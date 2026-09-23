@@ -1,0 +1,297 @@
+mkdir -p build
+mkdir -p bin
+mkdir -p lib
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -DVBOX -DRT_OS_WINDOWS -DVMSVGA3D_DIRECT3D -DVBOX_VMSVGA3D_WITH_WINE_OPENGL -DVBOX_WITH_VMSVGA -DVBOX_WITH_VMSVGA3D -DIN_RING3 -DLOG_GROUP=LOG_GROUP_DEV_VMSVGA -I. -Ivbox_headers -Ishim/include -Ishim/include/VBox -Ishim/include/iprt -Ishim/include/vmsvga -Ishim/src -Itools -c DevVGA-SVGA3d-win.cpp -o build/DevVGA-SVGA3d-win.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -DVBOX -DRT_OS_WINDOWS -DVMSVGA3D_DIRECT3D -DVBOX_VMSVGA3D_WITH_WINE_OPENGL -DVBOX_WITH_VMSVGA -DVBOX_WITH_VMSVGA3D -DIN_RING3 -DLOG_GROUP=LOG_GROUP_DEV_VMSVGA -I. -Ivbox_headers -Ishim/include -Ishim/include/VBox -Ishim/include/iprt -Ishim/include/vmsvga -Ishim/src -Itools -c shim/src/mock_d3d9.cpp -o build/mock_d3d9.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -DVBOX -DRT_OS_WINDOWS -DVMSVGA3D_DIRECT3D -DVBOX_VMSVGA3D_WITH_WINE_OPENGL -DVBOX_WITH_VMSVGA -DVBOX_WITH_VMSVGA3D -DIN_RING3 -DLOG_GROUP=LOG_GROUP_DEV_VMSVGA -I. -Ivbox_headers -Ishim/include -Ishim/include/VBox -Ishim/include/iprt -Ishim/include/vmsvga -Ishim/src -Itools -c shim/src/vbox_shim.cpp -o build/vbox_shim.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -DVBOX -DRT_OS_WINDOWS -DVMSVGA3D_DIRECT3D -DVBOX_VMSVGA3D_WITH_WINE_OPENGL -DVBOX_WITH_VMSVGA -DVBOX_WITH_VMSVGA3D -DIN_RING3 -DLOG_GROUP=LOG_GROUP_DEV_VMSVGA -I. -Ivbox_headers -Ishim/include -Ishim/include/VBox -Ishim/include/iprt -Ishim/include/vmsvga -Ishim/src -Itools -c tools/svga3d-oracle.cpp -o build/svga3d-oracle.o
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dSurfaceTrackUsage(PVMSVGA3DSTATE, PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE)’:
+DevVGA-SVGA3d-win.cpp:1272:78: warning: unused parameter ‘pContext’ [-Wunused-parameter]
+ 1272 | static int vmsvga3dSurfaceTrackUsage(PVMSVGA3DSTATE pState, PVMSVGA3DCONTEXT pContext, PVMSVGA3DSURFACE pSurface)
+      |                                                             ~~~~~~~~~~~~~~~~~^~~~~~~~
+DevVGA-SVGA3d-win.cpp:1272:105: warning: unused parameter ‘pSurface’ [-Wunused-parameter]
+ 1272 | static int vmsvga3dSurfaceTrackUsage(PVMSVGA3DSTATE pState, PVMSVGA3DCONTEXT pContext, PVMSVGA3DSURFACE pSurface)
+      |                                                                                        ~~~~~~~~~~~~~~~~~^~~~~~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dSurfaceFlush(PVGASTATE, PVMSVGA3DSURFACE)’:
+DevVGA-SVGA3d-win.cpp:1318:60: warning: unused parameter ‘pSurface’ [-Wunused-parameter]
+ 1318 | int vmsvga3dSurfaceFlush(PVGASTATE pThis, PVMSVGA3DSURFACE pSurface)
+      |                                           ~~~~~~~~~~~~~~~~~^~~~~~~~
+In file included from shim/include/iprt/cdefs.h:9,
+                 from shim/include/VBox/vmm/pdmdev.h:4,
+                 from DevVGA-SVGA3d-win.cpp:23:
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dGetD3DSurface(PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE, uint32_t, uint32_t, bool, IDirect3DSurface9**)’:
+DevVGA-SVGA3d-win.cpp:1418:32: warning: left operand of comma operator has no effect [-Wunused-value]
+ 1418 |         AssertMsgFailedReturn(("No surface for type %d\n", pSurface->enmD3DResType), VERR_INTERNAL_ERROR);
+      |                                ^~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:54:53: note: in definition of macro ‘AssertMsgFailedReturn’
+   54 | # define AssertMsgFailedReturn(msg, rc) do { (void)(msg); return (rc); } while (0)
+      |                                                     ^~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dBackCreateTexture(PVMSVGA3DSTATE, PVMSVGA3DCONTEXT, uint32_t, PVMSVGA3DSURFACE)’:
+DevVGA-SVGA3d-win.cpp:1921:43: warning: left operand of comma operator has no effect [-Wunused-value]
+ 1921 |             AssertMsgBreak(hr == D3D_OK, ("LockBox failed with %x\n", hr));
+      |                                           ^~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:62:63: note: in definition of macro ‘AssertMsgBreak’
+   62 | # define AssertMsgBreak(expr, msg) do { if (!(expr)) { (void)(msg); break; } } while (0)
+      |                                                               ^~~
+DevVGA-SVGA3d-win.cpp:1946:43: warning: left operand of comma operator has no effect [-Wunused-value]
+ 1946 |             AssertMsgBreak(hr == D3D_OK, ("UnlockBox failed with %x\n", hr));
+      |                                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:62:63: note: in definition of macro ‘AssertMsgBreak’
+   62 | # define AssertMsgBreak(expr, msg) do { if (!(expr)) { (void)(msg); break; } } while (0)
+      |                                                               ^~~
+DevVGA-SVGA3d-win.cpp:1969:47: warning: left operand of comma operator has no effect [-Wunused-value]
+ 1969 |                 AssertMsgBreak(hr == D3D_OK, ("LockRect failed with %x\n", hr));
+      |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:62:63: note: in definition of macro ‘AssertMsgBreak’
+   62 | # define AssertMsgBreak(expr, msg) do { if (!(expr)) { (void)(msg); break; } } while (0)
+      |                                                               ^~~
+DevVGA-SVGA3d-win.cpp:1987:47: warning: left operand of comma operator has no effect [-Wunused-value]
+ 1987 |                 AssertMsgBreak(hr == D3D_OK, ("UnlockRect failed with %x\n", hr));
+      |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:62:63: note: in definition of macro ‘AssertMsgBreak’
+   62 | # define AssertMsgBreak(expr, msg) do { if (!(expr)) { (void)(msg); break; } } while (0)
+      |                                                               ^~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dContextTrackUsage(PVGASTATE, PVMSVGA3DCONTEXT)’:
+DevVGA-SVGA3d-win.cpp:3016:48: warning: unused parameter ‘pThis’ [-Wunused-parameter]
+ 3016 | static int vmsvga3dContextTrackUsage(PVGASTATE pThis, PVMSVGA3DCONTEXT pContext)
+      |                                      ~~~~~~~~~~^~~~~
+DevVGA-SVGA3d-win.cpp:3016:72: warning: unused parameter ‘pContext’ [-Wunused-parameter]
+ 3016 | static int vmsvga3dContextTrackUsage(PVGASTATE pThis, PVMSVGA3DCONTEXT pContext)
+      |                                                       ~~~~~~~~~~~~~~~~~^~~~~~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dSetRenderState(PVGASTATE, uint32_t, uint32_t, SVGA3dRenderState*)’:
+DevVGA-SVGA3d-win.cpp:3619:40: warning: left operand of comma operator has no effect [-Wunused-value]
+ 3619 |                 AssertMsgFailedReturn(("Unexpected fog function %d\n", mode.s.function), VERR_INTERNAL_ERROR);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:54:53: note: in definition of macro ‘AssertMsgFailedReturn’
+   54 | # define AssertMsgFailedReturn(msg, rc) do { (void)(msg); return (rc); } while (0)
+      |                                                     ^~~
+DevVGA-SVGA3d-win.cpp:3633:40: warning: left operand of comma operator has no effect [-Wunused-value]
+ 3633 |                 AssertMsgFailedReturn(("Unexpected fog type %d\n", mode.s.type), VERR_INTERNAL_ERROR);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:54:53: note: in definition of macro ‘AssertMsgFailedReturn’
+   54 | # define AssertMsgFailedReturn(msg, rc) do { (void)(msg); return (rc); } while (0)
+      |                                                     ^~~
+DevVGA-SVGA3d-win.cpp:3674:40: warning: left operand of comma operator has no effect [-Wunused-value]
+ 3674 |                 AssertMsgFailedReturn(("Unexpected fill mode %d\n", mode.s.mode), VERR_INTERNAL_ERROR);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:54:53: note: in definition of macro ‘AssertMsgFailedReturn’
+   54 | # define AssertMsgFailedReturn(msg, rc) do { (void)(msg); return (rc); } while (0)
+      |                                                     ^~~
+DevVGA-SVGA3d-win.cpp:3684:41: warning: comparison between ‘enum _D3DSHADEMODE’ and ‘enum SVGA3dShadeMode’ [-Wenum-compare]
+ 3684 |             AssertCompile(D3DSHADE_FLAT == SVGA3D_SHADEMODE_FLAT);
+      |                           ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3709:50: warning: comparison between ‘enum SVGA3dBlendEquation’ and ‘enum _D3DBLENDOP’ [-Wenum-compare]
+ 3709 |             AssertCompile(SVGA3D_BLENDEQ_MAXIMUM == D3DBLENDOP_MAX);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3732:40: warning: left operand of comma operator has no effect [-Wunused-value]
+ 3732 |                 AssertMsgFailedReturn(("Unexpected cull mode %d\n", pRenderState[i].uintValue), VERR_INTERNAL_ERROR);
+      |                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:54:53: note: in definition of macro ‘AssertMsgFailedReturn’
+   54 | # define AssertMsgFailedReturn(msg, rc) do { (void)(msg); return (rc); } while (0)
+      |                                                     ^~~
+DevVGA-SVGA3d-win.cpp:3740:45: warning: comparison between ‘enum SVGA3dCmpFunc’ and ‘enum _D3DCMPFUNC’ [-Wenum-compare]
+ 3740 |             AssertCompile(SVGA3D_CMP_ALWAYS == D3DCMP_ALWAYS);
+      |                           ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3776:45: warning: comparison between ‘enum _D3DSTENCILOP’ and ‘enum SVGA3dStencilOp’ [-Wenum-compare]
+ 3776 |             AssertCompile(D3DSTENCILOP_KEEP == SVGA3D_STENCILOP_KEEP);
+      |                           ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3777:45: warning: comparison between ‘enum _D3DSTENCILOP’ and ‘enum SVGA3dStencilOp’ [-Wenum-compare]
+ 3777 |             AssertCompile(D3DSTENCILOP_DECR == SVGA3D_STENCILOP_DECR);
+      |                           ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3844:41: warning: comparison between ‘enum _D3DMATERIALCOLORSOURCE’ and ‘enum SVGA3dVertexMaterial’ [-Wenum-compare]
+ 3844 |             AssertCompile(D3DMCS_COLOR2 == SVGA3D_VERTEXMATERIAL_SPECULAR);
+      |                           ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:3910:49: warning: comparison between ‘enum SVGA3dVertexBlendFlags’ and ‘enum _D3DVERTEXBLENDFLAGS’ [-Wenum-compare]
+ 3910 |             AssertCompile(SVGA3D_VBLEND_DISABLE == D3DVBF_DISABLE);
+      |                           ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dVertexDecl2D3D(const SVGA3dVertexArrayIdentity&, D3DVERTEXELEMENT9*)’:
+DevVGA-SVGA3d-win.cpp:5081:42: warning: comparison between ‘enum SVGA3dDeclType’ and ‘enum _D3DDECLTYPE’ [-Wenum-compare]
+ 5081 |     AssertCompile(SVGA3D_DECLTYPE_FLOAT1 == D3DDECLTYPE_FLOAT1);
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:5082:45: warning: comparison between ‘enum SVGA3dDeclType’ and ‘enum _D3DDECLTYPE’ [-Wenum-compare]
+ 5082 |     AssertCompile(SVGA3D_DECLTYPE_FLOAT16_4 == D3DDECLTYPE_FLOAT16_4);
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:5083:45: warning: comparison between ‘enum SVGA3dDeclMethod’ and ‘enum _D3DDECLMETHOD’ [-Wenum-compare]
+ 5083 |     AssertCompile(SVGA3D_DECLMETHOD_DEFAULT == D3DDECLMETHOD_DEFAULT);
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:5084:54: warning: comparison between ‘enum SVGA3dDeclMethod’ and ‘enum _D3DDECLMETHOD’ [-Wenum-compare]
+ 5084 |     AssertCompile(SVGA3D_DECLMETHOD_LOOKUPPRESAMPLED == D3DDECLMETHOD_LOOKUPPRESAMPLED);
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:5085:41: warning: comparison between ‘enum _D3DDECLUSAGE’ and ‘enum SVGA3dDeclUsage’ [-Wenum-compare]
+ 5085 |     AssertCompile(D3DDECLUSAGE_POSITION == SVGA3D_DECLUSAGE_POSITION);
+      |                   ~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp:5086:39: warning: comparison between ‘enum _D3DDECLUSAGE’ and ‘enum SVGA3dDeclUsage’ [-Wenum-compare]
+ 5086 |     AssertCompile(D3DDECLUSAGE_SAMPLE == SVGA3D_DECLUSAGE_SAMPLE);
+      |                   ~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:82:44: note: in definition of macro ‘AssertCompile’
+   82 | # define AssertCompile(expr) static_assert(expr, #expr)
+      |                                            ^~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
+DevVGA-SVGA3d-win.cpp:5793:43: warning: left operand of comma operator has no effect [-Wunused-value]
+ 5793 |         AssertMsgBreakStmt(hr == D3D_OK, ("SetStreamSource failed with %x\n", hr), rc = VERR_INTERNAL_ERROR);
+      |                                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:74:73: note: in definition of macro ‘AssertMsgBreakStmt’
+   74 | # define AssertMsgBreakStmt(expr, msg, stmt) do { if (!(expr)) { (void)(msg); stmt; break; } } while (0)
+      |                                                                         ^~~
+DevVGA-SVGA3d-win.cpp:5883:47: warning: left operand of comma operator has no effect [-Wunused-value]
+ 5883 |             AssertMsgBreakStmt(hr == D3D_OK, ("DrawPrimitive failed with %x\n", hr), rc = VERR_INTERNAL_ERROR);
+      |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:74:73: note: in definition of macro ‘AssertMsgBreakStmt’
+   74 | # define AssertMsgBreakStmt(expr, msg, stmt) do { if (!(expr)) { (void)(msg); stmt; break; } } while (0)
+      |                                                                         ^~~
+DevVGA-SVGA3d-win.cpp:5919:47: warning: left operand of comma operator has no effect [-Wunused-value]
+ 5919 |             AssertMsgBreakStmt(hr == D3D_OK, ("DrawIndexedPrimitive failed with %x\n", hr), rc = VERR_INTERNAL_ERROR);
+      |                                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+shim/include/iprt/assert.h:74:73: note: in definition of macro ‘AssertMsgBreakStmt’
+   74 | # define AssertMsgBreakStmt(expr, msg, stmt) do { if (!(expr)) { (void)(msg); stmt; break; } } while (0)
+      |                                                                         ^~~
+DevVGA-SVGA3d-win.cpp: At global scope:
+DevVGA-SVGA3d-win.cpp:1191:31: warning: ‘VMSVGA3DSHAREDSURFACE* vmsvga3dSurfaceGetSharedCopy(PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE)’ defined but not used [-Wunused-function]
+ 1191 | static PVMSVGA3DSHAREDSURFACE vmsvga3dSurfaceGetSharedCopy(PVMSVGA3DCONTEXT pContext, PVMSVGA3DSURFACE pSurface)
+      |                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/vlkn_dispatch.cpp -o build/vlkn_dispatch.o
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DVolumeTexture9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:460:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  460 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:460:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  460 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DVertexBuffer9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:532:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  532 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:532:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  532 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DIndexBuffer9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:580:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  580 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:580:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  580 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DVertexDeclaration9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:628:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  628 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:628:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  628 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DVertexShader9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:662:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  662 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:662:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  662 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DPixelShader9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:692:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  692 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:692:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  692 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DQuery9::GetDevice(IDirect3DDevice9**)’:
+shim/src/mock_d3d9.cpp:715:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  715 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:715:47: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  715 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
+      |                                               ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DDevice9::GetDirect3D(IDirect3D9**)’:
+shim/src/mock_d3d9.cpp:808:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
+  808 |     if (!ppD3D9) return D3DERR_INVALIDCALL; *ppD3D9 = m_pD3D; if (m_pD3D) m_pD3D->AddRef(); return D3D_OK;
+      |     ^~
+shim/src/mock_d3d9.cpp:808:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘if’
+  808 |     if (!ppD3D9) return D3DERR_INVALIDCALL; *ppD3D9 = m_pD3D; if (m_pD3D) m_pD3D->AddRef(); return D3D_OK;
+      |                                             ^
+shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3D9::CreateDeviceEx(UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, void*, IDirect3DDevice9Ex**)’:
+shim/src/mock_d3d9.cpp:1540:51: warning: unused parameter ‘Adapter’ [-Wunused-parameter]
+ 1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
+      |                                              ~~~~~^~~~~~~
+shim/src/mock_d3d9.cpp:1540:71: warning: unused parameter ‘DeviceType’ [-Wunused-parameter]
+ 1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
+      |                                                            ~~~~~~~~~~~^~~~~~~~~~
+shim/src/mock_d3d9.cpp:1540:88: warning: unused parameter ‘hFocusWindow’ [-Wunused-parameter]
+ 1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
+      |                                                                                   ~~~~~^~~~~~~~~~~~
+shim/src/mock_d3d9.cpp:1540:108: warning: unused parameter ‘BehaviorFlags’ [-Wunused-parameter]
+ 1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
+      |                                                                                                      ~~~~~~^~~~~~~~~~~~~
+shim/src/mock_d3d9.cpp:1540:146: warning: unused parameter ‘pPresentationParameters’ [-Wunused-parameter]
+ 1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
+      |                                                                                                                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
+DevVGA-SVGA3d-win.cpp:5845:18: warning: ‘PrimitiveTypeD3D’ may be used uninitialized [-Wmaybe-uninitialized]
+ 5844 |             &&  (   PrimitiveTypeD3D == D3DPT_TRIANGLESTRIP
+      |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 5845 |                  || PrimitiveTypeD3D == D3DPT_TRIANGLEFAN))
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+DevVGA-SVGA3d-win.cpp:5836:26: note: ‘PrimitiveTypeD3D’ was declared here
+ 5836 |         D3DPRIMITIVETYPE PrimitiveTypeD3D;
+      |                          ^~~~~~~~~~~~~~~~
+In function ‘int vmsvga3dDrawPrimitivesSyncVertexBuffer(PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE)’,
+    inlined from ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’ at DevVGA-SVGA3d-win.cpp:5749:52:
+DevVGA-SVGA3d-win.cpp:5556:30: warning: ‘pVertexSurface’ may be used uninitialized [-Wmaybe-uninitialized]
+ 5556 |     if (   pVertexSurface->u.pSurface
+      |            ~~~~~~~~~~~~~~~~~~^~~~~~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
+DevVGA-SVGA3d-win.cpp:5745:26: note: ‘pVertexSurface’ was declared here
+ 5745 |         PVMSVGA3DSURFACE pVertexSurface;
+      |                          ^~~~~~~~~~~~~~
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/vlkn_backend.cpp -o build/vlkn_backend.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_surface.cpp -o build/svga3_surface.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_context.cpp -o build/svga3_context.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_fifo.cpp -o build/svga3_fifo.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_device.cpp -o build/svga3_device.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_shader_translator.cpp -o build/svga3_shader_translator.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_guest_mem.cpp -o build/svga3_guest_mem.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/qemu_vmsvga.cpp -o build/qemu_vmsvga.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC build/DevVGA-SVGA3d-win.o build/mock_d3d9.o build/vbox_shim.o build/svga3d-oracle.o -o bin/svga3d-oracle
+ar rcs lib/libsvga3_vlkn.a build/vlkn_dispatch.o build/vlkn_backend.o build/svga3_surface.o build/svga3_context.o build/svga3_fifo.o build/svga3_device.o build/svga3_shader_translator.o build/svga3_guest_mem.o build/qemu_vmsvga.o
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -shared -I. -Iinclude -Isrc -Ishim/include -Idata -Itools src/qemu_svga3d_preload.cpp -Llib -lsvga3_vlkn -ldl -lpthread -o lib/libqemu_svga3d.so
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_svga3_vlkn.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_svga3_vlkn
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_real_vulkan.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_real_vulkan
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_shader_translation.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_shader_translation
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_shader_execution.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_shader_execution
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_guest_memory.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_guest_memory
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_verified_rendering.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_verified_rendering
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_presentation.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_presentation
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_qemu_integration.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_qemu_integration

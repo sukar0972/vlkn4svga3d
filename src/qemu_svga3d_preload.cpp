@@ -1,0 +1,857 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <link.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <time.h>
+#include <pthread.h>
+
+#include <vector>
+#include <mutex>
+#include <algorithm>
+
+#include "svga3_vlkn.h"
+#include "svga3_device.h"
+#include "svga3_guest_mem.h"
+#include "tools/svga3d_tables.h"
+
+/* QEMU VMware SVGA Offsets */
+#define OFFSET_INDEX            0x10a2c
+#define OFFSET_ENABLE           0x10a14
+#define OFFSET_CONFIG           0x10a18
+#define OFFSET_SYNCING          0x10a54
+#define OFFSET_FIFO_PTR         0x10b70
+#define OFFSET_FIFO_SIZE        0x10b78
+#define OFFSET_FIFO             0x10b80
+#define OFFSET_FIFO_MIN         0x10b88
+#define OFFSET_FIFO_MAX         0x10b8c
+#define OFFSET_FIFO_NEXT        0x10b90
+#define OFFSET_FIFO_STOP        0x10b94
+#define OFFSET_REDRAW_FIFO      0x10b98
+#define OFFSET_REDRAW_FIFO_LAST 0x12b98
+
+/* QEMU 10.1.2 Binary Patch Points */
+#define ADDR_PCIVMSVGA_REALIZE_SIZE1 0x470716
+#define ADDR_PCIVMSVGA_REALIZE_SIZE2 0x470735
+#define ADDR_VMSVGA_UPDATE_RECT_FLUSH 0x471100
+#define ADDR_VMSVGA_FIFO_RUN          0x4712f0
+#define ADDR_VMSVGA_IO_OPS            0x1965840
+#define ADDR_VMSVGA_IO_READ           0x470860
+#define ADDR_VMSVGA_IO_WRITE          0x472640
+#define ADDR_VNC_POINTER              0x3c2868
+#define ADDR_VNC_CONT                 0x3c2350
+#define ADDR_QEMU_INPUT_UPDATE_BUTTONS 0x3b4510
+#define ADDR_QEMU_INPUT_QUEUE_REL     0x3b4670
+#define ADDR_QEMU_INPUT_EVENT_SYNC    0x3b3f20
+#define ADDR_VNC_BUTTON_MAP           0x1b4a3a0
+
+#define VS_VD                         0x151a0
+#define VS_LAST_X                     0x151bc
+#define VS_LAST_Y                     0x151c0
+#define VS_LAST_BMASK                 0x151c4
+#define VD_CONSOLE                    0x58
+
+#define INPUT_AXIS_X                  0
+#define INPUT_AXIS_Y                  1
+#define VNC_LEFT_BUTTON               1
+#define REL_STEP                      40
+#define HOME_STEPS                    24
+#define TAP_DWELL_NS                  150000000LL
+#define SCREEN_W                      1280
+#define SCREEN_H                      768
+
+/* SVGA Capabilities Advertised to Guest (0x0050c0e3):
+ * Bit 0: RECT_COPY (0x01)
+ * Bit 1: CURSOR (0x02)
+ * Bit 5: PITCHLOCK (0x20)
+ * Bit 6: SYNCHRONIZATION (0x40)
+ * Bit 7: GLYPH (0x80)
+ * Bit 14: 3D (0x4000)
+ * Bit 15: EXTENDED_FIFO (0x8000)
+ * Bit 18: IRQMASK cleared (0x0) -> forces synchronous polling
+ * Bit 20: GMR (0x100000)
+ * Bit 22: GMR2 (0x400000)
+ */
+#define SVGA_CAPABILITIES_VALUE       0x0050c0e3
+#define EXPANDED_FIFO_SIZE            0x400000
+
+#ifndef SVGA_FIFO_CAP_FENCE
+#define SVGA_FIFO_CAP_FENCE           1
+#endif
+#ifndef SVGA_FIFO_CAP_3D_HWVERSION_REVISED
+#define SVGA_FIFO_CAP_3D_HWVERSION_REVISED 0x8
+#endif
+#ifndef SVGA_CMD_RECT_FILL
+#define SVGA_CMD_RECT_FILL            2
+#endif
+#define SVGA_FIFO_NEXT                SVGA_FIFO_NEXT_CMD
+#define SVGA3D_HWVERSION_WS65_B1      0x00020001
+#define SVGA_FIFO_BUSY                290
+
+struct vmsvga_rect_s {
+    int x, y, w, h;
+};
+
+/* Function Pointers for QEMU Originals */
+static void (*orig_update_rect_flush)(void *s) = NULL;
+static uint64_t (*orig_io_read)(void *opaque, uint64_t addr, unsigned size) = NULL;
+static void (*orig_io_write)(void *opaque, uint64_t addr, uint64_t data, unsigned size) = NULL;
+static void (*orig_input_update_buttons)(void *con, uint32_t *map, uint32_t old, uint32_t newm) = NULL;
+static void (*orig_input_queue_rel)(void *con, int axis, int value) = NULL;
+static void (*orig_input_event_sync)(void) = NULL;
+
+/* Input & Pointer State */
+static bool pending_press;
+static void *pending_con;
+static uint32_t *pending_map;
+static uint32_t pending_old, pending_new;
+static int64_t left_down_ns;
+
+/* SVGA Registers State */
+static uint32_t saved_gmr_id = 0;
+static uint32_t saved_gmr_desc = 0;
+static uint32_t saved_irqmask = 0;
+static FILE *log_file = NULL;
+
+/* Production SVGA3=VLKN Vulkan Device State */
+static Svga3VlknDevice *g_vlknDev = nullptr;
+static void *g_vmsvga_state = nullptr;
+static void *g_guest_ram_base = nullptr;
+static size_t g_guest_ram_size = 0;
+static bool g_vlkn_initialized = false;
+static std::mutex g_vlkn_mutex;
+
+extern "C" void log_msg(const char *fmt, ...) {
+    if (!log_file) {
+        log_file = fopen("/tmp/svga3d.log", "a");
+        if (log_file) setlinebuf(log_file);
+    }
+    if (log_file) {
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(log_file, fmt, args);
+        va_end(args);
+    }
+}
+
+static uint32_t reg_value(void *s, int index) {
+    int *reg = (int *)((char *)s + OFFSET_INDEX);
+    int saved = *reg;
+    *reg = index;
+    uint32_t value = orig_io_read(s, 1, 4);
+    *reg = saved;
+    return value;
+}
+
+static void redraw(void *s, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    int *last = (int *)((char *)s + OFFSET_REDRAW_FIFO_LAST);
+    struct vmsvga_rect_s *rects = (struct vmsvga_rect_s *)((char *)s + OFFSET_REDRAW_FIFO);
+    if (*last < 0 || *last > 512) return;
+    if (*last == 512 && orig_update_rect_flush) orig_update_rect_flush(s);
+    if (*last < 512) rects[(*last)++] = (struct vmsvga_rect_s){(int)x, (int)y, (int)w, (int)h};
+}
+
+static void vlkn_display_update_cb(void *opaque, int32_t x, int32_t y, int32_t w, int32_t h) {
+    void *s = opaque;
+    if (s && w > 0 && h > 0) {
+        redraw(s, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
+    }
+}
+
+static void find_guest_ram(void *vram_hva) {
+    if (g_guest_ram_base) return;
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        uintptr_t start = 0, end = 0;
+        char perms[8] = {0};
+        int n = sscanf(line, "%lx-%lx %7s", &start, &end, perms);
+        if (n >= 3 && strstr(perms, "rw")) {
+            size_t sz = end - start;
+            if (sz >= 256 * 1024 * 1024 && (void*)start != vram_hva) {
+                char *path = strchr(line, '/');
+                if (!path || strstr(path, "memfd") || strstr(path, "zero")) {
+                    g_guest_ram_base = (void*)start;
+                    g_guest_ram_size = sz;
+                    log_msg("[libqemu_svga3d] Found guest physical RAM: %p - %p (%zu MB)\n",
+                            (void*)start, (void*)end, sz / (1024 * 1024));
+                    break;
+                }
+            }
+        }
+    }
+    fclose(f);
+}
+
+static void ensure_vlkn_device(void *s) {
+    std::lock_guard<std::mutex> lock(g_vlkn_mutex);
+    if (g_vlkn_initialized) return;
+    g_vmsvga_state = s;
+
+    uint8_t *vram = *(uint8_t **)((char *)s + 8);
+    find_guest_ram(vram);
+
+    Svga3VlknConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.appName = "PlayBook SVGA3D Vulkan";
+    cfg.apiVersion = VK_API_VERSION_1_0;
+    cfg.stagingBufferSize = 64 * 1024 * 1024;
+    cfg.forceMockBackend = false;
+    cfg.enableValidationLayers = false;
+
+    g_vlknDev = svga3_vlkn_device_create(&cfg);
+    if (!g_vlknDev) {
+        log_msg("[libqemu_svga3d] WARNING: svga3_vlkn_device_create failed; fallback to CPU!\n");
+        return;
+    }
+
+    if (g_guest_ram_base && g_guest_ram_size > 0) {
+        svga3_vlkn_device_map_guest_ram(g_vlknDev, 0, g_guest_ram_base, g_guest_ram_size);
+        log_msg("[libqemu_svga3d] Mapped Guest RAM GPA 0..%zu MB -> %p\n",
+                g_guest_ram_size / (1024*1024), g_guest_ram_base);
+    }
+
+    uint32_t width = reg_value(s, SVGA_REG_WIDTH);
+    if (!width || width == 768) width = SCREEN_W;
+    uint32_t height = reg_value(s, SVGA_REG_HEIGHT);
+    if (!height || height == 1280) height = SCREEN_H;
+    uint32_t pitch = reg_value(s, SVGA_REG_BYTES_PER_LINE);
+    if (!pitch) pitch = width * 4;
+    uint32_t bpp = reg_value(s, SVGA_REG_BITS_PER_PIXEL);
+    if (!bpp) bpp = 32;
+    uint32_t vram_size = reg_value(s, SVGA_REG_VRAM_SIZE);
+    if (!vram_size) vram_size = 128 * 1024 * 1024;
+
+    log_msg("[libqemu_svga3d] Framebuffer init: vram=%p w=%u h=%u pitch=%u bpp=%u vram_size=%u\n",
+            vram, width, height, pitch, bpp, vram_size);
+
+    svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, 0xE0000000, vram_size, width, height, pitch, bpp / 8);
+    svga3_vlkn_device_set_display_callback(g_vlknDev, s, vlkn_display_update_cb);
+
+    g_vlkn_initialized = true;
+    log_msg("[libqemu_svga3d] SVGA3=VLKN Vulkan hardware 3D engine initialized successfully!\n");
+}
+
+static void init_devcaps_record(uint32_t *fifo) {
+    /* Header at &fifo[32]: length = 172 dwords, type = 0x100 (SVGA3DCAPS_RECORD_DEVCAPS) */
+    fifo[32] = 172;
+    fifo[33] = 0x100;
+
+    size_t capCount = sizeof(g_DevCaps) / sizeof(g_DevCaps[0]);
+    for (size_t i = 0; i < capCount; ++i) {
+        fifo[34 + 2 * i] = g_DevCaps[i].id;
+        fifo[34 + 2 * i + 1] = g_DevCaps[i].expectedValue;
+    }
+    /* 85th dummy sentinel entry at index 84 (words 202, 203) */
+    fifo[34 + 2 * capCount] = 0xFFFFFFFF;
+    fifo[34 + 2 * capCount + 1] = 0;
+
+    /* Terminate record chain at word 32 + 172 = 204 */
+    fifo[32 + 172] = 0;
+}
+
+static uint32_t peek_word(uint32_t *fifo, uint32_t stop, uint32_t min, uint32_t max, uint32_t i) {
+    return fifo[(min + ((uint64_t)stop-min+(uint64_t)i*4) % (max-min)) / 4];
+}
+
+extern "C" void my_vmsvga_fifo_run(void *s) {
+    if (!s || !*(int *)((char *)s+OFFSET_CONFIG) || !*(int *)((char *)s+OFFSET_ENABLE)) return;
+    uint32_t *fifo = *(uint32_t **)((char *)s+OFFSET_FIFO);
+    uint32_t allocated = *(uint32_t *)((char *)s+OFFSET_FIFO_SIZE);
+    if (!fifo || allocated < 16 || allocated > EXPANDED_FIFO_SIZE) return;
+    uint32_t min=fifo[0], max=fifo[1], next=fifo[2], stop=fifo[3];
+    if ((min|max|next|stop)&3 || min<16 || min>=max || max>allocated ||
+        stop<min || stop>=max || next<min || next>=max) return;
+    uint32_t available = (next>=stop ? next-stop : max-stop+next-min)/4;
+
+    uint32_t cur_w = reg_value(s, SVGA_REG_WIDTH);
+    uint32_t cur_h = reg_value(s, SVGA_REG_HEIGHT);
+    if (cur_w == 768) cur_w = SCREEN_W;
+    if (cur_h == 1280) cur_h = SCREEN_H;
+    uint32_t cur_p = reg_value(s, SVGA_REG_BYTES_PER_LINE);
+    if (!cur_p) cur_p = cur_w * 4;
+    static uint32_t s_last_w = 0, s_last_h = 0, s_last_p = 0;
+    if (g_vlknDev && (cur_w != s_last_w || cur_h != s_last_h || cur_p != s_last_p)) {
+        s_last_w = cur_w; s_last_h = cur_h; s_last_p = cur_p;
+        uint32_t bpp = reg_value(s, SVGA_REG_BITS_PER_PIXEL);
+        if (!bpp) bpp = 32;
+        uint32_t vram_sz = reg_value(s, SVGA_REG_VRAM_SIZE);
+        if (!vram_sz) vram_sz = 128 * 1024 * 1024;
+        uint8_t *vram = *(uint8_t **)((char *)s + 8);
+        svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, 0xE0000000, vram_sz, cur_w, cur_h, cur_p, bpp / 8);
+        log_msg("[libqemu_svga3d] Display mode synchronized: w=%u h=%u pitch=%u bpp=%u\n", cur_w, cur_h, cur_p, bpp);
+    }
+
+    for (unsigned count=0; available && count<8192; count++) {
+        uint32_t cmd=peek_word(fifo,stop,min,max,0);
+        uint64_t words=0;
+#define P(i) peek_word(fifo,stop,min,max,(i))
+        if (cmd == SVGA_CMD_UPDATE || cmd == SVGA_CMD_UPDATE_VERBOSE) {
+            words = 5;
+        } else if (cmd == SVGA_CMD_RECT_FILL) {
+            words = 6;
+        } else if (cmd == SVGA_CMD_RECT_COPY) {
+            words = 7;
+        } else if (cmd == SVGA_CMD_FENCE) {
+            words = 2;
+        } else if (cmd == SVGA_CMD_ESCAPE) {
+            if (available < 3) goto done;
+            words = 3 + ((uint64_t)P(2) + 3) / 4;
+        } else if (cmd == 19) { /* DEFINE_CURSOR */
+            if (available < 8) goto done;
+            if (P(4)>256 || P(5)>256 || P(7)>32) goto unsupported;
+            words = 8 + (((uint64_t)P(4)+31)/32)*P(5) + (((uint64_t)P(4)*P(7)+31)/32)*P(5);
+        } else if (cmd == 22) { /* DEFINE_ALPHA_CURSOR */
+            if (available < 6) goto done;
+            if (P(4)>256 || P(5)>256) goto unsupported;
+            words = 6 + (uint64_t)P(4)*P(5);
+        } else if (cmd == SVGA_CMD_DEFINE_GMR2) {
+            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdDefineGMR2)) / 4;
+        } else if (cmd == SVGA_CMD_REMAP_GMR2) {
+            if (available < 5) goto done;
+            uint32_t flags = P(2);
+            uint32_t numPages = P(4);
+            size_t descBytes = 0;
+            if (flags & SVGA_REMAP_GMR2_VIA_GMR) {
+                descBytes = sizeof(SVGAGuestPtr);
+            } else if (flags & SVGA_REMAP_GMR2_SINGLE_PPN) {
+                descBytes = (flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t);
+            } else {
+                descBytes = (size_t)numPages * ((flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t));
+            }
+            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdRemapGMR2) + descBytes + 3) / 4;
+        } else if (cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) {
+            if (available < 2) goto done;
+            uint32_t payloadSizeBytes = P(1);
+            words = (sizeof(uint32_t) + sizeof(SVGA3dCmdHeader) + payloadSizeBytes + 3) / 4;
+        } else {
+            goto unsupported;
+        }
+
+        if (words > (max-min)/4-1) goto unsupported;
+        if (words > available) break; /* Incomplete packet; await more words */
+
+        if (cmd == SVGA_CMD_UPDATE || cmd == SVGA_CMD_UPDATE_VERBOSE) {
+            redraw(s, P(1), P(2), P(3), P(4));
+        } else if (cmd == SVGA_CMD_RECT_FILL) {
+            /* Non-destructive damage marking: ignore fill color P(1) */
+            redraw(s, P(2), P(3), P(4), P(5));
+        } else if (cmd == SVGA_CMD_RECT_COPY) {
+            /* Non-destructive damage marking: ignore src coords P(1), P(2) */
+            redraw(s, P(3), P(4), P(5), P(6));
+        } else if (cmd == SVGA_CMD_FENCE) {
+            static uint32_t fence_count = 0;
+            fence_count++;
+            if (fence_count <= 10 || (fence_count % 50) == 0) {
+                log_msg("[libqemu_svga3d] SVGA_CMD_FENCE #%u: fence_id=%u\n", fence_count, P(1));
+            }
+            if (g_vlknDev) {
+                if (g_vlknDev->contextMgr) g_vlknDev->contextMgr->endAllRenderPasses();
+                if (g_vlknDev->backend) g_vlknDev->backend->flushCommandBuffer();
+                svga3_vlkn::svga3_vlkn_present_client_surfaces(g_vlknDev, "fence");
+            }
+            if (min >= 28) fifo[SVGA_FIFO_FENCE] = P(1);
+        } else if (cmd == SVGA_CMD_ESCAPE) {
+            /* Video overlay no-ops */
+        } else if ((cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) ||
+                   cmd == SVGA_CMD_DEFINE_GMR2 || cmd == SVGA_CMD_REMAP_GMR2) {
+            ensure_vlkn_device(s);
+            if (g_vlknDev) {
+                size_t packetBytes = words * 4;
+                size_t bytesConsumed = 0;
+                static uint32_t total_3d = 0;
+                total_3d++;
+                if (total_3d <= 30 || (total_3d % 500) == 0) {
+                    log_msg("[libqemu_svga3d] 3D cmd %u (payloadBytes=%u, words=%lu, total=%u)\n",
+                            cmd, (cmd >= SVGA_3D_CMD_BASE) ? P(1) : 0, (unsigned long)words, total_3d);
+                }
+                if (stop + packetBytes <= max) {
+                    svga3_vlkn_fifo_execute(g_vlknDev, (const uint8_t *)fifo + stop, packetBytes, &bytesConsumed);
+                } else {
+                    std::vector<uint32_t> packetWords(words);
+                    for (uint64_t w = 0; w < words; ++w) {
+                        packetWords[w] = P(w);
+                    }
+                    svga3_vlkn_fifo_execute(g_vlknDev, packetWords.data(), packetBytes, &bytesConsumed);
+                }
+            }
+        }
+
+        stop = min + ((uint64_t)stop - min + words * 4) % (max - min);
+        fifo[SVGA_FIFO_STOP] = stop;
+        *(uint32_t *)((char *)s + OFFSET_FIFO_STOP) = stop;
+        available -= words;
+        continue;
+
+unsupported:
+        {
+            static uint32_t last_cmd = UINT32_MAX;
+            if (last_cmd != cmd) {
+                log_msg("[libqemu_svga3d] Unsupported/malformed FIFO command %u at stop=%u (min=%u, max=%u, next=%u, words: [%u, %u, %u, %u]); stopped\n",
+                        cmd, stop, min, max, next, P(0), P(1), P(2), P(3));
+                last_cmd = cmd;
+            }
+        }
+        break;
+#undef P
+    }
+
+done:
+    if (min > SVGA_FIFO_BUSY * 4) fifo[SVGA_FIFO_BUSY] = (stop != next);
+    *(int *)((char *)s + OFFSET_SYNCING) = 0;
+    if (orig_update_rect_flush) orig_update_rect_flush(s);
+}
+
+extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size) {
+    void *s = opaque;
+    if (addr == 0) {
+        return *(int *)((char *)s + OFFSET_INDEX);
+    }
+    if (addr == 1) {
+        int index = *(int *)((char *)s + OFFSET_INDEX);
+        switch (index) {
+        case SVGA_REG_CAPABILITIES:
+            return SVGA_CAPABILITIES_VALUE;
+        case SVGA_REG_MEM_SIZE:
+            return EXPANDED_FIFO_SIZE;
+        case SVGA_REG_CONFIG_DONE:
+            return *(int *)((char *)s + OFFSET_CONFIG);
+        case SVGA_REG_SYNC:
+            return 0;
+        case SVGA_REG_BUSY: {
+            my_vmsvga_fifo_run(s);
+            uint32_t *fifo = *(uint32_t **)((char *)s + OFFSET_FIFO);
+            if (fifo && fifo[SVGA_FIFO_STOP] != fifo[SVGA_FIFO_NEXT]) {
+                return 1;
+            }
+            return 0;
+        }
+        case SVGA_REG_GMR_ID:
+            return saved_gmr_id;
+        case SVGA_REG_GMR_DESCRIPTOR:
+            return saved_gmr_desc;
+        case SVGA_REG_GMR_MAX_IDS:
+            return 256;
+        case SVGA_REG_GMR_MAX_DESCRIPTOR_LENGTH:
+            return 4096;
+        case 45: /* SVGA_REG_GMRS_MAX_PAGES */
+            return 65536;
+        case SVGA_REG_IRQMASK:
+            return saved_irqmask;
+        default:
+            break;
+        }
+    }
+    return orig_io_read(opaque, addr, size);
+}
+
+extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, unsigned size) {
+    void *s = opaque;
+    if (addr == 0) {
+        *(int *)((char *)s + OFFSET_INDEX) = (int)data;
+        return;
+    }
+    if (addr == 1) {
+        int index = *(int *)((char *)s + OFFSET_INDEX);
+        switch (index) {
+        case SVGA_REG_CONFIG_DONE: {
+            orig_io_write(opaque, addr, data, size);
+            if (data) {
+                uint32_t *fifo = *(uint32_t **)((char *)s + OFFSET_FIFO);
+                if (!fifo) {
+                    uint8_t *fifo_ptr = *(uint8_t **)((char *)s + OFFSET_FIFO_PTR);
+                    if (fifo_ptr) {
+                        fifo = (uint32_t *)fifo_ptr;
+                        *(uint32_t **)((char *)s + OFFSET_FIFO) = fifo;
+                    }
+                }
+                if (fifo) {
+                    if (fifo[SVGA_FIFO_MIN] < 32 || fifo[SVGA_FIFO_MIN] > EXPANDED_FIFO_SIZE) return;
+                    fifo[SVGA_FIFO_CAPABILITIES] |= SVGA_FIFO_CAP_FENCE | SVGA_FIFO_CAP_3D_HWVERSION_REVISED;
+                    fifo[SVGA_FIFO_FLAGS] = 0;
+                    fifo[SVGA_FIFO_FENCE] = 0;
+                    fifo[SVGA_FIFO_3D_HWVERSION] = SVGA3D_HWVERSION_WS65_B1;
+                    fifo[SVGA_FIFO_3D_HWVERSION_REVISED] = SVGA3D_HWVERSION_WS65_B1;
+                    if (fifo[SVGA_FIFO_MIN] > (SVGA_FIFO_BUSY * 4)) {
+                        fifo[SVGA_FIFO_BUSY] = 0;
+                    }
+
+                    init_devcaps_record(fifo);
+
+                    log_msg("[libqemu_svga3d] CONFIG_DONE=1: initialized extended FIFO with DevCaps (caps=0x%x, hwversion=0x%x)\n",
+                            fifo[SVGA_FIFO_CAPABILITIES], fifo[SVGA_FIFO_3D_HWVERSION]);
+                }
+                ensure_vlkn_device(s);
+            }
+            return;
+        }
+        case SVGA_REG_SYNC:
+        case SVGA_REG_BUSY:
+            my_vmsvga_fifo_run(s);
+            return;
+        case SVGA_REG_ENABLE:
+        case SVGA_REG_BYTES_PER_LINE:
+        case SVGA_REG_WIDTH:
+        case SVGA_REG_HEIGHT: {
+            if (index == SVGA_REG_WIDTH && data == 768) {
+                log_msg("[libqemu_svga3d] Suppressing portrait SVGA_REG_WIDTH %lu -> %d\n", (unsigned long)data, SCREEN_W);
+                data = SCREEN_W;
+            } else if (index == SVGA_REG_HEIGHT && data == 1280) {
+                log_msg("[libqemu_svga3d] Suppressing portrait SVGA_REG_HEIGHT %lu -> %d\n", (unsigned long)data, SCREEN_H);
+                data = SCREEN_H;
+            }
+            orig_io_write(opaque, addr, data, size);
+            if (g_vlknDev && *(int *)((char *)s + OFFSET_ENABLE)) {
+                uint32_t w = reg_value(s, SVGA_REG_WIDTH);
+                uint32_t h = reg_value(s, SVGA_REG_HEIGHT);
+                if (w == 768) w = SCREEN_W;
+                if (h == 1280) h = SCREEN_H;
+                uint32_t p = reg_value(s, SVGA_REG_BYTES_PER_LINE);
+                uint32_t bpp = reg_value(s, SVGA_REG_BITS_PER_PIXEL);
+                uint32_t vram_sz = reg_value(s, SVGA_REG_VRAM_SIZE);
+                uint8_t *vram = *(uint8_t **)((char *)s + 8);
+                if (w && h && vram) {
+                    if (!p) p = w * 4;
+                    if (!bpp) bpp = 32;
+                    if (!vram_sz) vram_sz = 128 * 1024 * 1024;
+                    svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, 0xE0000000, vram_sz, w, h, p, bpp / 8);
+                }
+            }
+            return;
+        }
+        case SVGA_REG_GMR_ID:
+            saved_gmr_id = (uint32_t)data;
+            log_msg("[libqemu_svga3d] SVGA_REG_GMR_ID write 0x%x\n", saved_gmr_id);
+            return;
+        case SVGA_REG_GMR_DESCRIPTOR:
+            saved_gmr_desc = (uint32_t)data;
+            log_msg("[libqemu_svga3d] SVGA_REG_GMR_DESCRIPTOR write 0x%x\n", saved_gmr_desc);
+            ensure_vlkn_device(s);
+            if (g_vlknDev && g_vlknDev->guestMem) {
+                Svga3VlknStatus st = g_vlknDev->guestMem->registerLegacyGMR(saved_gmr_id, saved_gmr_desc);
+                log_msg("[libqemu_svga3d] registerLegacyGMR id=%u, descPPN=0x%x -> status=%d\n",
+                        saved_gmr_id, saved_gmr_desc, st);
+            }
+            return;
+        case SVGA_REG_GMR_MAX_IDS:
+        case SVGA_REG_GMR_MAX_DESCRIPTOR_LENGTH:
+        case 45: /* SVGA_REG_GMRS_MAX_PAGES */
+            return;
+        case SVGA_REG_IRQMASK:
+            saved_irqmask = (uint32_t)data;
+            return;
+        default:
+            break;
+        }
+    }
+    orig_io_write(opaque, addr, data, size);
+}
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static void install_abs_jmp(uintptr_t from, void *to) {
+    unsigned char *p = (unsigned char *)from;
+    p[0] = 0xff; p[1] = 0x25; p[2] = p[3] = p[4] = p[5] = 0;
+    uint64_t target = (uint64_t)to;
+    memcpy(p + 6, &target, 8);
+}
+
+static void *make_orig_tramp(uintptr_t orig, int stolen, int call_off, uintptr_t call_target) {
+    unsigned char *t = (unsigned char *)MAP_FAILED;
+    for (uintptr_t off = 0x200000; off < 0x40000000UL && t == (unsigned char *)MAP_FAILED; off += 0x200000) {
+        void *hint = (void *)((orig + off) & ~((uintptr_t)0xfff));
+        t = (unsigned char *)mmap(hint, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+                                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    }
+    if (t == (unsigned char *)MAP_FAILED) return NULL;
+    intptr_t back = (intptr_t)(orig + (unsigned)stolen) - (intptr_t)(t + 4 + stolen + 5);
+    if (back != (int32_t)back) {
+        munmap(t, 4096);
+        return NULL;
+    }
+    /* Indirect calls to this trampoline require an IBT landing pad. */
+    t[0] = 0xf3; t[1] = 0x0f; t[2] = 0x1e; t[3] = 0xfa;
+    memcpy(t + 4, (void *)orig, (size_t)stolen);
+    if (call_off >= 0) {
+        int32_t rel = (int32_t)(call_target - ((uintptr_t)t + 4 + (size_t)call_off + 5));
+        memcpy(t + 4 + call_off + 1, &rel, 4);
+    }
+    t[4 + stolen] = 0xe9;
+    int32_t jrel = (int32_t)back;
+    memcpy(t + 4 + stolen + 1, &jrel, 4);
+    return t;
+}
+
+extern "C" void my_input_update_buttons(void *con, uint32_t *map, uint32_t old, uint32_t newm) {
+    bool press = (newm & VNC_LEFT_BUTTON) && !(old & VNC_LEFT_BUTTON);
+    bool release = !(newm & VNC_LEFT_BUTTON) && (old & VNC_LEFT_BUTTON);
+    if (press) {
+        pending_press = true;
+        pending_con = con;
+        pending_map = map;
+        pending_old = old;
+        pending_new = newm;
+        return;
+    }
+    if (release) {
+        int64_t remain = TAP_DWELL_NS - (now_ns() - left_down_ns);
+        if (remain > 0 && remain < 250000000LL) {
+            struct timespec ts = { 0, (long)remain };
+            nanosleep(&ts, NULL);
+        }
+        log_msg("[libqemu_svga3d] left release after dwell\n");
+    }
+    orig_input_update_buttons(con, map, old, newm);
+}
+
+extern "C" void my_input_queue_rel(void *con, int axis, int value) {
+    while (value > REL_STEP) {
+        orig_input_queue_rel(con, axis, REL_STEP);
+        orig_input_event_sync();
+        value -= REL_STEP;
+    }
+    while (value < -REL_STEP) {
+        orig_input_queue_rel(con, axis, -REL_STEP);
+        orig_input_event_sync();
+        value += REL_STEP;
+    }
+    orig_input_queue_rel(con, axis, value);
+}
+
+extern "C" void my_input_event_sync(void) {
+    if (pending_press) {
+        orig_input_update_buttons(pending_con, pending_map, pending_old, pending_new);
+        pending_press = false;
+        left_down_ns = now_ns();
+        log_msg("[libqemu_svga3d] left press after relative move\n");
+    }
+    orig_input_event_sync();
+}
+
+static int guest_x, guest_y;
+static bool pointer_homed;
+static uint32_t guest_bmask;
+static uint32_t vnc_bmap[10] = { 0x01, 0x04, 0x02, 0x08, 0x10, 0x20, 0x40 };
+__attribute__((visibility("hidden"))) void *vnc_pointer_cont = NULL;
+
+static void rel_xy(int dx, int dy) {
+    if (dx) orig_input_queue_rel(NULL, INPUT_AXIS_X, dx);
+    if (dy) orig_input_queue_rel(NULL, INPUT_AXIS_Y, dy);
+    orig_input_event_sync();
+}
+
+extern "C" void my_vnc_pointer_event(void *vs, uint32_t button_mask, int x, int y) {
+    int dx, dy;
+    uint32_t prev;
+    if (!vs || !orig_input_queue_rel) return;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > SCREEN_W - 1) x = SCREEN_W - 1;
+    if (y > SCREEN_H - 1) y = SCREEN_H - 1;
+    if (!pointer_homed) {
+        int i;
+        for (i = 0; i < 25; i++) rel_xy(-100, -100);
+        guest_x = guest_y = 0;
+        pointer_homed = true;
+        log_msg("[libqemu_svga3d] homed default console pointer\n");
+    }
+    while (guest_x != x || guest_y != y) {
+        dx = x - guest_x;
+        dy = y - guest_y;
+        if (dx > REL_STEP) dx = REL_STEP;
+        if (dx < -REL_STEP) dx = -REL_STEP;
+        if (dy > REL_STEP) dy = REL_STEP;
+        if (dy < -REL_STEP) dy = -REL_STEP;
+        rel_xy(dx, dy);
+        guest_x += dx;
+        guest_y += dy;
+    }
+    prev = guest_bmask;
+    if ((button_mask & VNC_LEFT_BUTTON) && !(prev & VNC_LEFT_BUTTON)) {
+        orig_input_update_buttons(NULL, vnc_bmap, prev, button_mask);
+        orig_input_event_sync();
+        left_down_ns = now_ns();
+        log_msg("[libqemu_svga3d] default-console press %d,%d\n", x, y);
+    } else if (!(button_mask & VNC_LEFT_BUTTON) && (prev & VNC_LEFT_BUTTON)) {
+        int64_t remain = TAP_DWELL_NS - (now_ns() - left_down_ns);
+        if (remain > 0 && remain < 250000000LL) {
+            struct timespec ts = { 0, (long)remain };
+            nanosleep(&ts, NULL);
+        }
+        orig_input_update_buttons(NULL, vnc_bmap, prev, button_mask);
+        orig_input_event_sync();
+        log_msg("[libqemu_svga3d] default-console release %d,%d\n", x, y);
+    } else if (prev != button_mask) {
+        orig_input_update_buttons(NULL, vnc_bmap, prev, button_mask);
+        orig_input_event_sync();
+    }
+    guest_bmask = button_mask;
+    *(int *)((char *)vs + VS_LAST_X) = x;
+    *(int *)((char *)vs + VS_LAST_Y) = y;
+    *(uint32_t *)((char *)vs + VS_LAST_BMASK) = button_mask;
+}
+
+asm(
+    ".text\n"
+    ".p2align 4\n"
+    ".globl vnc_pointer_hook\n"
+    "vnc_pointer_hook:\n"
+    "  movq %r15, %rdi\n"
+    "  movl %ebx, %esi\n"
+    "  movl (%rsp), %edx\n"
+    "  movl 4(%rsp), %ecx\n"
+    "  subq $8, %rsp\n"
+    "  call my_vnc_pointer_event\n"
+    "  addq $8, %rsp\n"
+    "  movq vnc_pointer_cont(%rip), %rax\n"
+    "  jmp *%rax\n"
+);
+extern "C" void vnc_pointer_hook(void);
+
+static uintptr_t qemu_base = 0;
+static bool supported_build = false;
+static const unsigned char expected_build[] = {0x2e,0x87,0x0e,0x40,0x0e,0x16,0x92,0xf5,0xf5,0xa5,0x4d,0xa8,0x97,0xd1,0xdc,0x15,0x2b,0x18,0x72,0x78};
+
+static int phdr_callback(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)size; (void)data;
+    if (info->dlpi_name == NULL || info->dlpi_name[0] == 0) {
+        qemu_base = info->dlpi_addr;
+        for (int i=0;i<info->dlpi_phnum;i++) {
+            const ElfW(Phdr) *ph=&info->dlpi_phdr[i];
+            if (ph->p_type!=PT_NOTE) continue;
+            const unsigned char *p=(const unsigned char *)(info->dlpi_addr+ph->p_vaddr), *end=p+ph->p_memsz;
+            while ((size_t)(end-p)>=sizeof(ElfW(Nhdr))) {
+                const ElfW(Nhdr) *n=(const ElfW(Nhdr) *)p;
+                size_t ns=((size_t)n->n_namesz+3)&~(size_t)3, ds=((size_t)n->n_descsz+3)&~(size_t)3;
+                p+=sizeof(*n);
+                if (ns>(size_t)(end-p) || ds>(size_t)(end-p)-ns) break;
+                if (n->n_type==NT_GNU_BUILD_ID && n->n_namesz==4 && !memcmp(p,"GNU",4) &&
+                    n->n_descsz==sizeof(expected_build) && !memcmp(p+ns,expected_build,sizeof(expected_build))) supported_build=true;
+                p+=ns+ds;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+__attribute__((constructor))
+static void svga3d_init(void) {
+    if (program_invocation_name == NULL || strstr(program_invocation_name, "qemu-system") == NULL) {
+        return;
+    }
+
+    dl_iterate_phdr(phdr_callback, NULL);
+    log_msg("[libqemu_svga3d] Loaded in QEMU! qemu_base=0x%lx\n", (unsigned long)qemu_base);
+    if (!qemu_base || !supported_build) {
+        fprintf(stderr, "[libqemu_svga3d] ERROR: unsupported QEMU build; refusing unsafe patch!\n");
+        _exit(78);
+    }
+
+    const unsigned char expected1[]={0xb9,0,0,1,0};
+    const unsigned char expected2[]={0x41,0xc7,0x86,0x38,0x16,1,0,0,0,1,0};
+    const unsigned char expected_fifo[]={0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x55,0x53,0x4c,0x8d,0x9c,0x24};
+    const unsigned char expected_btn[]={0xf3,0x0f,0x1e,0xfa,0x41,0x57,0x41,0x56,0x49,0x89,0xfe};
+    const unsigned char expected_rel[]={0xf3,0x0f,0x1e,0xfa,0x53,0x48,0x63,0xd2,0x48,0x83,0xec,0x30};
+    const unsigned char expected_sync[]={0xf3,0x0f,0x1e,0xfa,0x48,0x83,0xec,0x08,0xe8};
+    const unsigned char expected_ptr[]={0x49,0x8b,0x87,0xa0,0x51,0x01,0x00,0xf3,0x0f,0x7e,0x24,0x24,0x48,0x8b};
+    if (memcmp((void *)(qemu_base+ADDR_PCIVMSVGA_REALIZE_SIZE1),expected1,sizeof(expected1)) ||
+        memcmp((void *)(qemu_base+ADDR_PCIVMSVGA_REALIZE_SIZE2),expected2,sizeof(expected2)) ||
+        memcmp((void *)(qemu_base+ADDR_VMSVGA_FIFO_RUN),expected_fifo,sizeof(expected_fifo)) ||
+        memcmp((void *)(qemu_base+ADDR_QEMU_INPUT_UPDATE_BUTTONS),expected_btn,sizeof(expected_btn)) ||
+        memcmp((void *)(qemu_base+ADDR_QEMU_INPUT_QUEUE_REL),expected_rel,sizeof(expected_rel)) ||
+        memcmp((void *)(qemu_base+ADDR_QEMU_INPUT_EVENT_SYNC),expected_sync,sizeof(expected_sync)) ||
+        memcmp((void *)(qemu_base+ADDR_VNC_POINTER),expected_ptr,sizeof(expected_ptr))) {
+        fprintf(stderr,"SVGA shim: unexpected instruction bytes; refusing patch\n"); _exit(78);
+    }
+
+    /* 1. Patch pci_vmsvga_realize to allocate 4MB FIFO RAM and set fifo_size = 4MB */
+    uintptr_t page_text = (qemu_base + ADDR_PCIVMSVGA_REALIZE_SIZE1) & ~0xFFF;
+    if (mprotect((void *)page_text, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        unsigned char *p1 = (unsigned char *)(qemu_base + ADDR_PCIVMSVGA_REALIZE_SIZE1);
+        p1[3] = 0x40; /* 0x01 -> 0x40 (4MB) */
+
+        unsigned char *p2 = (unsigned char *)(qemu_base + ADDR_PCIVMSVGA_REALIZE_SIZE2);
+        p2[9] = 0x40; /* 0x01 -> 0x40 (4MB) */
+
+        mprotect((void *)page_text, 4096 * 2, PROT_READ | PROT_EXEC);
+        log_msg("[libqemu_svga3d] Patched FIFO size in pci_vmsvga_realize to 4MB\n");
+    } else {
+        perror("[libqemu_svga3d] mprotect text failed"); _exit(78);
+    }
+
+    /* 2. Resolve original update_rect_flush */
+    orig_update_rect_flush = (void (*)(void *))(qemu_base + ADDR_VMSVGA_UPDATE_RECT_FLUSH);
+
+    /* 3. Hook vmsvga_fifo_run with a 14-byte indirect jump */
+    uintptr_t page_fifo = (qemu_base + ADDR_VMSVGA_FIFO_RUN) & ~0xFFF;
+    if (mprotect((void *)page_fifo, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        unsigned char *p_fifo = (unsigned char *)(qemu_base + ADDR_VMSVGA_FIFO_RUN);
+        p_fifo[0] = 0xff;
+        p_fifo[1] = 0x25;
+        p_fifo[2] = 0x00;
+        p_fifo[3] = 0x00;
+        p_fifo[4] = 0x00;
+        p_fifo[5] = 0x00;
+        uint64_t target = (uint64_t)&my_vmsvga_fifo_run;
+        memcpy(&p_fifo[6], &target, 8);
+        mprotect((void *)page_fifo, 4096 * 2, PROT_READ | PROT_EXEC);
+        log_msg("[libqemu_svga3d] Hooked vmsvga_fifo_run -> %p\n", (void *)target);
+    } else {
+        perror("[libqemu_svga3d] mprotect fifo_run failed"); _exit(78);
+    }
+
+    /* 4. Hook vmsvga_io_ops.read and vmsvga_io_ops.write */
+    uintptr_t page_ops = (qemu_base + ADDR_VMSVGA_IO_OPS) & ~0xFFF;
+    if (mprotect((void *)page_ops, 4096 * 2, PROT_READ | PROT_WRITE) == 0) {
+        void **p_ops = (void **)(qemu_base + ADDR_VMSVGA_IO_OPS);
+        orig_io_read = (uint64_t (*)(void *, uint64_t, unsigned))p_ops[0];
+        orig_io_write = (void (*)(void *, uint64_t, uint64_t, unsigned))p_ops[1];
+        p_ops[0] = (void *)&my_vmsvga_io_read;
+        p_ops[1] = (void *)&my_vmsvga_io_write;
+        log_msg("[libqemu_svga3d] Hooked vmsvga_io_ops (read=%p->%p, write=%p->%p)\n",
+                orig_io_read, my_vmsvga_io_read, orig_io_write, my_vmsvga_io_write);
+    } else {
+        perror("[libqemu_svga3d] mprotect io_ops failed"); _exit(78);
+    }
+
+    orig_input_update_buttons = (void (*)(void *, uint32_t *, uint32_t, uint32_t))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_UPDATE_BUTTONS, 22, -1, 0);
+    orig_input_queue_rel = (void (*)(void *, int, int))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_QUEUE_REL, 21, -1, 0);
+    orig_input_event_sync = (void (*)(void))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_EVENT_SYNC, 15, 8,
+                                                            qemu_base + 0x607150);
+    if (!orig_input_update_buttons || !orig_input_queue_rel || !orig_input_event_sync) {
+        perror("[libqemu_svga3d] mmap input trampoline failed"); _exit(78);
+    }
+
+    uintptr_t page_in = (qemu_base + ADDR_QEMU_INPUT_EVENT_SYNC) & ~0xFFF;
+    if (mprotect((void *)page_in, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        perror("[libqemu_svga3d] mprotect input failed"); _exit(78);
+    }
+    install_abs_jmp(qemu_base + ADDR_QEMU_INPUT_UPDATE_BUTTONS, (void *)my_input_update_buttons);
+    install_abs_jmp(qemu_base + ADDR_QEMU_INPUT_QUEUE_REL, (void *)my_input_queue_rel);
+    install_abs_jmp(qemu_base + ADDR_QEMU_INPUT_EVENT_SYNC, (void *)my_input_event_sync);
+    mprotect((void *)page_in, 4096 * 2, PROT_READ | PROT_EXEC);
+    log_msg("[libqemu_svga3d] Hooked qemu_input buttons/rel/sync for PlayBook tap dwell\n");
+
+    vnc_pointer_cont = (void *)(qemu_base + ADDR_VNC_CONT);
+    uintptr_t page_ptr = (qemu_base + ADDR_VNC_POINTER) & ~0xFFF;
+    if (mprotect((void *)page_ptr, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        perror("[libqemu_svga3d] mprotect vnc pointer failed"); _exit(78);
+    }
+    install_abs_jmp(qemu_base + ADDR_VNC_POINTER, (void *)vnc_pointer_hook);
+    mprotect((void *)page_ptr, 4096 * 2, PROT_READ | PROT_EXEC);
+    log_msg("[libqemu_svga3d] Hooked VNC pointer_event preamble for homing\n");
+}

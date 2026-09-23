@@ -1,0 +1,9 @@
+#ifndef ___SHIM_VBOX_VERSION_H___
+#define ___SHIM_VBOX_VERSION_H___
+
+#define VBOX_VERSION_MAJOR 5
+#define VBOX_VERSION_MINOR 2
+#define VBOX_VERSION_BUILD 30
+#define VBOX_VERSION_STRING "5.2.30"
+
+#endif

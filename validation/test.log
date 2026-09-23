@@ -1,0 +1,123 @@
+=== Running Oracle Reference Verification ===
+./bin/svga3d-oracle --test
+[1m==========================================================[0m
+[1m SVGA3D Reference Oracle Test Runner & Fixture Exporter[0m
+[1m==========================================================[0m
+[36m[TEST 1] Device and Context Lifecycle...[0m
+[36m[TEST 2] Device Capability Queries (84 SVGA3D_DEVCAP_* values)...[0m
+[32m  Verified 83/83 capabilities successfully.[0m
+[36m[TEST 3] Surface Format Conversions...[0m
+[32m  Verified 49/49 surface format translations.[0m
+[36m[TEST 4] Exhaustive Render State Translations (Value Sweeps)...[0m
+[32m  Verified 63/63 render state translations on D3D9 device.[0m
+[36m[TEST 5] Exhaustive Texture Stage States & Combiners (8 Stages)...[0m
+[36m[TEST 6] Viewport, Scissor Rect, and Z-Range Sweeps...[0m
+[36m[TEST 7] Transform Matrices (World, View, Proj, Textures 0..7)...[0m
+[36m[TEST 8] Material Lighting Properties & Presets...[0m
+[36m[TEST 9] Hardware Light Sources (8 Lights, Point/Spot/Dir)...[0m
+[36m[TEST 10] Clip Planes (Planes 0..5, Arbitrary Equations)...[0m
+[36m[TEST 11] Shader Lifecycle & Constant Banks (Float, Int, Bool)...[0m
+[36m[TEST 12] Hardware Occlusion Queries (Create, Issue, GetData, Delete)...[0m
+[36m[TEST 13] Clear Command Variations & Rectangles...[0m
+[36m[TEST 14] Surfaces (Define, RenderTarget, DMA, Blit, Present, Mipmaps)...[0m
+[36m[TEST 15] Primitive Topologies & Vertex Declaration Types...[0m
+[36m[TEST 16] Multi-Context State Isolation & Device Termination...[0m
+
+[1m----------------------------------------------------------[0m
+[1m Test Results Summary: [0m[32m[1mALL 1508 TESTS PASSED![0m
+[1m----------------------------------------------------------[0m
+
+=== Running SVGA3=VLKN Product Verification ===
+./bin/test_svga3_vlkn
+[1;33m==================================================================[0m
+[1;33m       SVGA3=VLKN - SVGA3D to Vulkan Engine Test Harness          [0m
+[1;33m==================================================================[0m
+[1;36m[TEST 2] Surface Format Verification against Oracle Fixtures...[0m
+[1;32m  Verified 49/49 surface formats matching Oracle.[0m
+[1;36m[TEST 3] Primitive Topology Verification against Oracle Table...[0m
+[1;32m  Verified 6/6 primitive topologies.[0m
+[1;36m[TEST 4] State Conversion Utilities...[0m
+[1;32m  State converters verified successfully.[0m
+[1;36m[TEST 1] Device Lifecycle & Oracle Capability Verification...[0m
+[libqemu_svga3d] Selected Vulkan device: SVGA3=VLKN Emulated Vulkan Adapter (type=2, API=1.1.0, driver=0x1)
+[1;32m  Test 1 passed successfully.[0m
+[libqemu_svga3d] Selected Vulkan device: SVGA3=VLKN Emulated Vulkan Adapter (type=2, API=1.1.0, driver=0x1)
+[1;36m[TEST 5] Surface Lifecycle & Resource Allocation...[0m
+[1;32m  Surface lifecycle verified successfully.[0m
+[1;36m[TEST 6] Surface DMA Upload, Download & Bit-Exact Readback Across Formats...[0m
+[libqemu_svga3d] 2D Buffer upload #1: sid=10, box=(0,0 16x16), bpp=4, totalBytes=1024
+[libqemu_svga3d] 2D Buffer upload #2: sid=11, box=(0,0 32x32), bpp=2, totalBytes=2048
+[1;32m  Surface DMA verified successfully.[0m
+[1;36m[TEST 7] Surface Copy (Blit) Operations...[0m
+[libqemu_svga3d] 2D Buffer upload #3: sid=20, box=(0,0 32x32), bpp=4, totalBytes=4096
+[1;32m  Surface copy verified successfully.[0m
+[1;36m[TEST 8] Context Lifecycle & Render State Tracking...[0m
+[1;32m  Context render states verified successfully.[0m
+[1;36m[TEST 9] Render Target, Viewport & Scissor Configuration...[0m
+[1;32m  Render target and viewport verified successfully.[0m
+[1;36m[TEST 10] Clear Operations & Render Pass Execution...[0m
+[libqemu_svga3d] ensureRenderPassActive #1: colorSid=1 (surf=0x556b24210040), depthSid=3 (surf=0x556b24358620)
+[1;32m  Clear operations verified successfully.[0m
+[1;36m[TEST 11] Draw Call Dispatch & All 6 Primitive Topologies...[0m
+[libqemu_svga3d] ensureRenderPassActive #2: colorSid=1 (surf=0x556b24210040), depthSid=3 (surf=0x556b24358620)
+[libqemu_svga3d] ctx::draw #1: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] ctx::draw #2: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] ctx::draw #3: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] ctx::draw #4: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] ctx::draw #5: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] ctx::draw #6: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[1;32m  Draw calls across all topologies verified successfully.[0m
+[1;36m[TEST 12] Binary FIFO Command Stream Decoding & Execution...[0m
+[libqemu_svga3d] SURFACE_DEFINE: sid=200, fmt=2, w=32, h=32, mips=1
+[libqemu_svga3d] CONTEXT_DEFINE: cid=200
+[libqemu_svga3d] SETRENDERTARGET (cid=200 #1): type=2, target.sid=200, face=0, mip=0
+[libqemu_svga3d] SETVIEWPORT #1: cid=200, rect=(0,0 32x32)
+[libqemu_svga3d] ensureRenderPassActive #3: colorSid=200 (surf=0x556b24d260b0), depthSid=0 (surf=(nil))
+[libqemu_svga3d] CLEAR (cid=200 #1): flags=0x1, color=0xff0000ff, depth=1.000000, numRects=1
+   rect[0]: (0,0 32x32)
+[libqemu_svga3d] DRAW_PRIMITIVES (cid=200 #1): primType=1, numVertexDecls=1, numRanges=1
+   decl[0]: usage=0, usageIdx=0, type=2, sid=0, offset=0, stride=12
+   range[0]: primType=1, primCount=1, idxSid=0, idxOff=0, idxStride=0, idxBias=0
+[libqemu_svga3d] ensureRenderPassActive #4: colorSid=200 (surf=0x556b24d260b0), depthSid=0 (surf=(nil))
+[libqemu_svga3d] ctx::draw #1: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(0.0,0.0 32.0x32.0)
+[libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
+[libqemu_svga3d] SETTEXTURESTATE #1: cid=200, numStates=2
+   [0] stage=0, name=2, val=0x4 (4)
+   [1] stage=0, name=8, val=0x3 (3)
+[libqemu_svga3d] SHADER_DEFINE: cid=200, shid=1, type=1, numDwords=2
+[libqemu_svga3d] SURFACE_DEFINE: sid=201, fmt=2, w=32, h=32, mips=1
+[libqemu_svga3d] PRESENT #1: sid=200, numRects=1
+[libqemu_svga3d]   rect0: dst=(0,0 0x0) src=(32,32)
+[libqemu_svga3d] CONTEXT_DESTROY: cid=200
+[1;32m  FIFO command stream verified successfully.[0m
+[1;36m[TEST 13] Exhaustive Transforms & Z-Range (World, View, Proj, Tex 0..7)...[0m
+[1;36m[TEST 14] Exhaustive Materials & Hardware Lights...[0m
+[1;36m[TEST 15] Exhaustive User Clip Planes (0..5)...[0m
+[1;36m[TEST 16] Exhaustive Texture Stage States & Combiners (8 Stages)...[0m
+[1;36m[TEST 17] Exhaustive Render State Value Sweeps (82 States)...[0m
+[1;36m[TEST 18] Shader Lifecycle & Constant Banks (Float 0..255, Int 0..15, Bool 0..15)...[0m
+[1;36m[TEST 19] Hardware Occlusion Queries (Begin, End, Wait)...[0m
+[1;36m[TEST 20] Advanced Surface Operations (StretchBlt, Mipmaps, BlitToScreen, Present)...[0m
+[1;36m[TEST 21] Multi-Context State Isolation (8 Contexts)...[0m
+[1;36m[TEST 22] Stress & High-Load Execution...[0m
+[1;32m  Stress test completed resource cycles in 46.9907 ms.[0m
+[1;36m
+Engine Execution Statistics Summary:[0m
+  - Total Commands Processed: 35
+  - Draw Calls Submitted:     13
+  - Primitives Rendered:      49
+  - Vertices Rendered:        147
+  - Surfaces Created:         262
+  - Surfaces Destroyed:       256
+  - Render Passes Executed:   10
+  - DMA Bytes Transferred:    14336 bytes
+[1;33m
+==================================================================[0m
+[1;32m ALL 3407 TESTS PASSED SUCCESSFULLY! (100% PASS RATE)[0m
+[1;33m==================================================================[0m

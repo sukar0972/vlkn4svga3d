@@ -1,0 +1,1561 @@
+{
+  "generator": "SVGA3D Oracle (DevVGA-SVGA3d-win.cpp Direct3D 9 shim)",
+  "description": "Definitive VMware SVGA3D protocol mapping fixtures and reference oracle",
+  "version": "1.0",
+
+  "device_capabilities": [
+    {
+      "id": 0,
+      "name": "SVGA3D_DEVCAP_3D",
+      "description": "3D acceleration available",
+      "expected_value": 1
+    },
+    {
+      "id": 1,
+      "name": "SVGA3D_DEVCAP_MAX_LIGHTS",
+      "description": "Maximum active lights",
+      "expected_value": 8
+    },
+    {
+      "id": 2,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURES",
+      "description": "Maximum simultaneous textures",
+      "expected_value": 8
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_DEVCAP_MAX_CLIP_PLANES",
+      "description": "Maximum user clip planes",
+      "expected_value": 6
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_DEVCAP_VERTEX_SHADER_VERSION",
+      "description": "Vertex shader version",
+      "expected_value": 768
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_DEVCAP_VERTEX_SHADER",
+      "description": "Vertex shader support boolean",
+      "expected_value": 1
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_DEVCAP_FRAGMENT_SHADER_VERSION",
+      "description": "Pixel shader version",
+      "expected_value": 768
+    },
+    {
+      "id": 7,
+      "name": "SVGA3D_DEVCAP_FRAGMENT_SHADER",
+      "description": "Pixel shader support boolean",
+      "expected_value": 1
+    },
+    {
+      "id": 8,
+      "name": "SVGA3D_DEVCAP_MAX_RENDER_TARGETS",
+      "description": "Simultaneous render targets",
+      "expected_value": 4
+    },
+    {
+      "id": 9,
+      "name": "SVGA3D_DEVCAP_S23E8_TEXTURES",
+      "description": "32-bit float texture format",
+      "expected_value": 0
+    },
+    {
+      "id": 10,
+      "name": "SVGA3D_DEVCAP_S10E5_TEXTURES",
+      "description": "16-bit float texture format",
+      "expected_value": 0
+    },
+    {
+      "id": 11,
+      "name": "SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND",
+      "description": "Fixed-function vertex blending matrices",
+      "expected_value": 4
+    },
+    {
+      "id": 12,
+      "name": "SVGA3D_DEVCAP_D16_BUFFER_FORMAT",
+      "description": "16-bit depth buffer format",
+      "expected_value": 1
+    },
+    {
+      "id": 13,
+      "name": "SVGA3D_DEVCAP_D24S8_BUFFER_FORMAT",
+      "description": "24-bit depth 8-bit stencil buffer",
+      "expected_value": 1
+    },
+    {
+      "id": 14,
+      "name": "SVGA3D_DEVCAP_D24X8_BUFFER_FORMAT",
+      "description": "24-bit depth buffer",
+      "expected_value": 1
+    },
+    {
+      "id": 15,
+      "name": "SVGA3D_DEVCAP_QUERY_TYPES",
+      "description": "Supported query types bitmask",
+      "expected_value": 1
+    },
+    {
+      "id": 16,
+      "name": "SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING",
+      "description": "Texture gradient sampling support",
+      "expected_value": 1
+    },
+    {
+      "id": 17,
+      "name": "SVGA3D_DEVCAP_MAX_POINT_SIZE",
+      "description": "Maximum point size",
+      "expected_value": 256
+    },
+    {
+      "id": 18,
+      "name": "SVGA3D_DEVCAP_MAX_SHADER_TEXTURES",
+      "description": "Maximum textures accessible in shaders",
+      "expected_value": 0
+    },
+    {
+      "id": 19,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURE_WIDTH",
+      "description": "Maximum texture width",
+      "expected_value": 8192
+    },
+    {
+      "id": 20,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURE_HEIGHT",
+      "description": "Maximum texture height",
+      "expected_value": 8192
+    },
+    {
+      "id": 21,
+      "name": "SVGA3D_DEVCAP_MAX_VOLUME_EXTENT",
+      "description": "Maximum 3D volume extent",
+      "expected_value": 2048
+    },
+    {
+      "id": 22,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURE_REPEAT",
+      "description": "Maximum texture repeat count",
+      "expected_value": 8192
+    },
+    {
+      "id": 23,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURE_ASPECT_RATIO",
+      "description": "Maximum texture aspect ratio",
+      "expected_value": 8192
+    },
+    {
+      "id": 24,
+      "name": "SVGA3D_DEVCAP_MAX_TEXTURE_ANISOTROPY",
+      "description": "Maximum texture anisotropy",
+      "expected_value": 16
+    },
+    {
+      "id": 25,
+      "name": "SVGA3D_DEVCAP_MAX_PRIMITIVE_COUNT",
+      "description": "Maximum primitives per draw call",
+      "expected_value": 1048576
+    },
+    {
+      "id": 26,
+      "name": "SVGA3D_DEVCAP_MAX_VERTEX_INDEX",
+      "description": "Maximum vertex index value",
+      "expected_value": 16777215
+    },
+    {
+      "id": 27,
+      "name": "SVGA3D_DEVCAP_MAX_VERTEX_SHADER_INSTRUCTIONS",
+      "description": "Max VS instructions",
+      "expected_value": 4096
+    },
+    {
+      "id": 28,
+      "name": "SVGA3D_DEVCAP_MAX_FRAGMENT_SHADER_INSTRUCTIONS",
+      "description": "Max PS instructions",
+      "expected_value": 4096
+    },
+    {
+      "id": 29,
+      "name": "SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEMPS",
+      "description": "Max VS temporary registers",
+      "expected_value": 32
+    },
+    {
+      "id": 30,
+      "name": "SVGA3D_DEVCAP_MAX_FRAGMENT_SHADER_TEMPS",
+      "description": "Max PS temporary registers",
+      "expected_value": 32
+    },
+    {
+      "id": 31,
+      "name": "SVGA3D_DEVCAP_TEXTURE_OPS",
+      "description": "Supported texture stage combiners bitmask",
+      "expected_value": 67108863
+    },
+    {
+      "id": 32,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8",
+      "description": "Format X8R8G8B8 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 33,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8",
+      "description": "Format A8R8G8B8 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 34,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A2R10G10B10",
+      "description": "Format A2R10G10B10 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 35,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5",
+      "description": "Format X1R5G5B5 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 36,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A1R5G5B5",
+      "description": "Format A1R5G5B5 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 37,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4",
+      "description": "Format A4R4G4B4 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 38,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_R5G6B5",
+      "description": "Format R5G6B5 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 39,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE16",
+      "description": "Format LUMINANCE16 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 40,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE8_ALPHA8",
+      "description": "Format LUMINANCE8_ALPHA8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 41,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_ALPHA8",
+      "description": "Format ALPHA8 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 42,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE8",
+      "description": "Format LUMINANCE8 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 43,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D16",
+      "description": "Format Z_D16 capability flags",
+      "expected_value": 16
+    },
+    {
+      "id": 44,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8",
+      "description": "Format Z_D24S8 capability flags",
+      "expected_value": 16
+    },
+    {
+      "id": 45,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8",
+      "description": "Format Z_D24X8 capability flags",
+      "expected_value": 16
+    },
+    {
+      "id": 46,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_DXT1",
+      "description": "Format DXT1 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 47,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_DXT2",
+      "description": "Format DXT2 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 48,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_DXT3",
+      "description": "Format DXT3 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 49,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_DXT4",
+      "description": "Format DXT4 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 50,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_DXT5",
+      "description": "Format DXT5 capability flags",
+      "expected_value": 79
+    },
+    {
+      "id": 51,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8",
+      "description": "Format BUMPX8L8V8U8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 52,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10",
+      "description": "Format A2W10V10U10 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 53,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8",
+      "description": "Format BUMPU8V8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 54,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8",
+      "description": "Format Q8W8V8U8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 55,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_CxV8U8",
+      "description": "Format CxV8U8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 56,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_R_S10E5",
+      "description": "Format R_S10E5 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 57,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_R_S23E8",
+      "description": "Format R_S23E8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 58,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_RG_S10E5",
+      "description": "Format RG_S10E5 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 59,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_RG_S23E8",
+      "description": "Format RG_S23E8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 60,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_ARGB_S10E5",
+      "description": "Format ARGB_S10E5 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 61,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_ARGB_S23E8",
+      "description": "Format ARGB_S23E8 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 63,
+      "name": "SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES",
+      "description": "Max VS texture units",
+      "expected_value": 4
+    },
+    {
+      "id": 64,
+      "name": "SVGA3D_DEVCAP_MAX_SIMULTANEOUS_RENDER_TARGETS",
+      "description": "Max simultaneous RTs",
+      "expected_value": 4
+    },
+    {
+      "id": 65,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_V16U16",
+      "description": "Format V16U16 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 66,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_G16R16",
+      "description": "Format G16R16 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 67,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_A16B16G16R16",
+      "description": "Format A16B16G16R16 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 68,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_UYVY",
+      "description": "Format UYVY flags",
+      "expected_value": 79
+    },
+    {
+      "id": 69,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_YUY2",
+      "description": "Format YUY2 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 70,
+      "name": "SVGA3D_DEVCAP_MULTISAMPLE_NONMASKABLESAMPLES",
+      "description": "Nonmaskable MSAA mask",
+      "expected_value": 0
+    },
+    {
+      "id": 71,
+      "name": "SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES",
+      "description": "Maskable MSAA samples bitmask",
+      "expected_value": 20
+    },
+    {
+      "id": 72,
+      "name": "SVGA3D_DEVCAP_ALPHATOCOVERAGE",
+      "description": "Alpha to coverage support",
+      "expected_value": 1
+    },
+    {
+      "id": 73,
+      "name": "SVGA3D_DEVCAP_SUPERSAMPLE",
+      "description": "Supersample support",
+      "expected_value": 1
+    },
+    {
+      "id": 74,
+      "name": "SVGA3D_DEVCAP_AUTOGENMIPMAPS",
+      "description": "Automatic mipmap generation support",
+      "expected_value": 1
+    },
+    {
+      "id": 75,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_NV12",
+      "description": "Format NV12 flags",
+      "expected_value": 79
+    },
+    {
+      "id": 76,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_AYUV",
+      "description": "Format AYUV flags",
+      "expected_value": 79
+    },
+    {
+      "id": 77,
+      "name": "SVGA3D_DEVCAP_MAX_CONTEXT_IDS",
+      "description": "Maximum context ID space",
+      "expected_value": 256
+    },
+    {
+      "id": 78,
+      "name": "SVGA3D_DEVCAP_MAX_SURFACE_IDS",
+      "description": "Maximum surface ID space",
+      "expected_value": 1024
+    },
+    {
+      "id": 79,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_DF16",
+      "description": "Format Z_DF16 flags",
+      "expected_value": 16
+    },
+    {
+      "id": 80,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_DF24",
+      "description": "Format Z_DF24 flags",
+      "expected_value": 16
+    },
+    {
+      "id": 81,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT",
+      "description": "Format Z_D24S8_INT flags",
+      "expected_value": 16
+    },
+    {
+      "id": 82,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_BC4_UNORM",
+      "description": "Format BC4_UNORM flags",
+      "expected_value": 0
+    },
+    {
+      "id": 83,
+      "name": "SVGA3D_DEVCAP_SURFACEFMT_BC5_UNORM",
+      "description": "Format BC5_UNORM flags",
+      "expected_value": 0
+    }
+  ],
+
+  "surface_formats": [
+    {
+      "id": 1,
+      "name": "SVGA3D_X8R8G8B8",
+      "d3d_format": 22,
+      "d3d_format_name": "D3DFMT_X8R8G8B8",
+      "vk_format": 44,
+      "vk_format_name": "VK_FORMAT_B8G8R8A8_UNORM"
+    },
+    {
+      "id": 2,
+      "name": "SVGA3D_A8R8G8B8",
+      "d3d_format": 21,
+      "d3d_format_name": "D3DFMT_A8R8G8B8",
+      "vk_format": 44,
+      "vk_format_name": "VK_FORMAT_B8G8R8A8_UNORM"
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_R5G6B5",
+      "d3d_format": 23,
+      "d3d_format_name": "D3DFMT_R5G6B5",
+      "vk_format": 84,
+      "vk_format_name": "VK_FORMAT_B5G6R5_UNORM_PACK16"
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_X1R5G5B5",
+      "d3d_format": 24,
+      "d3d_format_name": "D3DFMT_X1R5G5B5",
+      "vk_format": 86,
+      "vk_format_name": "VK_FORMAT_B5G5R5A1_UNORM_PACK16"
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_A1R5G5B5",
+      "d3d_format": 25,
+      "d3d_format_name": "D3DFMT_A1R5G5B5",
+      "vk_format": 86,
+      "vk_format_name": "VK_FORMAT_B5G5R5A1_UNORM_PACK16"
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_A4R4G4B4",
+      "d3d_format": 26,
+      "d3d_format_name": "D3DFMT_A4R4G4B4",
+      "vk_format": 80,
+      "vk_format_name": "VK_FORMAT_B4G4R4A4_UNORM_PACK16"
+    },
+    {
+      "id": 7,
+      "name": "SVGA3D_Z_D32",
+      "d3d_format": 71,
+      "d3d_format_name": "D3DFMT_D32",
+      "vk_format": 126,
+      "vk_format_name": "VK_FORMAT_D32_SFLOAT"
+    },
+    {
+      "id": 8,
+      "name": "SVGA3D_Z_D16",
+      "d3d_format": 80,
+      "d3d_format_name": "D3DFMT_D16",
+      "vk_format": 124,
+      "vk_format_name": "VK_FORMAT_D16_UNORM"
+    },
+    {
+      "id": 9,
+      "name": "SVGA3D_Z_D24S8",
+      "d3d_format": 75,
+      "d3d_format_name": "D3DFMT_D24S8",
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
+    },
+    {
+      "id": 10,
+      "name": "SVGA3D_Z_D15S1",
+      "d3d_format": 73,
+      "d3d_format_name": "D3DFMT_D15S1",
+      "vk_format": 124,
+      "vk_format_name": "VK_FORMAT_D16_UNORM"
+    },
+    {
+      "id": 11,
+      "name": "SVGA3D_LUMINANCE8",
+      "d3d_format": 50,
+      "d3d_format_name": "D3DFMT_L8",
+      "vk_format": 9,
+      "vk_format_name": "VK_FORMAT_R8_UNORM"
+    },
+    {
+      "id": 12,
+      "name": "SVGA3D_LUMINANCE4_ALPHA4",
+      "d3d_format": 52,
+      "d3d_format_name": "D3DFMT_A4L4",
+      "vk_format": 9,
+      "vk_format_name": "VK_FORMAT_R8_UNORM"
+    },
+    {
+      "id": 13,
+      "name": "SVGA3D_LUMINANCE16",
+      "d3d_format": 81,
+      "d3d_format_name": "D3DFMT_L16",
+      "vk_format": 70,
+      "vk_format_name": "VK_FORMAT_R16_UNORM"
+    },
+    {
+      "id": 14,
+      "name": "SVGA3D_LUMINANCE8_ALPHA8",
+      "d3d_format": 51,
+      "d3d_format_name": "D3DFMT_A8L8",
+      "vk_format": 16,
+      "vk_format_name": "VK_FORMAT_R8G8_UNORM"
+    },
+    {
+      "id": 15,
+      "name": "SVGA3D_DXT1",
+      "d3d_format": 827611204,
+      "d3d_format_name": "D3DFMT_DXT1",
+      "vk_format": 133,
+      "vk_format_name": "VK_FORMAT_BC1_RGBA_UNORM_BLOCK"
+    },
+    {
+      "id": 16,
+      "name": "SVGA3D_DXT2",
+      "d3d_format": 844388420,
+      "d3d_format_name": "D3DFMT_DXT2",
+      "vk_format": 135,
+      "vk_format_name": "VK_FORMAT_BC2_UNORM_BLOCK"
+    },
+    {
+      "id": 17,
+      "name": "SVGA3D_DXT3",
+      "d3d_format": 861165636,
+      "d3d_format_name": "D3DFMT_DXT3",
+      "vk_format": 135,
+      "vk_format_name": "VK_FORMAT_BC2_UNORM_BLOCK"
+    },
+    {
+      "id": 18,
+      "name": "SVGA3D_DXT4",
+      "d3d_format": 877942852,
+      "d3d_format_name": "D3DFMT_DXT4",
+      "vk_format": 137,
+      "vk_format_name": "VK_FORMAT_BC3_UNORM_BLOCK"
+    },
+    {
+      "id": 19,
+      "name": "SVGA3D_DXT5",
+      "d3d_format": 894720068,
+      "d3d_format_name": "D3DFMT_DXT5",
+      "vk_format": 137,
+      "vk_format_name": "VK_FORMAT_BC3_UNORM_BLOCK"
+    },
+    {
+      "id": 20,
+      "name": "SVGA3D_BUMPU8V8",
+      "d3d_format": 60,
+      "d3d_format_name": "D3DFMT_V8U8",
+      "vk_format": 16,
+      "vk_format_name": "VK_FORMAT_R8G8_UNORM"
+    },
+    {
+      "id": 21,
+      "name": "SVGA3D_BUMPL6V5U5",
+      "d3d_format": 61,
+      "d3d_format_name": "D3DFMT_L6V5U5",
+      "vk_format": 0,
+      "vk_format_name": "VK_FORMAT_UNDEFINED"
+    },
+    {
+      "id": 22,
+      "name": "SVGA3D_BUMPX8L8V8U8",
+      "d3d_format": 62,
+      "d3d_format_name": "D3DFMT_X8L8V8U8",
+      "vk_format": 44,
+      "vk_format_name": "VK_FORMAT_B8G8R8A8_UNORM"
+    },
+    {
+      "id": 23,
+      "name": "SVGA3D_BUMPL8V8U8",
+      "d3d_format": 0,
+      "d3d_format_name": "D3DFMT_UNKNOWN",
+      "vk_format": 0,
+      "vk_format_name": "VK_FORMAT_UNDEFINED"
+    },
+    {
+      "id": 24,
+      "name": "SVGA3D_ARGB_S10E5",
+      "d3d_format": 113,
+      "d3d_format_name": "D3DFMT_A16B16G16R16F",
+      "vk_format": 97,
+      "vk_format_name": "VK_FORMAT_R16G16B16A16_SFLOAT"
+    },
+    {
+      "id": 25,
+      "name": "SVGA3D_ARGB_S23E8",
+      "d3d_format": 116,
+      "d3d_format_name": "D3DFMT_A32B32G32R32F",
+      "vk_format": 109,
+      "vk_format_name": "VK_FORMAT_R32G32B32A32_SFLOAT"
+    },
+    {
+      "id": 26,
+      "name": "SVGA3D_A2R10G10B10",
+      "d3d_format": 35,
+      "d3d_format_name": "D3DFMT_A2R10G10B10",
+      "vk_format": 64,
+      "vk_format_name": "VK_FORMAT_A2R10G10B10_UNORM_PACK32"
+    },
+    {
+      "id": 27,
+      "name": "SVGA3D_V8U8",
+      "d3d_format": 60,
+      "d3d_format_name": "D3DFMT_V8U8",
+      "vk_format": 16,
+      "vk_format_name": "VK_FORMAT_R8G8_UNORM"
+    },
+    {
+      "id": 28,
+      "name": "SVGA3D_Q8W8V8U8",
+      "d3d_format": 63,
+      "d3d_format_name": "D3DFMT_Q8W8V8U8",
+      "vk_format": 37,
+      "vk_format_name": "VK_FORMAT_R8G8B8A8_UNORM"
+    },
+    {
+      "id": 29,
+      "name": "SVGA3D_CxV8U8",
+      "d3d_format": 117,
+      "d3d_format_name": "D3DFMT_CxV8U8",
+      "vk_format": 16,
+      "vk_format_name": "VK_FORMAT_R8G8_UNORM"
+    },
+    {
+      "id": 30,
+      "name": "SVGA3D_X8L8V8U8",
+      "d3d_format": 62,
+      "d3d_format_name": "D3DFMT_X8L8V8U8",
+      "vk_format": 44,
+      "vk_format_name": "VK_FORMAT_B8G8R8A8_UNORM"
+    },
+    {
+      "id": 31,
+      "name": "SVGA3D_A2W10V10U10",
+      "d3d_format": 67,
+      "d3d_format_name": "D3DFMT_A2W10V10U10",
+      "vk_format": 64,
+      "vk_format_name": "VK_FORMAT_A2R10G10B10_UNORM_PACK32"
+    },
+    {
+      "id": 32,
+      "name": "SVGA3D_ALPHA8",
+      "d3d_format": 28,
+      "d3d_format_name": "D3DFMT_A8",
+      "vk_format": 9,
+      "vk_format_name": "VK_FORMAT_R8_UNORM"
+    },
+    {
+      "id": 33,
+      "name": "SVGA3D_R_S10E5",
+      "d3d_format": 111,
+      "d3d_format_name": "D3DFMT_R16F",
+      "vk_format": 76,
+      "vk_format_name": "VK_FORMAT_R16_SFLOAT"
+    },
+    {
+      "id": 34,
+      "name": "SVGA3D_R_S23E8",
+      "d3d_format": 114,
+      "d3d_format_name": "D3DFMT_R32F",
+      "vk_format": 100,
+      "vk_format_name": "VK_FORMAT_R32_SFLOAT"
+    },
+    {
+      "id": 35,
+      "name": "SVGA3D_RG_S10E5",
+      "d3d_format": 112,
+      "d3d_format_name": "D3DFMT_G16R16F",
+      "vk_format": 83,
+      "vk_format_name": "VK_FORMAT_R16G16_SFLOAT"
+    },
+    {
+      "id": 36,
+      "name": "SVGA3D_RG_S23E8",
+      "d3d_format": 115,
+      "d3d_format_name": "D3DFMT_G32R32F",
+      "vk_format": 103,
+      "vk_format_name": "VK_FORMAT_R32G32_SFLOAT"
+    },
+    {
+      "id": 37,
+      "name": "SVGA3D_BUFFER",
+      "d3d_format": 0,
+      "d3d_format_name": "D3DFMT_UNKNOWN",
+      "vk_format": 0,
+      "vk_format_name": "VK_FORMAT_UNDEFINED"
+    },
+    {
+      "id": 38,
+      "name": "SVGA3D_Z_D24X8",
+      "d3d_format": 77,
+      "d3d_format_name": "D3DFMT_D24X8",
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
+    },
+    {
+      "id": 39,
+      "name": "SVGA3D_V16U16",
+      "d3d_format": 64,
+      "d3d_format_name": "D3DFMT_V16U16",
+      "vk_format": 77,
+      "vk_format_name": "VK_FORMAT_R16G16_UNORM"
+    },
+    {
+      "id": 40,
+      "name": "SVGA3D_G16R16",
+      "d3d_format": 34,
+      "d3d_format_name": "D3DFMT_G16R16",
+      "vk_format": 77,
+      "vk_format_name": "VK_FORMAT_R16G16_UNORM"
+    },
+    {
+      "id": 41,
+      "name": "SVGA3D_A16B16G16R16",
+      "d3d_format": 36,
+      "d3d_format_name": "D3DFMT_A16B16G16R16",
+      "vk_format": 97,
+      "vk_format_name": "VK_FORMAT_R16G16B16A16_SFLOAT"
+    },
+    {
+      "id": 42,
+      "name": "SVGA3D_UYVY",
+      "d3d_format": 1498831189,
+      "d3d_format_name": "D3DFMT_UYVY",
+      "vk_format": 0,
+      "vk_format_name": "VK_FORMAT_UNDEFINED"
+    },
+    {
+      "id": 43,
+      "name": "SVGA3D_YUY2",
+      "d3d_format": 844715353,
+      "d3d_format_name": "D3DFMT_YUY2",
+      "vk_format": 0,
+      "vk_format_name": "VK_FORMAT_UNDEFINED"
+    },
+    {
+      "id": 68,
+      "name": "SVGA3D_R8G8B8A8_UNORM",
+      "d3d_format": 32,
+      "d3d_format_name": "D3DFMT_A8B8G8R8",
+      "vk_format": 37,
+      "vk_format_name": "VK_FORMAT_R8G8B8A8_UNORM"
+    },
+    {
+      "id": 108,
+      "name": "SVGA3D_BC4_UNORM",
+      "d3d_format": 0,
+      "d3d_format_name": "D3DFMT_UNKNOWN",
+      "vk_format": 139,
+      "vk_format_name": "VK_FORMAT_BC4_UNORM_BLOCK"
+    },
+    {
+      "id": 111,
+      "name": "SVGA3D_BC5_UNORM",
+      "d3d_format": 0,
+      "d3d_format_name": "D3DFMT_UNKNOWN",
+      "vk_format": 141,
+      "vk_format_name": "VK_FORMAT_BC5_UNORM_BLOCK"
+    },
+    {
+      "id": 118,
+      "name": "SVGA3D_Z_DF16",
+      "d3d_format": 0,
+      "d3d_format_name": "D3DFMT_UNKNOWN",
+      "vk_format": 124,
+      "vk_format_name": "VK_FORMAT_D16_UNORM"
+    },
+    {
+      "id": 119,
+      "name": "SVGA3D_Z_DF24",
+      "d3d_format": 83,
+      "d3d_format_name": "D3DFMT_D24FS8",
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
+    },
+    {
+      "id": 120,
+      "name": "SVGA3D_Z_D24S8_INT",
+      "d3d_format": 75,
+      "d3d_format_name": "D3DFMT_D24S8",
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
+    }
+  ],
+
+  "render_states": [
+    {
+      "id": 1,
+      "name": "SVGA3D_RS_ZENABLE",
+      "d3d_state": 7,
+      "d3d_state_name": "D3DRS_ZENABLE"
+    },
+    {
+      "id": 29,
+      "name": "SVGA3D_RS_FILLMODE",
+      "d3d_state": 8,
+      "d3d_state_name": "D3DRS_FILLMODE"
+    },
+    {
+      "id": 30,
+      "name": "SVGA3D_RS_SHADEMODE",
+      "d3d_state": 9,
+      "d3d_state_name": "D3DRS_SHADEMODE"
+    },
+    {
+      "id": 2,
+      "name": "SVGA3D_RS_ZWRITEENABLE",
+      "d3d_state": 14,
+      "d3d_state_name": "D3DRS_ZWRITEENABLE"
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_RS_ALPHATESTENABLE",
+      "d3d_state": 15,
+      "d3d_state_name": "D3DRS_ALPHATESTENABLE"
+    },
+    {
+      "id": 67,
+      "name": "SVGA3D_RS_LASTPIXEL",
+      "d3d_state": 16,
+      "d3d_state_name": "D3DRS_LASTPIXEL"
+    },
+    {
+      "id": 32,
+      "name": "SVGA3D_RS_SRCBLEND",
+      "d3d_state": 19,
+      "d3d_state_name": "D3DRS_SRCBLEND"
+    },
+    {
+      "id": 33,
+      "name": "SVGA3D_RS_DSTBLEND",
+      "d3d_state": 20,
+      "d3d_state_name": "D3DRS_DESTBLEND"
+    },
+    {
+      "id": 35,
+      "name": "SVGA3D_RS_CULLMODE",
+      "d3d_state": 22,
+      "d3d_state_name": "D3DRS_CULLMODE"
+    },
+    {
+      "id": 36,
+      "name": "SVGA3D_RS_ZFUNC",
+      "d3d_state": 23,
+      "d3d_state_name": "D3DRS_ZFUNC"
+    },
+    {
+      "id": 37,
+      "name": "SVGA3D_RS_ALPHAFUNC",
+      "d3d_state": 25,
+      "d3d_state_name": "D3DRS_ALPHAFUNC"
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_RS_DITHERENABLE",
+      "d3d_state": 26,
+      "d3d_state_name": "D3DRS_DITHERENABLE"
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_RS_BLENDENABLE",
+      "d3d_state": 27,
+      "d3d_state_name": "D3DRS_ALPHABLENDENABLE"
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_RS_FOGENABLE",
+      "d3d_state": 28,
+      "d3d_state_name": "D3DRS_FOGENABLE"
+    },
+    {
+      "id": 7,
+      "name": "SVGA3D_RS_SPECULARENABLE",
+      "d3d_state": 29,
+      "d3d_state_name": "D3DRS_SPECULARENABLE"
+    },
+    {
+      "id": 25,
+      "name": "SVGA3D_RS_FOGCOLOR",
+      "d3d_state": 34,
+      "d3d_state_name": "D3DRS_FOGCOLOR"
+    },
+    {
+      "id": 28,
+      "name": "SVGA3D_RS_FOGMODE",
+      "d3d_state": 35,
+      "d3d_state_name": "D3DRS_FOGTABLEMODE"
+    },
+    {
+      "id": 16,
+      "name": "SVGA3D_RS_FOGSTART",
+      "d3d_state": 36,
+      "d3d_state_name": "D3DRS_FOGSTART"
+    },
+    {
+      "id": 17,
+      "name": "SVGA3D_RS_FOGEND",
+      "d3d_state": 37,
+      "d3d_state_name": "D3DRS_FOGEND"
+    },
+    {
+      "id": 18,
+      "name": "SVGA3D_RS_FOGDENSITY",
+      "d3d_state": 38,
+      "d3d_state_name": "D3DRS_FOGDENSITY"
+    },
+    {
+      "id": 46,
+      "name": "SVGA3D_RS_RANGEFOGENABLE",
+      "d3d_state": 48,
+      "d3d_state_name": "D3DRS_RANGEFOGENABLE"
+    },
+    {
+      "id": 8,
+      "name": "SVGA3D_RS_STENCILENABLE",
+      "d3d_state": 52,
+      "d3d_state_name": "D3DRS_STENCILENABLE"
+    },
+    {
+      "id": 39,
+      "name": "SVGA3D_RS_STENCILFAIL",
+      "d3d_state": 53,
+      "d3d_state_name": "D3DRS_STENCILFAIL"
+    },
+    {
+      "id": 40,
+      "name": "SVGA3D_RS_STENCILZFAIL",
+      "d3d_state": 54,
+      "d3d_state_name": "D3DRS_STENCILZFAIL"
+    },
+    {
+      "id": 41,
+      "name": "SVGA3D_RS_STENCILPASS",
+      "d3d_state": 55,
+      "d3d_state_name": "D3DRS_STENCILPASS"
+    },
+    {
+      "id": 38,
+      "name": "SVGA3D_RS_STENCILFUNC",
+      "d3d_state": 56,
+      "d3d_state_name": "D3DRS_STENCILFUNC"
+    },
+    {
+      "id": 13,
+      "name": "SVGA3D_RS_STENCILREF",
+      "d3d_state": 57,
+      "d3d_state_name": "D3DRS_STENCILREF"
+    },
+    {
+      "id": 14,
+      "name": "SVGA3D_RS_STENCILMASK",
+      "d3d_state": 58,
+      "d3d_state_name": "D3DRS_STENCILMASK"
+    },
+    {
+      "id": 15,
+      "name": "SVGA3D_RS_STENCILWRITEMASK",
+      "d3d_state": 59,
+      "d3d_state_name": "D3DRS_STENCILWRITEMASK"
+    },
+    {
+      "id": 53,
+      "name": "SVGA3D_RS_TEXTUREFACTOR",
+      "d3d_state": 60,
+      "d3d_state_name": "D3DRS_TEXTUREFACTOR"
+    },
+    {
+      "id": 68,
+      "name": "SVGA3D_RS_CLIPPING",
+      "d3d_state": 136,
+      "d3d_state_name": "D3DRS_CLIPPING"
+    },
+    {
+      "id": 9,
+      "name": "SVGA3D_RS_LIGHTINGENABLE",
+      "d3d_state": 137,
+      "d3d_state_name": "D3DRS_LIGHTING"
+    },
+    {
+      "id": 26,
+      "name": "SVGA3D_RS_AMBIENT",
+      "d3d_state": 139,
+      "d3d_state_name": "D3DRS_AMBIENT"
+    },
+    {
+      "id": 47,
+      "name": "SVGA3D_RS_COLORWRITEENABLE",
+      "d3d_state": 168,
+      "d3d_state_name": "D3DRS_COLORWRITEENABLE"
+    },
+    {
+      "id": 56,
+      "name": "SVGA3D_RS_BLENDCOLOR",
+      "d3d_state": 193,
+      "d3d_state_name": "D3DRS_BLENDFACTOR"
+    },
+    {
+      "id": 34,
+      "name": "SVGA3D_RS_BLENDEQUATION",
+      "d3d_state": 171,
+      "d3d_state_name": "D3DRS_BLENDOP"
+    },
+    {
+      "id": 55,
+      "name": "SVGA3D_RS_SCISSORTESTENABLE",
+      "d3d_state": 174,
+      "d3d_state_name": "D3DRS_SCISSORTESTENABLE"
+    },
+    {
+      "id": 63,
+      "name": "SVGA3D_RS_SLOPESCALEDEPTHBIAS",
+      "d3d_state": 175,
+      "d3d_state_name": "D3DRS_SLOPESCALEDEPTHBIAS"
+    },
+    {
+      "id": 64,
+      "name": "SVGA3D_RS_DEPTHBIAS",
+      "d3d_state": 195,
+      "d3d_state_name": "D3DRS_DEPTHBIAS"
+    },
+    {
+      "id": 93,
+      "name": "SVGA3D_RS_SEPARATEALPHABLENDENABLE",
+      "d3d_state": 206,
+      "d3d_state_name": "D3DRS_SEPARATEALPHABLENDENABLE"
+    },
+    {
+      "id": 94,
+      "name": "SVGA3D_RS_SRCBLENDALPHA",
+      "d3d_state": 207,
+      "d3d_state_name": "D3DRS_SRCBLENDALPHA"
+    },
+    {
+      "id": 95,
+      "name": "SVGA3D_RS_DSTBLENDALPHA",
+      "d3d_state": 208,
+      "d3d_state_name": "D3DRS_DESTBLENDALPHA"
+    },
+    {
+      "id": 96,
+      "name": "SVGA3D_RS_BLENDEQUATIONALPHA",
+      "d3d_state": 209,
+      "d3d_state_name": "D3DRS_BLENDOPALPHA"
+    },
+    {
+      "id": 59,
+      "name": "SVGA3D_RS_CCWSTENCILFAIL",
+      "d3d_state": 186,
+      "d3d_state_name": "D3DRS_CCW_STENCILFAIL"
+    },
+    {
+      "id": 60,
+      "name": "SVGA3D_RS_CCWSTENCILZFAIL",
+      "d3d_state": 187,
+      "d3d_state_name": "D3DRS_CCW_STENCILZFAIL"
+    },
+    {
+      "id": 61,
+      "name": "SVGA3D_RS_CCWSTENCILPASS",
+      "d3d_state": 188,
+      "d3d_state_name": "D3DRS_CCW_STENCILPASS"
+    },
+    {
+      "id": 58,
+      "name": "SVGA3D_RS_CCWSTENCILFUNC",
+      "d3d_state": 189,
+      "d3d_state_name": "D3DRS_CCW_STENCILFUNC"
+    },
+    {
+      "id": 85,
+      "name": "SVGA3D_RS_MULTISAMPLEANTIALIAS",
+      "d3d_state": 161,
+      "d3d_state_name": "D3DRS_MULTISAMPLEANTIALIAS"
+    },
+    {
+      "id": 86,
+      "name": "SVGA3D_RS_MULTISAMPLEMASK",
+      "d3d_state": 162,
+      "d3d_state_name": "D3DRS_MULTISAMPLEMASK"
+    },
+    {
+      "id": 10,
+      "name": "SVGA3D_RS_NORMALIZENORMALS",
+      "d3d_state": 143,
+      "d3d_state_name": "D3DRS_NORMALIZENORMALS"
+    },
+    {
+      "id": 19,
+      "name": "SVGA3D_RS_POINTSIZE",
+      "d3d_state": 154,
+      "d3d_state_name": "D3DRS_POINTSIZE"
+    },
+    {
+      "id": 20,
+      "name": "SVGA3D_RS_POINTSIZEMIN",
+      "d3d_state": 155,
+      "d3d_state_name": "D3DRS_POINTSIZE_MIN"
+    },
+    {
+      "id": 11,
+      "name": "SVGA3D_RS_POINTSPRITEENABLE",
+      "d3d_state": 156,
+      "d3d_state_name": "D3DRS_POINTSPRITEENABLE"
+    },
+    {
+      "id": 12,
+      "name": "SVGA3D_RS_POINTSCALEENABLE",
+      "d3d_state": 157,
+      "d3d_state_name": "D3DRS_POINTSCALEENABLE"
+    },
+    {
+      "id": 22,
+      "name": "SVGA3D_RS_POINTSCALE_A",
+      "d3d_state": 158,
+      "d3d_state_name": "D3DRS_POINTSCALE_A"
+    },
+    {
+      "id": 23,
+      "name": "SVGA3D_RS_POINTSCALE_B",
+      "d3d_state": 159,
+      "d3d_state_name": "D3DRS_POINTSCALE_B"
+    },
+    {
+      "id": 24,
+      "name": "SVGA3D_RS_POINTSCALE_C",
+      "d3d_state": 160,
+      "d3d_state_name": "D3DRS_POINTSCALE_C"
+    },
+    {
+      "id": 21,
+      "name": "SVGA3D_RS_POINTSIZEMAX",
+      "d3d_state": 166,
+      "d3d_state_name": "D3DRS_POINTSIZE_MAX"
+    },
+    {
+      "id": 48,
+      "name": "SVGA3D_RS_VERTEXMATERIALENABLE",
+      "d3d_state": 167,
+      "d3d_state_name": "D3DRS_INDEXEDVERTEXBLENDENABLE"
+    },
+    {
+      "id": 49,
+      "name": "SVGA3D_RS_DIFFUSEMATERIALSOURCE",
+      "d3d_state": 145,
+      "d3d_state_name": "D3DRS_DIFFUSEMATERIALSOURCE"
+    },
+    {
+      "id": 50,
+      "name": "SVGA3D_RS_SPECULARMATERIALSOURCE",
+      "d3d_state": 146,
+      "d3d_state_name": "D3DRS_SPECULARMATERIALSOURCE"
+    },
+    {
+      "id": 51,
+      "name": "SVGA3D_RS_AMBIENTMATERIALSOURCE",
+      "d3d_state": 147,
+      "d3d_state_name": "D3DRS_AMBIENTMATERIALSOURCE"
+    },
+    {
+      "id": 52,
+      "name": "SVGA3D_RS_EMISSIVEMATERIALSOURCE",
+      "d3d_state": 148,
+      "d3d_state_name": "D3DRS_EMISSIVEMATERIALSOURCE"
+    }
+  ],
+
+  "texture_combiners": [
+    {
+      "id": 1,
+      "name": "SVGA3D_TC_DISABLE",
+      "d3d_op": 1,
+      "d3d_op_name": "D3DTOP_DISABLE"
+    },
+    {
+      "id": 2,
+      "name": "SVGA3D_TC_SELECTARG1",
+      "d3d_op": 2,
+      "d3d_op_name": "D3DTOP_SELECTARG1"
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_TC_SELECTARG2",
+      "d3d_op": 3,
+      "d3d_op_name": "D3DTOP_SELECTARG2"
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_TC_MODULATE",
+      "d3d_op": 4,
+      "d3d_op_name": "D3DTOP_MODULATE"
+    },
+    {
+      "id": 12,
+      "name": "SVGA3D_TC_MODULATE2X",
+      "d3d_op": 5,
+      "d3d_op_name": "D3DTOP_MODULATE2X"
+    },
+    {
+      "id": 13,
+      "name": "SVGA3D_TC_MODULATE4X",
+      "d3d_op": 6,
+      "d3d_op_name": "D3DTOP_MODULATE4X"
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_TC_ADD",
+      "d3d_op": 7,
+      "d3d_op_name": "D3DTOP_ADD"
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_TC_ADDSIGNED",
+      "d3d_op": 8,
+      "d3d_op_name": "D3DTOP_ADDSIGNED"
+    },
+    {
+      "id": 17,
+      "name": "SVGA3D_TC_ADDSIGNED2X",
+      "d3d_op": 9,
+      "d3d_op_name": "D3DTOP_ADDSIGNED2X"
+    },
+    {
+      "id": 7,
+      "name": "SVGA3D_TC_SUBTRACT",
+      "d3d_op": 10,
+      "d3d_op_name": "D3DTOP_SUBTRACT"
+    },
+    {
+      "id": 18,
+      "name": "SVGA3D_TC_ADDSMOOTH",
+      "d3d_op": 11,
+      "d3d_op_name": "D3DTOP_ADDSMOOTH"
+    },
+    {
+      "id": 9,
+      "name": "SVGA3D_TC_BLENDDIFFUSEALPHA",
+      "d3d_op": 12,
+      "d3d_op_name": "D3DTOP_BLENDDIFFUSEALPHA"
+    },
+    {
+      "id": 8,
+      "name": "SVGA3D_TC_BLENDTEXTUREALPHA",
+      "d3d_op": 13,
+      "d3d_op_name": "D3DTOP_BLENDTEXTUREALPHA"
+    },
+    {
+      "id": 11,
+      "name": "SVGA3D_TC_BLENDFACTORALPHA",
+      "d3d_op": 14,
+      "d3d_op_name": "D3DTOP_BLENDFACTORALPHA"
+    },
+    {
+      "id": 16,
+      "name": "SVGA3D_TC_BLENDTEXTUREALPHAPM",
+      "d3d_op": 15,
+      "d3d_op_name": "D3DTOP_BLENDTEXTUREALPHAPM"
+    },
+    {
+      "id": 10,
+      "name": "SVGA3D_TC_BLENDCURRENTALPHA",
+      "d3d_op": 16,
+      "d3d_op_name": "D3DTOP_BLENDCURRENTALPHA"
+    },
+    {
+      "id": 19,
+      "name": "SVGA3D_TC_PREMODULATE",
+      "d3d_op": 17,
+      "d3d_op_name": "D3DTOP_PREMODULATE"
+    },
+    {
+      "id": 20,
+      "name": "SVGA3D_TC_MODULATEALPHA_ADDCOLOR",
+      "d3d_op": 18,
+      "d3d_op_name": "D3DTOP_MODULATEALPHA_ADDCOLOR"
+    },
+    {
+      "id": 21,
+      "name": "SVGA3D_TC_MODULATECOLOR_ADDALPHA",
+      "d3d_op": 19,
+      "d3d_op_name": "D3DTOP_MODULATECOLOR_ADDALPHA"
+    },
+    {
+      "id": 22,
+      "name": "SVGA3D_TC_MODULATEINVALPHA_ADDCOLOR",
+      "d3d_op": 20,
+      "d3d_op_name": "D3DTOP_MODULATEINVALPHA_ADDCOLOR"
+    },
+    {
+      "id": 23,
+      "name": "SVGA3D_TC_MODULATEINVCOLOR_ADDALPHA",
+      "d3d_op": 21,
+      "d3d_op_name": "D3DTOP_MODULATEINVCOLOR_ADDALPHA"
+    },
+    {
+      "id": 15,
+      "name": "SVGA3D_TC_DOTPRODUCT3",
+      "d3d_op": 24,
+      "d3d_op_name": "D3DTOP_DOTPRODUCT3"
+    },
+    {
+      "id": 25,
+      "name": "SVGA3D_TC_MULTIPLYADD",
+      "d3d_op": 25,
+      "d3d_op_name": "D3DTOP_MULTIPLYADD"
+    },
+    {
+      "id": 26,
+      "name": "SVGA3D_TC_LERP",
+      "d3d_op": 26,
+      "d3d_op_name": "D3DTOP_LERP"
+    }
+  ],
+
+  "primitive_topologies": [
+    {
+      "id": 2,
+      "name": "SVGA3D_PRIMITIVE_POINTLIST",
+      "d3d_type": 1,
+      "d3d_type_name": "D3DPT_POINTLIST",
+      "vk_topology": 0,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_POINT_LIST"
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_PRIMITIVE_LINELIST",
+      "d3d_type": 2,
+      "d3d_type_name": "D3DPT_LINELIST",
+      "vk_topology": 1,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_LINE_LIST"
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_PRIMITIVE_LINESTRIP",
+      "d3d_type": 3,
+      "d3d_type_name": "D3DPT_LINESTRIP",
+      "vk_topology": 2,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_LINE_STRIP"
+    },
+    {
+      "id": 1,
+      "name": "SVGA3D_PRIMITIVE_TRIANGLELIST",
+      "d3d_type": 4,
+      "d3d_type_name": "D3DPT_TRIANGLELIST",
+      "vk_topology": 3,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST"
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_PRIMITIVE_TRIANGLESTRIP",
+      "d3d_type": 5,
+      "d3d_type_name": "D3DPT_TRIANGLESTRIP",
+      "vk_topology": 4,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP"
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_PRIMITIVE_TRIANGLEFAN",
+      "d3d_type": 6,
+      "d3d_type_name": "D3DPT_TRIANGLEFAN",
+      "vk_topology": 5,
+      "vk_topology_name": "VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN"
+    }
+  ],
+
+  "blend_ops": [
+    {
+      "id": 1,
+      "name": "SVGA3D_BLENDOP_ZERO",
+      "d3d_op": 1,
+      "d3d_op_name": "D3DBLEND_ZERO"
+    },
+    {
+      "id": 2,
+      "name": "SVGA3D_BLENDOP_ONE",
+      "d3d_op": 2,
+      "d3d_op_name": "D3DBLEND_ONE"
+    },
+    {
+      "id": 3,
+      "name": "SVGA3D_BLENDOP_SRCCOLOR",
+      "d3d_op": 3,
+      "d3d_op_name": "D3DBLEND_SRCCOLOR"
+    },
+    {
+      "id": 4,
+      "name": "SVGA3D_BLENDOP_INVSRCCOLOR",
+      "d3d_op": 4,
+      "d3d_op_name": "D3DBLEND_INVSRCCOLOR"
+    },
+    {
+      "id": 5,
+      "name": "SVGA3D_BLENDOP_SRCALPHA",
+      "d3d_op": 5,
+      "d3d_op_name": "D3DBLEND_SRCALPHA"
+    },
+    {
+      "id": 6,
+      "name": "SVGA3D_BLENDOP_INVSRCALPHA",
+      "d3d_op": 6,
+      "d3d_op_name": "D3DBLEND_INVSRCALPHA"
+    },
+    {
+      "id": 7,
+      "name": "SVGA3D_BLENDOP_DESTALPHA",
+      "d3d_op": 7,
+      "d3d_op_name": "D3DBLEND_DESTALPHA"
+    },
+    {
+      "id": 8,
+      "name": "SVGA3D_BLENDOP_INVDESTALPHA",
+      "d3d_op": 8,
+      "d3d_op_name": "D3DBLEND_INVDESTALPHA"
+    },
+    {
+      "id": 9,
+      "name": "SVGA3D_BLENDOP_DESTCOLOR",
+      "d3d_op": 9,
+      "d3d_op_name": "D3DBLEND_DESTCOLOR"
+    },
+    {
+      "id": 10,
+      "name": "SVGA3D_BLENDOP_INVDESTCOLOR",
+      "d3d_op": 10,
+      "d3d_op_name": "D3DBLEND_INVDESTCOLOR"
+    },
+    {
+      "id": 11,
+      "name": "SVGA3D_BLENDOP_SRCALPHASAT",
+      "d3d_op": 11,
+      "d3d_op_name": "D3DBLEND_SRCALPHASAT"
+    },
+    {
+      "id": 12,
+      "name": "SVGA3D_BLENDOP_BLENDFACTOR",
+      "d3d_op": 14,
+      "d3d_op_name": "D3DBLEND_BLENDFACTOR"
+    },
+    {
+      "id": 13,
+      "name": "SVGA3D_BLENDOP_INVBLENDFACTOR",
+      "d3d_op": 15,
+      "d3d_op_name": "D3DBLEND_INVBLENDFACTOR"
+    }
+  ]
+}
