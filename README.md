@@ -4,6 +4,10 @@ An experimental SVGA3D-to-Vulkan rendering library and QEMU integration prototyp
 
 **Work in progress — incomplete and not production-ready.** This is a source snapshot, not a finished virtual GPU or a drop-in replacement for VMware graphics. Shader, format, state, and guest compatibility are not comprehensively verified. On 2026-09-24, the project owner reported successfully entering a Minecraft world in the PlayBook guest after integration work. This is a user-observed milestone; the active Vulkan path, visual correctness, performance, and restart reliability have not been independently verified for this snapshot. No general compatibility or performance guarantee is made.
 
+## Warning:
+
+Currently runs as root on the host!
+
 ## What is included
 
 - SVGA3D FIFO decoding, surfaces, contexts, and Vulkan rendering code.
