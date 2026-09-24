@@ -40,27 +40,33 @@ static void blitClientSurfaceToFramebuffer(Svga3VlknDevice *dev, uint32_t cid, u
     size_t rowBytes = copyW * bytesPerPixel;
 
     const uint8_t *src = static_cast<const uint8_t*>(mapped);
+    uint32_t centerPixel = 0;
+    if (copyW > 0 && copyH > 0 && bytesPerPixel == 4) {
+        const uint32_t *midRow = reinterpret_cast<const uint32_t*>(src + (copyH / 2) * rowPitch);
+        centerPixel = midRow[copyW / 2];
+    }
+
+    uint32_t p0 = (bytesPerPixel == 4) ? *reinterpret_cast<const uint32_t*>(src) : 0;
+    bool isBlank = ((centerPixel & 0x00FFFFFF) == 0) &&
+                   ((p0 & 0x00FFFFFF) == 0) &&
+                   is_buffer_all_black_or_zero(mapped, copyW, copyH, rowPitch, bytesPerPixel);
+    if (isBlank) {
+        static uint32_t blank_client_warn = 0;
+        if (blank_client_warn++ < 5 || (blank_client_warn % 500) == 0) {
+            log_msg("[libqemu_svga3d] Client blit (%s, cid=%u): sid=%u is completely blank/zero, preserving fb.hva\n",
+                    reason, cid, sid);
+        }
+        return;
+    }
+
     for (uint32_t y = 0; y < copyH; ++y) {
         uint8_t *dst = fb.hva + (dstY + y) * dstPitch + dstX * dstBpp;
         memcpy(dst, src + y * rowPitch, rowBytes);
     }
 
-    uint32_t centerPixel = 0;
-    if (copyW > 0 && copyH > 0 && bytesPerPixel == 4) {
-        const uint32_t *p32 = reinterpret_cast<const uint32_t*>(src);
-        centerPixel = p32[(copyH / 2) * (rowPitch / 4) + (copyW / 2)];
-    }
-
     dev->guestMem->notifyDisplayUpdate(dstX, dstY, copyW, copyH);
 
     lock.unlock();
-
-    /* Synchronize into sid=1 (presentation quad source for cid=246) */
-    VlknSurface *surf1 = dev->surfaceMgr->getSurface(1);
-    if (surf1) {
-        SVGA3dBox box = { 0, 0, 0, std::min(fb.width, surf1->width()), std::min(fb.height, surf1->height()), 1 };
-        surf1->dmaUpload(0, &box, fb.hva, fb.pitch);
-    }
 
     static uint32_t blit_count = 0;
     blit_count++;
@@ -273,18 +279,20 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             static uint32_t srt_count_app = 0;
             bool is_246 = (pCmd->cid == 246);
             uint32_t cur_srt = is_246 ? ++srt_count_246 : ++srt_count_app;
-            if (!is_246 || cur_srt <= 5 || (cur_srt % 500) == 0) {
+            if (cur_srt <= 5 || (cur_srt % 500) == 0) {
                 log_msg("[libqemu_svga3d] SETRENDERTARGET (cid=%u #%u): type=%u, target.sid=%u, face=%u, mip=%u\n",
                         pCmd->cid, cur_srt, pCmd->type, pCmd->target.sid, pCmd->target.face, pCmd->target.mipmap);
             }
 
             /* Detect double-buffered client window surface swap on application context */
             if (!is_246 && pCmd->type == SVGA3D_RT_COLOR0 && dev->guestMem && dev->surfaceMgr) {
+                const RenderTargetBinding *curRt = ctx->getRenderTarget(SVGA3D_RT_COLOR0);
+                uint32_t oldSid = curRt ? curRt->sid : 0;
                 uint32_t newSid = pCmd->target.sid;
-                VlknSurface *newSurf = dev->surfaceMgr->getSurface(newSid);
-                if (newSurf && newSurf->width() >= 320 && newSurf->height() >= 240 && !newSurf->isDepthStencil()) {
-                    if (ctx->hasDrawnToWindow() && ctx->lastDrawnWindowSid() != newSid) {
-                        blitClientSurfaceToFramebuffer(dev, pCmd->cid, ctx->lastDrawnWindowSid(), "swap");
+                if (oldSid != 0 && oldSid != SVGA3D_INVALID_ID && oldSid != newSid) {
+                    VlknSurface *oldSurf = dev->surfaceMgr->getSurface(oldSid);
+                    if (oldSurf && oldSurf->width() >= 320 && oldSurf->height() >= 240 && !oldSurf->isDepthStencil()) {
+                        blitClientSurfaceToFramebuffer(dev, pCmd->cid, oldSid, "swap");
                         ctx->resetDrawnToWindow();
                     }
                 }
@@ -469,7 +477,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 static uint32_t clr_count_app = 0;
                 bool is_246 = (pCmd->cid == 246);
                 uint32_t cur_clr = is_246 ? ++clr_count_246 : ++clr_count_app;
-                if (!is_246 || cur_clr <= 5 || (cur_clr % 500) == 0) {
+                if (cur_clr <= 5 || (cur_clr % 500) == 0) {
                     log_msg("[libqemu_svga3d] CLEAR (cid=%u #%u): flags=0x%x, color=0x%08x, depth=%f, numRects=%u\n",
                             pCmd->cid, cur_clr, pCmd->clearFlag, pCmd->color, pCmd->depth, numRects);
                     for (uint32_t r = 0; r < numRects && r < 4; ++r) {
@@ -514,7 +522,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             static uint32_t draw_count_app = 0;
             bool is_246 = (pCmd->cid == 246);
             uint32_t cur_draw = is_246 ? ++draw_count_246 : ++draw_count_app;
-            if (!is_246 || cur_draw <= 5 || (cur_draw % 500) == 0) {
+            if (cur_draw <= 5 || (cur_draw % 500) == 0) {
                 log_msg("[libqemu_svga3d] DRAW_PRIMITIVES (cid=%u #%u): primType=%u, numVertexDecls=%u, numRanges=%u\n",
                         pCmd->cid, cur_draw, (uint32_t)primType, pCmd->numVertexDecls, pCmd->numRanges);
                 for (uint32_t i = 0; i < pCmd->numVertexDecls; ++i) {
@@ -528,6 +536,18 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                             i, ranges[i].primType, ranges[i].primitiveCount,
                             ranges[i].indexArray.surfaceId, ranges[i].indexArray.offset,
                             ranges[i].indexArray.stride, ranges[i].indexBias);
+                }
+            }
+
+            if (is_246) {
+                if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
+                const auto &fb = dev->guestMem->getFramebuffer();
+                if (fb.hva && fb.width && fb.height) {
+                    VlknSurface *surf1 = dev->surfaceMgr->getSurface(1);
+                    if (surf1) {
+                        SVGA3dBox box = { 0, 0, 0, std::min(fb.width, surf1->width()), std::min(fb.height, surf1->height()), 1 };
+                        surf1->dmaUpload(0, &box, fb.hva, fb.pitch);
+                    }
                 }
             }
 
@@ -830,7 +850,6 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             }
             if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
             if (dev->backend) dev->backend->flushCommandBuffer();
-            svga3_vlkn_present_client_surfaces(dev, "fifo_fence");
             *bytesRead = sizeof(uint32_t);
             return SVGA3_VLKN_SUCCESS;
         }

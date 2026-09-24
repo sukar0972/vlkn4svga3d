@@ -264,9 +264,9 @@ static void TestSurfaceLifecycle(Svga3VlknDevice *dev) {
     st = svga3_vlkn_surface_set_active(dev, 1, true);
     TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Set surface 1 active");
 
-    /* 7. Define duplicate SID -> expect error ALREADY_EXISTS */
+    /* 7. Define duplicate SID -> replaces surface smoothly */
     st = svga3_vlkn_surface_define(dev, 1, 0, SVGA3D_X8R8G8B8, &size2d, 1);
-    TEST_CHECK(st == SVGA3_VLKN_ERROR_ALREADY_EXISTS, "Duplicate SID rejected");
+    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Duplicate SID replaced");
 
     /* 8. Destroy surfaces */
     st = svga3_vlkn_surface_destroy(dev, 2);

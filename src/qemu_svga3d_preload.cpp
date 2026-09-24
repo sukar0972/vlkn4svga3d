@@ -159,6 +159,30 @@ static void redraw(void *s, uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     if (*last < 512) rects[(*last)++] = (struct vmsvga_rect_s){(int)x, (int)y, (int)w, (int)h};
 }
 
+static bool draw_rect(void *s, bool copy, uint32_t color,
+                      uint32_t sx, uint32_t sy, uint32_t x, uint32_t y,
+                      uint32_t w, uint32_t h) {
+    uint32_t width = reg_value(s, SVGA_REG_WIDTH), height = reg_value(s, SVGA_REG_HEIGHT);
+    uint32_t bpp = reg_value(s, SVGA_REG_BITS_PER_PIXEL);
+    uint32_t stride = reg_value(s, SVGA_REG_BYTES_PER_LINE);
+    uint32_t size = reg_value(s, SVGA_REG_VRAM_SIZE);
+    uint8_t *vram = *(uint8_t **)((char *)s + 8);
+    if (!vram || !width || !height || bpp == 0 || bpp > 32 || bpp % 8) return false;
+    if (w == 0 || h == 0) return true;
+    uint32_t bytes = bpp / 8;
+    if ((uint64_t)width * bytes > stride || (uint64_t)height * stride > size) return false;
+    if (x >= width || y >= height || w > width - x || h > height - y) return false;
+    if (copy && (sx >= width || sy >= height || w > width - sx || h > height - sy)) return false;
+    for (uint32_t row = 0; row < h; row++) {
+        uint32_t r = copy && y > sy ? h - 1 - row : row;
+        uint8_t *dst = vram + (uint64_t)(y + r) * stride + (uint64_t)x * bytes;
+        if (copy) memmove(dst, vram + (uint64_t)(sy + r) * stride + (uint64_t)sx * bytes, (size_t)w * bytes);
+        else for (uint32_t col = 0; col < w; col++) memcpy(dst + (size_t)col * bytes, &color, bytes);
+    }
+    redraw(s, x, y, w, h);
+    return true;
+}
+
 static void vlkn_display_update_cb(void *opaque, int32_t x, int32_t y, int32_t w, int32_t h) {
     void *s = opaque;
     if (s && w > 0 && h > 0) {
@@ -342,12 +366,55 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
 
         if (cmd == SVGA_CMD_UPDATE || cmd == SVGA_CMD_UPDATE_VERBOSE) {
             redraw(s, P(1), P(2), P(3), P(4));
+            if (g_vlknDev && g_vlknDev->surfaceMgr && g_vlknDev->guestMem) {
+                svga3_vlkn::VlknSurface *surf1 = g_vlknDev->surfaceMgr->getSurface(1);
+                if (surf1) {
+                    const auto &fb = g_vlknDev->guestMem->getFramebuffer();
+                    if (fb.hva && fb.width && fb.height) {
+                        uint32_t ux = P(1), uy = P(2), uw = P(3), uh = P(4);
+                        if (ux < fb.width && uy < fb.height && uw > 0 && uh > 0) {
+                            SVGA3dBox box = { ux, uy, 0, std::min(uw, fb.width - ux), std::min(uh, fb.height - uy), 1 };
+                            const uint8_t *src = fb.hva + uy * fb.pitch + ux * (fb.bpp ? fb.bpp : 4);
+                            if (g_vlknDev->contextMgr) g_vlknDev->contextMgr->endAllRenderPasses();
+                            surf1->dmaUpload(0, &box, src, fb.pitch);
+                        }
+                    }
+                }
+            }
         } else if (cmd == SVGA_CMD_RECT_FILL) {
-            /* Non-destructive damage marking: ignore fill color P(1) */
-            redraw(s, P(2), P(3), P(4), P(5));
+            draw_rect(s, false, P(1), 0, 0, P(2), P(3), P(4), P(5));
+            if (g_vlknDev && g_vlknDev->surfaceMgr && g_vlknDev->guestMem) {
+                svga3_vlkn::VlknSurface *surf1 = g_vlknDev->surfaceMgr->getSurface(1);
+                if (surf1) {
+                    const auto &fb = g_vlknDev->guestMem->getFramebuffer();
+                    if (fb.hva && fb.width && fb.height) {
+                        uint32_t fx = P(2), fy = P(3), fw = P(4), fh = P(5);
+                        if (fx < fb.width && fy < fb.height && fw > 0 && fh > 0) {
+                            SVGA3dBox box = { fx, fy, 0, std::min(fw, fb.width - fx), std::min(fh, fb.height - fy), 1 };
+                            const uint8_t *src = fb.hva + fy * fb.pitch + fx * (fb.bpp ? fb.bpp : 4);
+                            if (g_vlknDev->contextMgr) g_vlknDev->contextMgr->endAllRenderPasses();
+                            surf1->dmaUpload(0, &box, src, fb.pitch);
+                        }
+                    }
+                }
+            }
         } else if (cmd == SVGA_CMD_RECT_COPY) {
-            /* Non-destructive damage marking: ignore src coords P(1), P(2) */
-            redraw(s, P(3), P(4), P(5), P(6));
+            draw_rect(s, true, 0, P(1), P(2), P(3), P(4), P(5), P(6));
+            if (g_vlknDev && g_vlknDev->surfaceMgr && g_vlknDev->guestMem) {
+                svga3_vlkn::VlknSurface *surf1 = g_vlknDev->surfaceMgr->getSurface(1);
+                if (surf1) {
+                    const auto &fb = g_vlknDev->guestMem->getFramebuffer();
+                    if (fb.hva && fb.width && fb.height) {
+                        uint32_t cx = P(3), cy = P(4), cw = P(5), ch = P(6);
+                        if (cx < fb.width && cy < fb.height && cw > 0 && ch > 0) {
+                            SVGA3dBox box = { cx, cy, 0, std::min(cw, fb.width - cx), std::min(ch, fb.height - cy), 1 };
+                            const uint8_t *src = fb.hva + cy * fb.pitch + cx * (fb.bpp ? fb.bpp : 4);
+                            if (g_vlknDev->contextMgr) g_vlknDev->contextMgr->endAllRenderPasses();
+                            surf1->dmaUpload(0, &box, src, fb.pitch);
+                        }
+                    }
+                }
+            }
         } else if (cmd == SVGA_CMD_FENCE) {
             static uint32_t fence_count = 0;
             fence_count++;
@@ -357,7 +424,6 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
             if (g_vlknDev) {
                 if (g_vlknDev->contextMgr) g_vlknDev->contextMgr->endAllRenderPasses();
                 if (g_vlknDev->backend) g_vlknDev->backend->flushCommandBuffer();
-                svga3_vlkn::svga3_vlkn_present_client_surfaces(g_vlknDev, "fence");
             }
             if (min >= 28) fifo[SVGA_FIFO_FENCE] = P(1);
         } else if (cmd == SVGA_CMD_ESCAPE) {

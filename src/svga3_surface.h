@@ -14,6 +14,8 @@
 
 namespace svga3_vlkn {
 
+class VlknContextManager;
+
 class GuestMemoryManager;
 
 struct SurfaceMipLevel {
@@ -42,6 +44,7 @@ public:
 
     uint32_t sid() const { return m_sid; }
     uint32_t flags() const { return m_flags; }
+    void addFlags(uint32_t flags) { m_flags |= flags; }
     SVGA3dSurfaceFormat svgaFormat() const { return m_svgaFormat; }
     VkFormat vkFormat() const { return m_vkFormat; }
     VkImage image() const { return m_image; }
@@ -72,12 +75,26 @@ public:
     Svga3VlknStatus dmaUpload(uint32_t mipLevel,
                               const SVGA3dBox *box,
                               const void *guestData,
-                              size_t guestStride);
+                              size_t guestStride,
+                              bool isLinear);
+    Svga3VlknStatus dmaUpload(uint32_t mipLevel,
+                              const SVGA3dBox *box,
+                              const void *guestData,
+                              size_t guestStride) {
+        return dmaUpload(mipLevel, box, guestData, guestStride, false);
+    }
 
     Svga3VlknStatus dmaDownload(uint32_t mipLevel,
                                 const SVGA3dBox *box,
                                 void *outGuestData,
-                                size_t guestStride);
+                                size_t guestStride,
+                                bool isLinear);
+    Svga3VlknStatus dmaDownload(uint32_t mipLevel,
+                                const SVGA3dBox *box,
+                                void *outGuestData,
+                                size_t guestStride) {
+        return dmaDownload(mipLevel, box, outGuestData, guestStride, false);
+    }
 
     Svga3VlknStatus dmaDownloadToStaging(uint32_t mipLevel,
                                         const SVGA3dBox *box,
@@ -177,10 +194,13 @@ public:
 
     Svga3VlknStatus setSurfaceActive(uint32_t sid, bool active);
 
+    void setContextManager(VlknContextManager *ctxMgr) { m_contextMgr = ctxMgr; }
+
     size_t count() const;
 
 private:
     VlknBackend *m_backend;
+    VlknContextManager *m_contextMgr = nullptr;
     std::unordered_map<uint32_t, std::unique_ptr<VlknSurface>> m_surfaces;
     mutable std::mutex m_mutex;
 };
@@ -189,6 +209,9 @@ private:
 size_t svga3_format_bytes_per_pixel(SVGA3dSurfaceFormat format);
 bool   svga3_format_is_depth_stencil(SVGA3dSurfaceFormat format);
 bool   svga3_format_is_compressed(SVGA3dSurfaceFormat format);
+
+bool is_buffer_all_zero(const void *data, uint32_t w, uint32_t h, size_t rowPitch, size_t bpp);
+bool is_buffer_all_black_or_zero(const void *data, uint32_t w, uint32_t h, size_t rowPitch, size_t bpp);
 
 } // namespace svga3_vlkn
 

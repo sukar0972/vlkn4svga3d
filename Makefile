@@ -141,7 +141,7 @@ $(QEMU_TEST_TARGET): tests/test_qemu_integration.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
 
 $(LIB_QEMU_SVGA3D): src/qemu_svga3d_preload.cpp $(VLKN_LIB) | $(LIB_DIR)
-	$(CXX) $(CXXFLAGS) -shared -I. $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -lpthread -o $@
+	$(CXX) $(CXXFLAGS) -shared -I. $(INCLUDES_VLKN) $< -L$(LIB_DIR) -Wl,--whole-archive -lsvga3_vlkn -Wl,--no-whole-archive -static-libstdc++ -static-libgcc -ldl -lpthread -o $@
 
 test-real-vulkan: $(REAL_VULKAN_TEST_TARGET)
 	./$(REAL_VULKAN_TEST_TARGET)

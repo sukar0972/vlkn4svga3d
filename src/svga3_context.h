@@ -190,6 +190,7 @@ public:
     }
 
     void endRenderPassIfActive();
+    void invalidateSurface(uint32_t sid);
 
 private:
     void initDefaultRenderStates();
@@ -250,6 +251,7 @@ private:
     VkShaderModule m_defaultVS;
     VkShaderModule m_defaultFS;
     VkShaderModule m_defaultFSTex;
+    VkShaderModule m_defaultFSTexPure;
 
     /* Descriptors and Constant Buffers */
     VkDescriptorSetLayout m_descriptorSetLayout;
@@ -287,6 +289,22 @@ private:
     VkBuffer m_dummyVb;
     VkDeviceMemory m_dummyVbMemory;
     uint32_t m_defaultVsInputMask;
+
+    /* Cached Framebuffer Bindings */
+    uint32_t m_fbColorSid;
+    uint32_t m_fbColorMip;
+    uint32_t m_fbColorFace;
+    VkImageView m_fbColorView;
+    uint32_t m_fbDepthSid;
+    uint32_t m_fbDepthMip;
+    uint32_t m_fbDepthFace;
+    VkImageView m_fbDepthView;
+    uint32_t m_fbWidth;
+    uint32_t m_fbHeight;
+
+    /* Cached Texture Stage ImageViews & Samplers */
+    VkImageView m_boundImageViews[SVGA3_MAX_TEXTURE_STAGES];
+    VkSampler m_boundSamplers[SVGA3_MAX_TEXTURE_STAGES];
 };
 
 class VlknContextManager {
@@ -303,6 +321,7 @@ public:
     void endAllRenderPasses();
     void endAllRenderPassesExcept(uint32_t cid);
     std::vector<std::pair<uint32_t, uint32_t>> collectPendingWindowPresents();
+    void invalidateSurface(uint32_t sid);
 
 private:
     VlknBackend *m_backend;

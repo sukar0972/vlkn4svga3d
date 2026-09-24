@@ -56,21 +56,21 @@
 [1;36m[TEST 9] Render Target, Viewport & Scissor Configuration...[0m
 [1;32m  Render target and viewport verified successfully.[0m
 [1;36m[TEST 10] Clear Operations & Render Pass Execution...[0m
-[libqemu_svga3d] ensureRenderPassActive #1: colorSid=1 (surf=0x556b24210040), depthSid=3 (surf=0x556b24358620)
+[libqemu_svga3d] ensureRenderPassActive #1: colorSid=1 (surf=0x61dfc3b84050), depthSid=3 (surf=0x61dfc3ccc630)
 [1;32m  Clear operations verified successfully.[0m
 [1;36m[TEST 11] Draw Call Dispatch & All 6 Primitive Topologies...[0m
-[libqemu_svga3d] ensureRenderPassActive #2: colorSid=1 (surf=0x556b24210040), depthSid=3 (surf=0x556b24358620)
-[libqemu_svga3d] ctx::draw #1: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ensureRenderPassActive #2: colorSid=1 (surf=0x61dfc3b84050), depthSid=3 (surf=0x61dfc3ccc630)
+[libqemu_svga3d] ctx::draw #1 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
-[libqemu_svga3d] ctx::draw #2: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ctx::draw #2 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
-[libqemu_svga3d] ctx::draw #3: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ctx::draw #3 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
-[libqemu_svga3d] ctx::draw #4: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ctx::draw #4 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
-[libqemu_svga3d] ctx::draw #5: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ctx::draw #5 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
-[libqemu_svga3d] ctx::draw #6: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(100.0,100.0 800.0x600.0)
+[libqemu_svga3d] ctx::draw #6 (cid=100): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=1, cull=3, vp=(100.0,100.0 800.0x600.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
 [1;32m  Draw calls across all topologies verified successfully.[0m
 [1;36m[TEST 12] Binary FIFO Command Stream Decoding & Execution...[0m
@@ -78,14 +78,14 @@
 [libqemu_svga3d] CONTEXT_DEFINE: cid=200
 [libqemu_svga3d] SETRENDERTARGET (cid=200 #1): type=2, target.sid=200, face=0, mip=0
 [libqemu_svga3d] SETVIEWPORT #1: cid=200, rect=(0,0 32x32)
-[libqemu_svga3d] ensureRenderPassActive #3: colorSid=200 (surf=0x556b24d260b0), depthSid=0 (surf=(nil))
+[libqemu_svga3d] ensureRenderPassActive #3: colorSid=200 (surf=0x61dfc4692140), depthSid=0 (surf=(nil))
 [libqemu_svga3d] CLEAR (cid=200 #1): flags=0x1, color=0xff0000ff, depth=1.000000, numRects=1
    rect[0]: (0,0 32x32)
 [libqemu_svga3d] DRAW_PRIMITIVES (cid=200 #1): primType=1, numVertexDecls=1, numRanges=1
    decl[0]: usage=0, usageIdx=0, type=2, sid=0, offset=0, stride=12
    range[0]: primType=1, primCount=1, idxSid=0, idxOff=0, idxStride=0, idxBias=0
-[libqemu_svga3d] ensureRenderPassActive #4: colorSid=200 (surf=0x556b24d260b0), depthSid=0 (surf=(nil))
-[libqemu_svga3d] ctx::draw #1: boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, vp=(0.0,0.0 32.0x32.0)
+[libqemu_svga3d] ensureRenderPassActive #4: colorSid=200 (surf=0x61dfc4692140), depthSid=0 (surf=(nil))
+[libqemu_svga3d] ctx::draw #1 (cid=200): boundVS=4294967295, boundPS=4294967295, useFfTex=0, stage0.sid=4294967295, rtSid=200, cull=3, vp=(0.0,0.0 32.0x32.0)
 [libqemu_svga3d]   mvp: [1, 0, 0, 0] [0, 1, 0, 0] [0, 0, 1, 0] [0, 0, 0, 1]
 [libqemu_svga3d] SETTEXTURESTATE #1: cid=200, numStates=2
    [0] stage=0, name=2, val=0x4 (4)
@@ -106,14 +106,14 @@
 [1;36m[TEST 20] Advanced Surface Operations (StretchBlt, Mipmaps, BlitToScreen, Present)...[0m
 [1;36m[TEST 21] Multi-Context State Isolation (8 Contexts)...[0m
 [1;36m[TEST 22] Stress & High-Load Execution...[0m
-[1;32m  Stress test completed resource cycles in 46.9907 ms.[0m
+[1;32m  Stress test completed resource cycles in 49.4421 ms.[0m
 [1;36m
 Engine Execution Statistics Summary:[0m
   - Total Commands Processed: 35
   - Draw Calls Submitted:     13
   - Primitives Rendered:      49
   - Vertices Rendered:        147
-  - Surfaces Created:         262
+  - Surfaces Created:         263
   - Surfaces Destroyed:       256
   - Render Passes Executed:   10
   - DMA Bytes Transferred:    14336 bytes

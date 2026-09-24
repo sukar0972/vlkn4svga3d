@@ -2,7 +2,7 @@
 
 An experimental SVGA3D-to-Vulkan rendering library and QEMU integration prototype. Internal APIs and build targets still use the original `svga3_vlkn` name.
 
-**Work in progress — incomplete and not production-ready.** This is a source snapshot, not a finished virtual GPU or a drop-in replacement for VMware graphics. Shader, format, state, and guest compatibility are not comprehensively verified. Recent live-guest testing produced a black display despite incoming draw commands. No general compatibility or performance guarantee is made.
+**Work in progress — incomplete and not production-ready.** This is a source snapshot, not a finished virtual GPU or a drop-in replacement for VMware graphics. Shader, format, state, and guest compatibility are not comprehensively verified. On 2026-09-24, the project owner reported successfully entering a Minecraft world in the PlayBook guest after integration work. This is a user-observed milestone; the active Vulkan path, visual correctness, performance, and restart reliability have not been independently verified for this snapshot. No general compatibility or performance guarantee is made.
 
 ## What is included
 
@@ -73,6 +73,6 @@ Individual targets:
 
 ## Snapshot and licensing
 
-Published from the development source on 2026-09-23. Build products, downloaded system packages, VM images, host configuration, and old runtime logs are excluded. See `VALIDATION.md` for publication-time checks.
+Updated from the development source on 2026-09-24. Build products, downloaded system packages, VM images, host configuration, and old runtime logs are excluded. See `VALIDATION.md` for publication-time checks.
 
 Third-party source notices are retained. `DevVGA-SVGA3d-win.cpp` and related VirtualBox files carry GPL-2.0 notices; the license text is in `COPYING`. VMware protocol headers retain their permissive notices. Bundled Khronos headers carry their own license identifiers. No blanket relicensing of third-party code is implied; consult individual files. A separate license grant for original project code has not yet been selected.

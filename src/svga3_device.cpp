@@ -134,6 +134,8 @@ Svga3VlknDevice *svga3_vlkn_device_create(const Svga3VlknConfig *config)
     dev->contextMgr = std::make_unique<svga3_vlkn::VlknContextManager>(dev->backend.get(), dev->surfaceMgr.get());
     dev->guestMem   = std::make_unique<svga3_vlkn::GuestMemoryManager>();
 
+    dev->surfaceMgr->setContextManager(dev->contextMgr.get());
+
     svga3_vlkn::VlknContextManager *ctxMgr = dev->contextMgr.get();
     dev->backend->setPreFlushHook([ctxMgr]() {
         if (ctxMgr) {
@@ -151,6 +153,9 @@ void svga3_vlkn_device_destroy(Svga3VlknDevice *dev)
         std::lock_guard<std::mutex> lock(dev->mutex);
         if (dev->backend) {
             dev->backend->waitIdle();
+        }
+        if (dev->surfaceMgr) {
+            dev->surfaceMgr->setContextManager(nullptr);
         }
         dev->guestMem.reset();
         dev->contextMgr.reset();

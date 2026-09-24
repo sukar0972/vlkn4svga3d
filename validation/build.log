@@ -1,3 +1,4 @@
+rm -rf build bin lib
 mkdir -p build
 mkdir -p bin
 mkdir -p lib
@@ -286,7 +287,7 @@ g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/qemu_vmsvga.cpp -o build/qemu_vmsvga.o
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC build/DevVGA-SVGA3d-win.o build/mock_d3d9.o build/vbox_shim.o build/svga3d-oracle.o -o bin/svga3d-oracle
 ar rcs lib/libsvga3_vlkn.a build/vlkn_dispatch.o build/vlkn_backend.o build/svga3_surface.o build/svga3_context.o build/svga3_fifo.o build/svga3_device.o build/svga3_shader_translator.o build/svga3_guest_mem.o build/qemu_vmsvga.o
-g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -shared -I. -Iinclude -Isrc -Ishim/include -Idata -Itools src/qemu_svga3d_preload.cpp -Llib -lsvga3_vlkn -ldl -lpthread -o lib/libqemu_svga3d.so
+g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -shared -I. -Iinclude -Isrc -Ishim/include -Idata -Itools src/qemu_svga3d_preload.cpp -Llib -Wl,--whole-archive -lsvga3_vlkn -Wl,--no-whole-archive -static-libstdc++ -static-libgcc -ldl -lpthread -o lib/libqemu_svga3d.so
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_svga3_vlkn.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_svga3_vlkn
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_real_vulkan.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_real_vulkan
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools tests/test_shader_translation.cpp -Llib -lsvga3_vlkn -ldl -o bin/test_shader_translation
