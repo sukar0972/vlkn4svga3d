@@ -21,7 +21,7 @@
 #include "svga3_vlkn.h"
 #include "svga3_device.h"
 #include "svga3_guest_mem.h"
-#include "tools/svga3d_tables.h"
+#include "svga3d_tables.h"
 
 /* QEMU VMware SVGA Offsets */
 #define OFFSET_INDEX            0x10a2c

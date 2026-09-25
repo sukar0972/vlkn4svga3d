@@ -6,8 +6,8 @@
  */
 
 #include "svga3_vlkn.h"
-#include "../data/svga3d_reference.h"
-#include "../tools/svga3d_tables.h"
+#include "svga3d_reference.h"
+#include "svga3d_tables.h"
 #include <iostream>
 #include <vector>
 #include <string>

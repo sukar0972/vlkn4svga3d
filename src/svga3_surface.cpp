@@ -5,7 +5,7 @@
 #include "svga3_surface.h"
 #include "svga3_context.h"
 #include "svga3_guest_mem.h"
-#include "../data/svga3d_reference.h"
+#include "svga3d_reference.h"
 #include <cstring>
 #include <algorithm>
 

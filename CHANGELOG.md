@@ -1,5 +1,9 @@
 # Changes
 
+## Source layout cleanup
+
+Moved private renderer headers to `include/internal/`, mock headers to `shim/include/mock/`, and reference helper headers to `tools/include/`. Updated build dependencies and include paths, documented the layout, and added `.editorconfig`. No rendering behavior changes are intended. Build, basic tests, and the acceptance suite passed after the reorganization.
+
 ## 2026-09-25 — Shader and texture integration updates
 
 - Added shader destination saturation (`_SAT`) and vertex color output clamping.

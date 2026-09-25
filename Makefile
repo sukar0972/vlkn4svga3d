@@ -18,15 +18,15 @@ INCLUDES_ORACLE = \
     -Ishim/include/VBox \
     -Ishim/include/iprt \
     -Ishim/include/vmsvga \
-    -Ishim/src \
-    -Itools
+    -Ishim/include/mock \
+    -Itools/include
 
 INCLUDES_VLKN = \
     -Iinclude \
-    -Isrc \
+    -Iinclude/internal \
     -Ishim/include \
     -Idata \
-    -Itools
+    -Itools/include
 
 BUILD_DIR = build
 BIN_DIR = bin
@@ -75,41 +75,41 @@ $(ORACLE_TARGET): $(ORACLE_OBJS) | $(BIN_DIR) $(DATA_DIR)
 $(BUILD_DIR)/DevVGA-SVGA3d-win.o: DevVGA-SVGA3d-win.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES_ORACLE) -c $< -o $@
 
-$(BUILD_DIR)/mock_d3d9.o: shim/src/mock_d3d9.cpp shim/src/mock_d3d9.h | $(BUILD_DIR)
+$(BUILD_DIR)/mock_d3d9.o: shim/src/mock_d3d9.cpp shim/include/mock/mock_d3d9.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES_ORACLE) -c $< -o $@
 
 $(BUILD_DIR)/vbox_shim.o: shim/src/vbox_shim.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES_ORACLE) -c $< -o $@
 
-$(BUILD_DIR)/svga3d-oracle.o: tools/svga3d-oracle.cpp tools/svga3d_tables.h shim/src/mock_d3d9.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3d-oracle.o: tools/svga3d-oracle.cpp tools/include/svga3d_tables.h shim/include/mock/mock_d3d9.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES_ORACLE) -c $< -o $@
 
 # SVGA3=VLKN Library
 $(VLKN_LIB): $(VLKN_OBJS) | $(LIB_DIR)
 	ar rcs $@ $(VLKN_OBJS)
 
-$(BUILD_DIR)/vlkn_dispatch.o: src/vlkn_dispatch.cpp src/vlkn_dispatch.h | $(BUILD_DIR)
+$(BUILD_DIR)/vlkn_dispatch.o: src/vlkn_dispatch.cpp include/internal/vlkn_dispatch.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/vlkn_backend.o: src/vlkn_backend.cpp src/vlkn_backend.h | $(BUILD_DIR)
+$(BUILD_DIR)/vlkn_backend.o: src/vlkn_backend.cpp include/internal/vlkn_backend.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_surface.o: src/svga3_surface.cpp src/svga3_surface.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_surface.o: src/svga3_surface.cpp include/internal/svga3_surface.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_context.o: src/svga3_context.cpp src/svga3_context.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_context.o: src/svga3_context.cpp include/internal/svga3_context.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_fifo.o: src/svga3_fifo.cpp src/svga3_device.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_fifo.o: src/svga3_fifo.cpp include/internal/svga3_device.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_device.o: src/svga3_device.cpp src/svga3_device.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_device.o: src/svga3_device.cpp include/internal/svga3_device.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_shader_translator.o: src/svga3_shader_translator.cpp src/svga3_shader_translator.h src/svga3_spirv_builder.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_shader_translator.o: src/svga3_shader_translator.cpp include/internal/svga3_shader_translator.h include/internal/svga3_spirv_builder.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
-$(BUILD_DIR)/svga3_guest_mem.o: src/svga3_guest_mem.cpp src/svga3_guest_mem.h | $(BUILD_DIR)
+$(BUILD_DIR)/svga3_guest_mem.o: src/svga3_guest_mem.cpp include/internal/svga3_guest_mem.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
 $(BUILD_DIR)/qemu_vmsvga.o: src/qemu_vmsvga.cpp include/qemu_vmsvga.h | $(BUILD_DIR)

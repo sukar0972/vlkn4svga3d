@@ -4,7 +4,7 @@
 
 #include "svga3_context.h"
 #include "svga3_shader_translator.h"
-#include "../data/svga3d_reference.h"
+#include "svga3d_reference.h"
 #include <cstring>
 #include <algorithm>
 #include <iostream>

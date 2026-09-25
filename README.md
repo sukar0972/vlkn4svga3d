@@ -16,6 +16,21 @@ Currently runs as root on the host!
 - A device integration harness and experimental QEMU preload library.
 - Mock unit tests, real-Vulkan tests, and a VirtualBox D3D9 reference harness.
 
+## Source layout
+
+| Directory | Contents |
+| --- | --- |
+| `include/` | Public library headers and bundled Vulkan headers |
+| `include/internal/` | Private renderer headers |
+| `src/` | Renderer and QEMU implementation files |
+| `tests/` | Test programs |
+| `shim/include/` | Compatibility headers, including `mock/` |
+| `shim/src/` | Compatibility implementations |
+| `tools/include/` | Reference harness helper headers |
+| `tools/` | Reference harness implementation |
+
+Internal headers are not a stable public API. `.editorconfig` defines whitespace conventions; Makefile recipes use tabs.
+
 ## Build on Linux
 
 Requires a C++17 compiler, GNU Make, binutils, pthreads, and libdl. Vulkan headers are bundled. Real rendering additionally requires the Vulkan loader, a working Vulkan driver, and validation layers. Software Vulkan such as Mesa lavapipe is usable for testing.
