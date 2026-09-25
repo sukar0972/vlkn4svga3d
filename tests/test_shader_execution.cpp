@@ -489,6 +489,62 @@ int main() {
     }
     TEST_CHECK(negativeControlCaught, "Negative control verified (harness detects discrepant pixels)");
 
+    /* 10. Multitexture Unbound Sampler Stage 1 Fallback Test (Minecraft Hand Defect Fix) */
+    /*
+        ps_3_0
+        dcl_texcoord v1
+        dcl_2d s0
+        dcl_2d s1
+        texld r0, v1, s0
+        texld r1, v1, s1
+        mul oC0, r0, r1
+        end
+    */
+    constexpr uint32_t SHID_PS3 = 22;
+    const uint32_t ps3Bytecode[] = {
+        0xFFFF0300, /* ps_3_0 */
+        (31) | (2 << 24), /* DCL texcoord */
+        0x80000000 | 5,
+        D3D9_DST(1, 1, 0xF), /* v1 */
+        (31) | (2 << 24), /* DCL 2D sampler s0 */
+        0x80000000 | (2 << 28),
+        D3D9_DST(10, 0, 0xF), /* s0 */
+        (31) | (2 << 24), /* DCL 2D sampler s1 */
+        0x80000000 | (2 << 28),
+        D3D9_DST(10, 1, 0xF), /* s1 */
+        (66) | (3 << 24), /* TEXLD r0, v1, s0 */
+        D3D9_DST(0, 0, 0xF),
+        D3D9_SRC(1, 1, 0xE4),
+        D3D9_SRC(10, 0, 0xE4),
+        (66) | (3 << 24), /* TEXLD r1, v1, s1 */
+        D3D9_DST(0, 1, 0xF),
+        D3D9_SRC(1, 1, 0xE4),
+        D3D9_SRC(10, 1, 0xE4),
+        (5) | (3 << 24), /* MUL oC0, r0, r1 */
+        D3D9_DST(8, 0, 0xF),
+        D3D9_SRC(0, 0, 0xE4),
+        D3D9_SRC(0, 1, 0xE4),
+        0x0000FFFF /* END */
+    };
+    st = svga3_vlkn_context_define_shader(dev, CID1, SHID_PS3, SVGA3D_SHADERTYPE_PS, ps3Bytecode, sizeof(ps3Bytecode)/sizeof(uint32_t));
+    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Define PS3 (Dual Sampler Modulate with Stage 1 Unbound)");
+    svga3_vlkn_context_set_shader(dev, CID1, SVGA3D_SHADERTYPE_PS, SHID_PS3);
+    svga3_vlkn_context_set_texture(dev, CID1, 0, SID_TEX);
+    svga3_vlkn_context_set_texture(dev, CID1, 1, SVGA3D_INVALID_ID); /* Explicitly unbind stage 1 */
+    svga3_vlkn_context_set_shader_const(dev, CID1, 0, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row0);
+    svga3_vlkn_context_set_shader_const(dev, CID1, 1, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row1);
+    svga3_vlkn_context_set_shader_const(dev, CID1, 2, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row2);
+    svga3_vlkn_context_set_shader_const(dev, CID1, 3, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row3);
+    svga3_vlkn_context_clear(dev, CID1, SVGA3D_CLEAR_COLOR, 0xFF000000, 1.0f, 0, nullptr, 0);
+    st = svga3_vlkn_context_draw(dev, CID1, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Draw with PS3 and unbound Stage 1");
+
+    st = svga3_vlkn_surface_dma_download(dev, SID_RT1, 0, &readBox, fb.data(), RT_WIDTH * sizeof(Pixel));
+    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Download framebuffer from PS3 execution");
+    Pixel pUnbound_Q1 = fb[16 * RT_WIDTH + 16];
+    std::cout << "  [PIXELS] Unbound Stage 1 Modulate Q1 (Expected Red): R=" << (int)pUnbound_Q1.r << " G=" << (int)pUnbound_Q1.g << " B=" << (int)pUnbound_Q1.b << std::endl;
+    TEST_CHECK(pUnbound_Q1.r >= 240 && pUnbound_Q1.g <= 15 && pUnbound_Q1.b <= 15, "Unbound Stage 1 sampled white (1,1,1,1) preserving stage 0 texture color");
+
     /* Cleanup */
     svga3_vlkn_context_destroy(dev, CID1);
     svga3_vlkn_context_destroy(dev, CID2);

@@ -62,6 +62,8 @@ public:
     uint32_t height() const { return m_height; }
     uint32_t depth() const { return m_depth; }
     uint32_t mipLevels() const { return m_mipLevels; }
+    uint32_t viewMipLevels() const { return m_viewMipLevels; }
+    void ensureViewMipLevels(uint32_t levels);
     uint32_t arrayLayers() const { return m_arrayLayers; }
     uint32_t multisampleCount() const { return m_multisampleCount; }
     SVGA3dTextureFilter autogenFilter() const { return m_autogenFilter; }
@@ -123,6 +125,7 @@ private:
     VkImage m_image;
     VkDeviceMemory m_memory;
     VkImageView m_imageView;
+    uint32_t m_viewMipLevels;
     VkImageLayout m_currentLayout;
 
     VkBuffer m_buffer;

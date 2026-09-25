@@ -45,6 +45,9 @@ VlknBackend::VlknBackend()
     , m_stagingMemory(VK_NULL_HANDLE)
     , m_stagingMapped(nullptr)
     , m_stagingSize(0)
+    , m_fallbackBuffer(VK_NULL_HANDLE)
+    , m_fallbackMemory(VK_NULL_HANDLE)
+    , m_fallbackSize(0)
 {
     memset(&m_dispatch, 0, sizeof(m_dispatch));
     memset(&m_props, 0, sizeof(m_props));
@@ -88,6 +91,9 @@ Svga3VlknStatus VlknBackend::init(const Svga3VlknConfig *config) {
     st = initStagingBuffer(stagingSize);
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
+    st = initFallbackBuffer(1024 * 1024); /* 1MB static fallback vertex/index buffer */
+    if (st != SVGA3_VLKN_SUCCESS) return st;
+
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -118,6 +124,16 @@ void VlknBackend::shutdown() {
         m_dispatch.vkFreeMemory(m_device, m_stagingMemory, nullptr);
         m_stagingMemory = VK_NULL_HANDLE;
     }
+
+    if (m_fallbackBuffer) {
+        m_dispatch.vkDestroyBuffer(m_device, m_fallbackBuffer, nullptr);
+        m_fallbackBuffer = VK_NULL_HANDLE;
+    }
+    if (m_fallbackMemory) {
+        m_dispatch.vkFreeMemory(m_device, m_fallbackMemory, nullptr);
+        m_fallbackMemory = VK_NULL_HANDLE;
+    }
+    m_fallbackSize = 0;
 
     if (m_cmdPool) {
         m_dispatch.vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
@@ -461,6 +477,33 @@ Svga3VlknStatus VlknBackend::initStagingBuffer(size_t size) {
     if (res != VK_SUCCESS) {
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
+    return SVGA3_VLKN_SUCCESS;
+}
+
+Svga3VlknStatus VlknBackend::initFallbackBuffer(size_t size) {
+    m_fallbackSize = size;
+    Svga3VlknStatus st = createBuffer(size,
+                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                      VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                      &m_fallbackBuffer,
+                                      &m_fallbackMemory);
+    if (st != SVGA3_VLKN_SUCCESS) return st;
+
+    void *mapped = nullptr;
+    VkResult res = m_dispatch.vkMapMemory(m_device, m_fallbackMemory, 0, size, 0, &mapped);
+    if (res != VK_SUCCESS) {
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
+
+    /* Fill buffer with 1.0f float values (0x3F800000) so any attribute read produces 1.0f */
+    uint32_t *words = static_cast<uint32_t*>(mapped);
+    size_t numWords = size / sizeof(uint32_t);
+    for (size_t i = 0; i < numWords; ++i) {
+        words[i] = 0x3F800000;
+    }
+    m_dispatch.vkUnmapMemory(m_device, m_fallbackMemory);
     return SVGA3_VLKN_SUCCESS;
 }
 

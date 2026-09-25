@@ -264,10 +264,14 @@ private:
     VkBuffer m_psConstBuffer;
     VkDeviceMemory m_psConstMemory;
 
-    /* Dummy 1x1 Texture and Sampler for Unbound Stages */
+    /* Dummy 1x1 textures. Unbound stages and missing views sample white (1,1,1,1)
+       so multitexture modulate operations preserve identity. */
     VkImage m_dummyImage;
     VkDeviceMemory m_dummyMemory;
     VkImageView m_dummyView;
+    VkImage m_whiteImage;
+    VkDeviceMemory m_whiteMemory;
+    VkImageView m_whiteView;
     VkSampler m_dummySampler;
 
     /* Query Pool */

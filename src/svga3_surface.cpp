@@ -135,6 +135,7 @@ VlknSurface::VlknSurface(VlknBackend *backend,
     , m_image(VK_NULL_HANDLE)
     , m_memory(VK_NULL_HANDLE)
     , m_imageView(VK_NULL_HANDLE)
+    , m_viewMipLevels(1)
     , m_currentLayout(VK_IMAGE_LAYOUT_UNDEFINED)
     , m_buffer(VK_NULL_HANDLE)
     , m_bufferMemory(VK_NULL_HANDLE)
@@ -299,7 +300,8 @@ Svga3VlknStatus VlknSurface::allocate() {
     viewInfo.subresourceRange.aspectMask = m_isDepthStencil ?
         (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = m_mipLevels;
+    m_viewMipLevels = (m_autogenFilter != SVGA3D_TEX_FILTER_NONE) ? m_mipLevels : 1;
+    viewInfo.subresourceRange.levelCount = m_viewMipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = m_arrayLayers;
 
@@ -374,6 +376,7 @@ Svga3VlknStatus VlknSurface::ensureBufferSize(size_t requiredSize) {
     }
 
     m_backend->flushCommandBuffer();
+    m_backend->waitIdle();
 
     if (m_buffer) {
         m_backend->dispatch().vkDestroyBuffer(m_backend->device(), m_buffer, nullptr);
@@ -390,9 +393,47 @@ Svga3VlknStatus VlknSurface::ensureBufferSize(size_t requiredSize) {
     return SVGA3_VLKN_SUCCESS;
 }
 
+void VlknSurface::ensureViewMipLevels(uint32_t levels) {
+    uint32_t targetLevels = std::min(levels, m_mipLevels);
+    if (targetLevels <= m_viewMipLevels || m_image == VK_NULL_HANDLE) {
+        return;
+    }
+    if (m_imageView != VK_NULL_HANDLE) {
+        m_backend->dispatch().vkDestroyImageView(m_backend->device(), m_imageView, nullptr);
+        m_imageView = VK_NULL_HANDLE;
+    }
+    m_viewMipLevels = targetLevels;
+    VkImageViewCreateInfo viewInfo = {};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = m_image;
+    if (m_isCubeMap) {
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    } else if (m_depth > 1) {
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
+    } else {
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    }
+    viewInfo.format = m_vkFormat;
+    viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    viewInfo.components.a = (m_svgaFormat == SVGA3D_X8R8G8B8 || m_svgaFormat == SVGA3D_X1R5G5B5) ?
+                            VK_COMPONENT_SWIZZLE_ONE : VK_COMPONENT_SWIZZLE_IDENTITY;
+
+    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ?
+        (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = m_viewMipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = m_arrayLayers;
+
+    m_backend->dispatch().vkCreateImageView(m_backend->device(), &viewInfo, nullptr, &m_imageView);
+}
+
 void VlknSurface::destroy() {
     if (m_backend) {
         m_backend->flushCommandBuffer();
+        m_backend->waitIdle();
     }
 
     if (m_buffer) {
@@ -480,8 +521,8 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
 
     bool isLinearBuffer = isLinear || (m_svgaFormat == SVGA3D_BUFFER) ||
                           (m_image == VK_NULL_HANDLE) ||
-                          ((m_flags & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) ||
-                          (bh == 1 && bd == 1 && (bw > mip.width || (bx + bw) > mip.width || guestStride == 0));
+                          (((m_flags & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) && m_height <= 1 && m_depth <= 1) ||
+                          (m_height <= 1 && m_depth <= 1 && (bw > mip.width || (bx + bw) > mip.width));
 
     if (isLinearBuffer) {
         uint32_t offset = bx;
@@ -547,6 +588,10 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
         log_msg("[libqemu_svga3d] dmaUpload error: box does not fit in image (sid=%u, box=(%u,%u %ux%u), mip=(%ux%u))\n",
                 m_sid, bx, by, bw, bh, mip.width, mip.height);
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+
+    if (mipLevel > 0) {
+        ensureViewMipLevels(mipLevel + 1);
     }
 
     /* Transition image to TRANSFER_DST_OPTIMAL */
@@ -812,8 +857,8 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
 
     bool isLinearBuffer = isLinear || (m_svgaFormat == SVGA3D_BUFFER) ||
                           (m_image == VK_NULL_HANDLE) ||
-                          ((m_flags & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) ||
-                          (bh == 1 && bd == 1 && (bw > mip.width || (bx + bw) > mip.width || guestStride == 0));
+                          (((m_flags & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) && m_height <= 1 && m_depth <= 1) ||
+                          (m_height <= 1 && m_depth <= 1 && (bw > mip.width || (bx + bw) > mip.width));
 
     if (isLinearBuffer) {
         if (!m_buffer || !m_bufferMemory) return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -1202,9 +1247,9 @@ Svga3VlknStatus VlknSurfaceManager::surfaceDMA(const SVGA3dGuestImage &guest,
 
         bool isLinearBuffer = (surf->svgaFormat() == SVGA3D_BUFFER) ||
                               (surf->image() == VK_NULL_HANDLE) ||
-                              ((surf->flags() & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) ||
-                              (bh == 1 && bd == 1 && (bw > surf->width() || (box.x + bw) > surf->width() || guest.pitch == 0));
-        if (isLinearBuffer) {
+                              (((surf->flags() & (SVGA3D_SURFACE_HINT_VERTEXBUFFER | SVGA3D_SURFACE_HINT_INDEXBUFFER)) != 0) && surf->height() <= 1 && surf->depth() <= 1) ||
+                              (surf->height() <= 1 && surf->depth() <= 1 && (bw > surf->width() || (box.x + bw) > surf->width()));
+        if (isLinearBuffer && surf->height() <= 1 && surf->depth() <= 1) {
             surf->addFlags(SVGA3D_SURFACE_HINT_VERTEXBUFFER);
         }
 
@@ -1351,6 +1396,7 @@ Svga3VlknStatus VlknSurfaceManager::generateMipmaps(uint32_t sid, SVGA3dTextureF
         );
     }
 
+    surf->ensureViewMipLevels(surf->mipLevels());
     m_backend->flushCommandBuffer();
     return SVGA3_VLKN_SUCCESS;
 }

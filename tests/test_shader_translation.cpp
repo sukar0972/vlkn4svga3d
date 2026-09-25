@@ -151,6 +151,60 @@ int main() {
     );
     TEST_CHECK(st == SVGA3_VLKN_ERROR_INVALID_PARAM, "Missing END token rejected with error");
 
+    /* 5. Test Destination Saturate (_SAT) Modifier */
+    /*
+        ps_3_0
+        dcl_texcoord v0
+        mov_sat r0, v0
+        mov oC0, r0
+        end
+    */
+    const uint32_t satBytecode[] = {
+        0xFFFF0300, /* ps_3_0 */
+        (31) | (2 << 24), /* DCL */
+        0x80000000 | 5,
+        0x80000000 | (1 << 28) | 0 | (0xF << 16), /* v0 */
+        (1) | (2 << 24), /* MOV */
+        0x80000000 | (0 << 28) | 0 | (0xF << 16) | (1 << 20), /* r0 with dstMod=1 (_SAT) */
+        0x80000000 | (1 << 28) | 0 | (0xE4 << 16), /* v0 */
+        (1) | (2 << 24), /* MOV */
+        0x80000000 | (8 << 28) | 0 | (0xF << 16), /* oC0 */
+        0x80000000 | (0 << 28) | 0 | (0xE4 << 16), /* r0 */
+        0x0000FFFF /* END */
+    };
+    std::vector<uint32_t> satSpirv;
+    std::string satErr;
+    st = svga3_vlkn::svga3_translate_shader_d3d9(
+        SVGA3D_SHADERTYPE_PS, satBytecode, sizeof(satBytecode)/sizeof(uint32_t), satSpirv, satErr
+    );
+    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Translate _SAT bytecode to SPIR-V");
+    TEST_CHECK(!satSpirv.empty(), "Saturate SPIR-V output is non-empty");
+
+    /* Check that GLSLstd450FClamp (43) is emitted in satSpirv */
+    bool foundFClamp = false;
+    for (size_t i = 5; i < satSpirv.size(); ) {
+        uint32_t word = satSpirv[i];
+        uint32_t wordCount = word >> 16;
+        uint32_t opcode = word & 0xFFFF;
+        if (opcode == 12 /* SpvOpExtInst */ && wordCount >= 5) {
+            uint32_t extInstOp = satSpirv[i + 4];
+            if (extInstOp == 43 /* GLSLstd450FClamp */) {
+                foundFClamp = true;
+                break;
+            }
+        }
+        if (wordCount == 0) break;
+        i += wordCount;
+    }
+    TEST_CHECK(foundFClamp, "GLSLstd450FClamp instruction emitted for _SAT modifier");
+
+    VkShaderModule satModule = VK_NULL_HANDLE;
+    smInfo.codeSize = satSpirv.size() * sizeof(uint32_t);
+    smInfo.pCode = satSpirv.data();
+    res = backend->dispatch().vkCreateShaderModule(backend->device(), &smInfo, nullptr, &satModule);
+    TEST_CHECK(res == VK_SUCCESS, "Create VkShaderModule from _SAT SPIR-V on Lavapipe");
+    backend->dispatch().vkDestroyShaderModule(backend->device(), satModule, nullptr);
+
     /* Cleanup */
     backend->dispatch().vkDestroyShaderModule(backend->device(), vsModule, nullptr);
     backend->dispatch().vkDestroyShaderModule(backend->device(), psModule, nullptr);

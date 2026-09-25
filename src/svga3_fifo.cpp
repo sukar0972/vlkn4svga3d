@@ -189,7 +189,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
 
             static uint32_t dma_count = 0;
             dma_count++;
-            if (dma_count <= 5 || (dma_count % 500) == 0) {
+            if (dma_count <= 5 || (dma_count % 500) == 0 || pCmd->host.sid == 73) {
                 log_msg("[libqemu_svga3d] SURFACE_DMA #%u: guest=(gmrId=%u, offset=%u, pitch=%u) host.sid=%u transfer=%u numBoxes=%u\n",
                         dma_count, pCmd->guest.ptr.gmrId, pCmd->guest.ptr.offset, pCmd->guest.pitch,
                         pCmd->host.sid, pCmd->transfer, numBoxes);

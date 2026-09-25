@@ -735,6 +735,12 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         if (!dstVar) return;
 
         uint32_t finalVal = val;
+        if ((dst.dstMod & 1) != 0) { /* _SAT (saturate: clamp float values to [0.0, 1.0]) */
+            uint32_t satVal = b.allocId();
+            b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeV4Float, satVal, glslSetId, GLSLstd450FClamp, val, const0_v4, const1_v4 });
+            finalVal = satVal;
+        }
+
         if (dst.writeMask != 0x0F) {
             /* Masked write: shuffle old value and new value */
             uint32_t oldVal = b.allocId();
@@ -743,15 +749,23 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             uint32_t comps[4];
             for (int i = 0; i < 4; ++i) {
                 if (dst.writeMask & (1 << i)) {
-                    comps[i] = 4 + i; /* from val */
+                    comps[i] = 4 + i; /* from finalVal */
                 } else {
                     comps[i] = i;     /* from oldVal */
                 }
             }
-            finalVal = b.allocId();
+            uint32_t maskedVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpVectorShuffle, {
-                typeV4Float, finalVal, oldVal, val, comps[0], comps[1], comps[2], comps[3]
+                typeV4Float, maskedVal, oldVal, finalVal, comps[0], comps[1], comps[2], comps[3]
             });
+            finalVal = maskedVal;
+        }
+
+        /* Direct3D 9 rasterizer clamps vertex shader color outputs (oD0/oD1) to [0.0, 1.0] */
+        if (isVS && (dstVar == outColorVar[0] || dstVar == outColorVar[1])) {
+            uint32_t satVal = b.allocId();
+            b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeV4Float, satVal, glslSetId, GLSLstd450FClamp, finalVal, const0_v4, const1_v4 });
+            finalVal = satVal;
         }
 
         b.emitInst(b.functionDefinitions, SpvOpStore, { dstVar, finalVal });
@@ -1036,9 +1050,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 uint32_t sampledImage = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpLoad, { typeSampledImage2D, sampledImage, samplerVars[samplerIdx] });
 
-                uint32_t res = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod, { typeV4Float, res, sampledImage, uv });
-                emitStoreDest(dst, res);
+                uint32_t sampled = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod, { typeV4Float, sampled, sampledImage, uv });
+                emitStoreDest(dst, sampled);
                 break;
             }
             default:

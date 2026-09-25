@@ -79,6 +79,10 @@ public:
     size_t stagingSize() const { return m_stagingSize; }
     std::mutex& stagingMutex() { return m_stagingMutex; }
 
+    /* Fallback Buffer Accessors (always-valid dummy buffer for missing vertex/index inputs) */
+    VkBuffer fallbackBuffer() const { return m_fallbackBuffer; }
+    size_t fallbackSize() const { return m_fallbackSize; }
+
     /* Pre-flush hook (e.g. to end any active render passes before ending command buffer) */
     void setPreFlushHook(std::function<void()> hook) { m_preFlushHook = std::move(hook); }
 
@@ -87,6 +91,7 @@ private:
     Svga3VlknStatus selectPhysicalDevice(const Svga3VlknConfig *config);
     Svga3VlknStatus initDevice(const Svga3VlknConfig *config);
     Svga3VlknStatus initStagingBuffer(size_t size);
+    Svga3VlknStatus initFallbackBuffer(size_t size);
 
     VlknDispatchTable m_dispatch;
     VkInstance m_instance;
@@ -119,6 +124,11 @@ private:
     void *m_stagingMapped;
     size_t m_stagingSize;
     std::mutex m_stagingMutex;
+
+    /* Fallback buffer */
+    VkBuffer m_fallbackBuffer;
+    VkDeviceMemory m_fallbackMemory;
+    size_t m_fallbackSize;
 
     /* Default RenderPass cache */
     struct RenderPassEntry {

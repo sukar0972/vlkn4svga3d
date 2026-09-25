@@ -187,6 +187,24 @@ DevVGA-SVGA3d-win.cpp:1191:31: warning: ‘VMSVGA3DSHAREDSURFACE* vmsvga3dSurfac
  1191 | static PVMSVGA3DSHAREDSURFACE vmsvga3dSurfaceGetSharedCopy(PVMSVGA3DCONTEXT pContext, PVMSVGA3DSURFACE pSurface)
       |                               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/vlkn_dispatch.cpp -o build/vlkn_dispatch.o
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
+DevVGA-SVGA3d-win.cpp:5845:18: warning: ‘PrimitiveTypeD3D’ may be used uninitialized [-Wmaybe-uninitialized]
+ 5844 |             &&  (   PrimitiveTypeD3D == D3DPT_TRIANGLESTRIP
+      |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 5845 |                  || PrimitiveTypeD3D == D3DPT_TRIANGLEFAN))
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+DevVGA-SVGA3d-win.cpp:5836:26: note: ‘PrimitiveTypeD3D’ was declared here
+ 5836 |         D3DPRIMITIVETYPE PrimitiveTypeD3D;
+      |                          ^~~~~~~~~~~~~~~~
+In function ‘int vmsvga3dDrawPrimitivesSyncVertexBuffer(PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE)’,
+    inlined from ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’ at DevVGA-SVGA3d-win.cpp:5749:52:
+DevVGA-SVGA3d-win.cpp:5556:30: warning: ‘pVertexSurface’ may be used uninitialized [-Wmaybe-uninitialized]
+ 5556 |     if (   pVertexSurface->u.pSurface
+      |            ~~~~~~~~~~~~~~~~~~^~~~~~~~
+DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
+DevVGA-SVGA3d-win.cpp:5745:26: note: ‘pVertexSurface’ was declared here
+ 5745 |         PVMSVGA3DSURFACE pVertexSurface;
+      |                          ^~~~~~~~~~~~~~
 shim/src/mock_d3d9.cpp: In member function ‘virtual HRESULT MockDirect3DVolumeTexture9::GetDevice(IDirect3DDevice9**)’:
 shim/src/mock_d3d9.cpp:460:5: warning: this ‘if’ clause does not guard... [-Wmisleading-indentation]
   460 |     if (!ppDevice) return D3DERR_INVALIDCALL; *ppDevice = (IDirect3DDevice9*)m_pDevice; if (m_pDevice) m_pDevice->AddRef(); return D3D_OK;
@@ -259,24 +277,6 @@ shim/src/mock_d3d9.cpp:1540:108: warning: unused parameter ‘BehaviorFlags’ [
 shim/src/mock_d3d9.cpp:1540:146: warning: unused parameter ‘pPresentationParameters’ [-Wunused-parameter]
  1540 | HRESULT WINAPI MockDirect3D9::CreateDeviceEx(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, void *pFullscreenDisplayMode, IDirect3DDevice9Ex **ppReturnedDeviceInterface) {
       |                                                                                                                           ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~
-DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
-DevVGA-SVGA3d-win.cpp:5845:18: warning: ‘PrimitiveTypeD3D’ may be used uninitialized [-Wmaybe-uninitialized]
- 5844 |             &&  (   PrimitiveTypeD3D == D3DPT_TRIANGLESTRIP
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- 5845 |                  || PrimitiveTypeD3D == D3DPT_TRIANGLEFAN))
-      |                  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-DevVGA-SVGA3d-win.cpp:5836:26: note: ‘PrimitiveTypeD3D’ was declared here
- 5836 |         D3DPRIMITIVETYPE PrimitiveTypeD3D;
-      |                          ^~~~~~~~~~~~~~~~
-In function ‘int vmsvga3dDrawPrimitivesSyncVertexBuffer(PVMSVGA3DCONTEXT, PVMSVGA3DSURFACE)’,
-    inlined from ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’ at DevVGA-SVGA3d-win.cpp:5749:52:
-DevVGA-SVGA3d-win.cpp:5556:30: warning: ‘pVertexSurface’ may be used uninitialized [-Wmaybe-uninitialized]
- 5556 |     if (   pVertexSurface->u.pSurface
-      |            ~~~~~~~~~~~~~~~~~~^~~~~~~~
-DevVGA-SVGA3d-win.cpp: In function ‘int vmsvga3dDrawPrimitives(PVGASTATE, uint32_t, uint32_t, SVGA3dVertexDecl*, uint32_t, SVGA3dPrimitiveRange*, uint32_t, SVGA3dVertexDivisor*)’:
-DevVGA-SVGA3d-win.cpp:5745:26: note: ‘pVertexSurface’ was declared here
- 5745 |         PVMSVGA3DSURFACE pVertexSurface;
-      |                          ^~~~~~~~~~~~~~
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/vlkn_backend.cpp -o build/vlkn_backend.o
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_surface.cpp -o build/svga3_surface.o
 g++ -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -Iinclude -Isrc -Ishim/include -Idata -Itools -c src/svga3_context.cpp -o build/svga3_context.o
