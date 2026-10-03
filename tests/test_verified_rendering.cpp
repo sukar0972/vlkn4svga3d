@@ -610,6 +610,52 @@ int main() {
             }
         }
 
+        /* Mesa encodes back-face colors with COLOR semantic indices 2/3.
+         * They must not overwrite front colors or texture coordinates. */
+        const uint32_t backColorVS[] = {
+            0xFFFE0300,
+            (31) | (2 << 24), 0x80000000, D3D9_DST(1, 0, 0xF),
+            (31) | (2 << 24), 0x80000000, D3D9_DST(6, 0, 0xF),
+            (31) | (2 << 24), 0x8000000A, D3D9_DST(6, 1, 0xF),
+            (31) | (2 << 24), 0x8001000A, D3D9_DST(6, 2, 0xF),
+            (31) | (2 << 24), 0x8002000A, D3D9_DST(6, 3, 0xF),
+            (31) | (2 << 24), 0x8003000A, D3D9_DST(6, 4, 0xF),
+            (20) | (3 << 24), D3D9_DST(6, 0, 0xF), D3D9_SRC(1, 0, 0xE4), D3D9_SRC(2, 0, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 1, 0xF), D3D9_SRC(2, 4, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 2, 0xF), D3D9_SRC(2, 5, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 3, 0xF), D3D9_SRC(2, 6, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 4, 0xF), D3D9_SRC(2, 7, 0xE4),
+            0x0000FFFF
+        };
+        const uint32_t backColorPS[] = {
+            0xFFFF0300,
+            (31) | (2 << 24), 0x8002000A, D3D9_DST(1, 0, 0xF),
+            (31) | (2 << 24), 0x8003000A, D3D9_DST(1, 1, 0xF),
+            (2) | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(1, 0, 0xE4), D3D9_SRC(1, 1, 0xE4),
+            0x0000FFFF
+        };
+        const float colors[4][4] = {{1, 1, 0, 0}, {0, 1, 1, 0}, {0.25f, 0, 0, 0.25f}, {0, 0.5f, 0.75f, 0.75f}};
+        for (int color = 0; color < 4; ++color) {
+            memcpy(scVal, colors[color], sizeof(scVal));
+            svga3_vlkn_context_set_shader_const(dev, CID, 4 + color, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, scVal);
+        }
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 4, SVGA3D_SHADERTYPE_VS,
+            backColorVS, sizeof(backColorVS) / 4) == SVGA3_VLKN_SUCCESS, "Four-color vertex shader defines");
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 5, SVGA3D_SHADERTYPE_PS,
+            backColorPS, sizeof(backColorPS) / 4) == SVGA3_VLKN_SUCCESS, "Back-color fragment shader defines");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_VS, 4);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 5);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+            decls, 1, &r1, 1) == SVGA3_VLKN_SUCCESS, "Back-color draw succeeds");
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr,
+            fb.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "Back-color readback succeeds");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + RT_W / 4], 64, 128, 191, 255),
+            "COLOR2 and COLOR3 interpolate independently of front colors");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_VS, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 1);
+
         /* SVGA front faces are clockwise in framebuffer coordinates.
          * These vertices map to top-left, top-right, bottom-right: clockwise
          * on screen. Reversing the vertex order must reverse vFace. */
