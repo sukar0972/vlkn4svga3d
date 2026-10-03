@@ -560,7 +560,228 @@ int main() {
         savePPM("artifacts/scene3_alpha_reference.ppm", refFb3.data(), RT_W, RT_H);
         saveDiffPPM("artifacts/scene3_alpha_diff.ppm", fb.data(), refFb3.data(), RT_W, RT_H);
 
+        /* Constant factors must use the packed guest color, including alpha.
+         * Queue two draws with different constants before readback to catch
+         * stale pipeline state and updates that overwrite earlier draws. */
+        const uint32_t constantColors[] = {0xBF4000FF, 0x4080FF00};
+        const uint32_t factors[] = {12, 13, 18, 19}; // VMware wire values
+        const uint8_t source[] = {200, 100, 50, 128};
+        for (uint32_t factor : factors) {
+            for (bool destinationFactor : {false, true}) {
+                TEST_CHECK(svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR,
+                    0xFF505050, 1.0f, 0, nullptr, 0) == SVGA3_VLKN_SUCCESS,
+                    "Constant blend clear succeeds");
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND,
+                    destinationFactor ? uint32_t(SVGA3D_BLENDOP_ZERO) : factor);
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLEND,
+                    destinationFactor ? factor : uint32_t(SVGA3D_BLENDOP_ZERO));
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SEPARATEALPHABLENDENABLE, 1);
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLENDALPHA, SVGA3D_BLENDOP_ZERO);
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLENDALPHA, factor);
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 1);
+                for (int half = 0; half < 2; ++half) {
+                    SVGA3dRect clip = {uint32_t(half * RT_W / 2), 0, RT_W / 2, RT_H};
+                    svga3_vlkn_context_set_scissor_rect(dev, CID, &clip);
+                    svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDCOLOR, constantColors[half]);
+                    TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+                        decls, 2, &r1, 1) == SVGA3_VLKN_SUCCESS, "Constant blend draw succeeds");
+                }
+                TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr,
+                    fb.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "Constant blend readback succeeds");
+                for (int half = 0; half < 2; ++half) {
+                    const uint32_t c = constantColors[half];
+                    const uint8_t channels[] = {uint8_t(c >> 16), uint8_t(c >> 8), uint8_t(c), uint8_t(c >> 24)};
+                    uint8_t expected[4];
+                    for (int channel = 0; channel < 4; ++channel) {
+                        const int component = (factor >= 18 || channel == 3) ? channels[3] : channels[channel];
+                        const int weight = (factor == 13 || factor == 19) ? 255 - component : component;
+                        const int input = channel == 3 ? 255 : (destinationFactor ? 80 : source[channel]);
+                        expected[channel] = uint8_t(std::lround(input * weight / 255.0));
+                    }
+                    const Pixel &actual = fb[(RT_H / 2) * RT_W + (half * RT_W / 2 + RT_W / 4)];
+                    if (!pixelMatches(actual, expected[0], expected[1], expected[2], expected[3])) {
+                        std::cerr << "constant factor=" << factor << " destination=" << destinationFactor
+                                  << " half=" << half << " observed RGBA=" << int(actual.r) << ','
+                                  << int(actual.g) << ',' << int(actual.b) << ',' << int(actual.a) << std::endl;
+                    }
+                    TEST_CHECK(pixelMatches(actual, expected[0], expected[1], expected[2], expected[3]),
+                        "Constant and inverse blend factors match independent RGBA calculations");
+                }
+            }
+        }
+
+        /* Mesa encodes back-face colors with COLOR semantic indices 2/3.
+         * They must not overwrite front colors or texture coordinates. */
+        const uint32_t backColorVS[] = {
+            0xFFFE0300,
+            (31) | (2 << 24), 0x80000000, D3D9_DST(1, 0, 0xF),
+            (31) | (2 << 24), 0x80000000, D3D9_DST(6, 0, 0xF),
+            (31) | (2 << 24), 0x8000000A, D3D9_DST(6, 1, 0xF),
+            (31) | (2 << 24), 0x8001000A, D3D9_DST(6, 2, 0xF),
+            (31) | (2 << 24), 0x8002000A, D3D9_DST(6, 3, 0xF),
+            (31) | (2 << 24), 0x8003000A, D3D9_DST(6, 4, 0xF),
+            (20) | (3 << 24), D3D9_DST(6, 0, 0xF), D3D9_SRC(1, 0, 0xE4), D3D9_SRC(2, 0, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 1, 0xF), D3D9_SRC(2, 4, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 2, 0xF), D3D9_SRC(2, 5, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 3, 0xF), D3D9_SRC(2, 6, 0xE4),
+            (1) | (2 << 24), D3D9_DST(6, 4, 0xF), D3D9_SRC(2, 7, 0xE4),
+            0x0000FFFF
+        };
+        const uint32_t backColorPS[] = {
+            0xFFFF0300,
+            (31) | (2 << 24), 0x8002000A, D3D9_DST(1, 0, 0xF),
+            (31) | (2 << 24), 0x8003000A, D3D9_DST(1, 1, 0xF),
+            (2) | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(1, 0, 0xE4), D3D9_SRC(1, 1, 0xE4),
+            0x0000FFFF
+        };
+        const float colors[4][4] = {{1, 1, 0, 0}, {0, 1, 1, 0}, {0.25f, 0, 0, 0.25f}, {0, 0.5f, 0.75f, 0.75f}};
+        for (int color = 0; color < 4; ++color) {
+            memcpy(scVal, colors[color], sizeof(scVal));
+            svga3_vlkn_context_set_shader_const(dev, CID, 4 + color, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, scVal);
+        }
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 4, SVGA3D_SHADERTYPE_VS,
+            backColorVS, sizeof(backColorVS) / 4) == SVGA3_VLKN_SUCCESS, "Four-color vertex shader defines");
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 5, SVGA3D_SHADERTYPE_PS,
+            backColorPS, sizeof(backColorPS) / 4) == SVGA3_VLKN_SUCCESS, "Back-color fragment shader defines");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_VS, 4);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 5);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+            decls, 1, &r1, 1) == SVGA3_VLKN_SUCCESS, "Back-color draw succeeds");
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr,
+            fb.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "Back-color readback succeeds");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + RT_W / 4], 64, 128, 191, 255),
+            "COLOR2 and COLOR3 interpolate independently of front colors");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_VS, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 1);
+
+        /* SVGA front faces are clockwise in framebuffer coordinates.
+         * These vertices map to top-left, top-right, bottom-right: clockwise
+         * on screen. Reversing the vertex order must reverse vFace. */
+        const uint32_t facePS[] = {
+            0xFFFF0300,
+            (1) | (2 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(17, 1, 0xE4),
+            0x0000FFFF
+        };
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 3, SVGA3D_SHADERTYPE_PS,
+            facePS, sizeof(facePS) / 4) == SVGA3_VLKN_SUCCESS, "vFace shader defines");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 3);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
+        for (int winding = 0; winding < 2; ++winding) {
+            if (winding) {
+                std::swap(quadVerts[0], quadVerts[1]);
+                std::swap(quadVerts[3], quadVerts[4]);
+                svga3_vlkn_surface_dma_upload(dev, SID_VB, 0, &bBox, quadVerts, sizeof(quadVerts));
+            }
+            SVGA3dRect clip = {uint32_t(winding * RT_W / 2), 0, RT_W / 2, RT_H};
+            svga3_vlkn_context_set_scissor_rect(dev, CID, &clip);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+                decls, 2, &r1, 1) == SVGA3_VLKN_SUCCESS, "Opposite winding vFace draw succeeds");
+        }
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr,
+            fb.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "vFace readback succeeds");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + RT_W / 4], 255, 255, 255, 255),
+            "Clockwise framebuffer triangles receive positive SVGA vFace");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + 3 * RT_W / 4], 0, 0, 0, 0),
+            "Counterclockwise framebuffer triangles receive negative SVGA vFace");
+
+        /* Exercise the same orientation through the fixed-function stencil
+         * path: clockwise replaces with 5; counterclockwise inverts to 255. */
+        const uint32_t SID_DS = 32;
+        TEST_CHECK(svga3_vlkn_surface_define(dev, SID_DS, SVGA3D_SURFACE_HINT_DEPTHSTENCIL,
+            SVGA3D_Z_D24S8, &rtSize, 1) == SVGA3_VLKN_SUCCESS, "Two-sided stencil surface defines");
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, SID_DS, 0, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_ZENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_ZWRITEENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE2SIDED, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILFUNC, SVGA3D_CMP_ALWAYS);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_CCWSTENCILFUNC, SVGA3D_CMP_ALWAYS);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILPASS, SVGA3D_STENCILOP_REPLACE);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_CCWSTENCILPASS, SVGA3D_STENCILOP_INVERT);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILREF, 5);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 0);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 2);
+        const float white[4] = {1, 1, 1, 1};
+        memcpy(scVal, white, sizeof(white));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, scVal);
+        TEST_CHECK(svga3_vlkn_context_clear(dev, CID,
+            SVGA3dClearFlag(SVGA3D_CLEAR_COLOR | SVGA3D_CLEAR_STENCIL),
+            0, 1.0f, 0, nullptr, 0) == SVGA3_VLKN_SUCCESS, "Two-sided stencil clears");
+        for (int winding = 0; winding < 2; ++winding) {
+            std::swap(quadVerts[0], quadVerts[1]);
+            std::swap(quadVerts[3], quadVerts[4]);
+            svga3_vlkn_surface_dma_upload(dev, SID_VB, 0, &bBox, quadVerts, sizeof(quadVerts));
+            SVGA3dRect clip = {uint32_t(winding * RT_W / 2), 0, RT_W / 2, RT_H};
+            svga3_vlkn_context_set_scissor_rect(dev, CID, &clip);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+                decls, 2, &r1, 1) == SVGA3_VLKN_SUCCESS, "Two-sided stencil writes succeed");
+        }
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE2SIDED, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILFUNC, SVGA3D_CMP_EQUAL);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILPASS, SVGA3D_STENCILOP_KEEP);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 0xF);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST,
+            decls, 2, &r1, 1) == SVGA3_VLKN_SUCCESS, "Stencil comparison draw succeeds");
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr,
+            fb.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "Two-sided stencil readback succeeds");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + RT_W / 4], 255, 255, 255, 255),
+            "Clockwise triangles use regular stencil replacement");
+        TEST_CHECK(pixelMatches(fb[(RT_H / 2) * RT_W + 3 * RT_W / 4], 0, 0, 0, 0),
+            "Counterclockwise triangles use CCW stencil inversion");
+
+        TEST_CHECK(svga3_vlkn_context_clear(dev, CID,
+            SVGA3dClearFlag(SVGA3D_CLEAR_DEPTH | SVGA3D_CLEAR_STENCIL),
+            0, 1.0f, 5, nullptr, 0) == SVGA3_VLKN_SUCCESS, "Packed depth/stencil clear succeeds");
+        std::vector<uint32_t> packedDepth(RT_W * RT_H);
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_DS, 0, nullptr,
+            packedDepth.data(), RT_W * 4) == SVGA3_VLKN_SUCCESS, "Packed depth/stencil readback succeeds");
+        TEST_CHECK(packedDepth[(RT_H / 2) * RT_W + RT_W / 4] == 0xFFFFFF05,
+            "Guest D24S8 readback packs depth above the stencil byte");
+        SVGA3dBox depthBox = {3, 4, 0, 3, 2, 1};
+        const uint32_t depthInput[8] = {0x00000001, 0x1234567F, 0xFFFFFF80, 0xDEADBEEF,
+                                      0xABCDEF11, 0x654321FF, 0x80000000, 0xDEADBEEF};
+        uint32_t depthOutput[8] = {};
+        TEST_CHECK(svga3_vlkn_surface_dma_upload(dev, SID_DS, 0, &depthBox,
+            depthInput, 16) == SVGA3_VLKN_SUCCESS, "Pitched packed depth/stencil upload succeeds");
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_DS, 0, &depthBox,
+            depthOutput, 16) == SVGA3_VLKN_SUCCESS, "Pitched packed depth/stencil download succeeds");
+        for (int row = 0; row < 2; ++row) {
+            for (int column = 0; column < 3; ++column)
+                TEST_CHECK(depthOutput[row * 4 + column] == depthInput[row * 4 + column],
+                    "Depth and stencil round-trip exactly through separate Vulkan aspects");
+            TEST_CHECK(depthOutput[row * 4 + 3] == 0, "Depth readback preserves destination row padding");
+        }
+
+        {
+            const void *mappedDepth = nullptr;
+            size_t depthPitch = 0;
+            std::unique_lock<std::mutex> depthLock;
+            TEST_CHECK(dev->surfaceMgr->getSurface(SID_DS)->dmaDownloadToStaging(0, &depthBox,
+                &mappedDepth, &depthPitch, depthLock) == SVGA3_VLKN_SUCCESS,
+                "Direct staging readback returns guest-packed depth/stencil");
+            TEST_CHECK(depthPitch == 12 && std::memcmp(mappedDepth, depthInput, 12) == 0 &&
+                std::memcmp(static_cast<const uint8_t*>(mappedDepth) + depthPitch, depthInput + 4, 12) == 0,
+                "Direct staging depth readback has tight packed rows");
+        }
+        const uint32_t SID_DEPTH24 = 33;
+        TEST_CHECK(svga3_vlkn_surface_define(dev, SID_DEPTH24, SVGA3D_SURFACE_HINT_DEPTHSTENCIL,
+            SVGA3D_Z_D24X8, &rtSize, 1) == SVGA3_VLKN_SUCCESS, "D24X8 surface defines");
+        TEST_CHECK(svga3_vlkn_surface_dma_upload(dev, SID_DEPTH24, 0, &depthBox,
+            depthInput, 16) == SVGA3_VLKN_SUCCESS, "D24X8 converts normalized depth to Vulkan float");
+        TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_DEPTH24, 0, &depthBox,
+            depthOutput, 16) == SVGA3_VLKN_SUCCESS, "D24X8 converts Vulkan float to normalized depth");
+        for (int row = 0; row < 2; ++row)
+            for (int column = 0; column < 3; ++column)
+                TEST_CHECK(std::abs(int(depthOutput[row * 4 + column] >> 8) -
+                    int(depthInput[row * 4 + column] >> 8)) <= 1 && (depthOutput[row * 4 + column] & 255) == 0,
+                    "D24X8 round-trips depth within one UNORM step and clears unused bits");
+        svga3_vlkn_surface_destroy(dev, SID_DEPTH24);
+
         /* Clean up Scene 3 */
+        svga3_vlkn_surface_destroy(dev, SID_DS);
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);
         svga3_vlkn_surface_destroy(dev, SID_VB);
