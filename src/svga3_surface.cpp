@@ -8,6 +8,7 @@
 #include "../data/svga3d_reference.h"
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 extern "C" void log_msg(const char *fmt, ...);
 
@@ -761,6 +762,96 @@ const SurfaceMipLevel* VlknSurface::getMipInfo(uint32_t mipLevel) const {
     return nullptr;
 }
 
+/* Guest D24 stores depth in bits 31:8 and stencil in bits 7:0. Vulkan
+ * buffer copies expose separate depth and stencil planes; copying the
+ * guest word directly loses stencil and puts depth in the wrong bits. */
+Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
+                                          const SVGA3dBox *box, void *guestData,
+                                          size_t guestStride) {
+    const auto &mip = m_mips[mipLevel];
+    const SVGA3dBox area = box ? *box : SVGA3dBox{0, 0, 0, mip.width, mip.height, mip.depth};
+    const size_t pixels = size_t(area.w) * area.h * area.d;
+    const bool stencil = svga3_format_has_stencil(m_svgaFormat);
+    if (pixels > SIZE_MAX / (stencil ? 5 : 4)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    const size_t depthBytes = pixels * 4;
+    const size_t bytes = depthBytes + (stencil ? pixels : 0);
+    const size_t stride = guestStride ? guestStride : size_t(area.w) * 4;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    auto st = m_backend->createBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &buffer, &memory);
+    if (st != SVGA3_VLKN_SUCCESS) return st;
+    void *mapped = nullptr;
+    if (m_backend->dispatch().vkMapMemory(m_backend->device(), memory, 0, bytes, 0, &mapped) != VK_SUCCESS || !mapped) {
+        m_backend->destroyBuffer(buffer, memory);
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
+    auto *plane = static_cast<uint8_t*>(mapped);
+    auto *guest = static_cast<uint8_t*>(guestData);
+    if (upload) {
+        for (size_t i = 0; i < pixels; ++i) {
+            uint32_t packed;
+            memcpy(&packed, guest + (i / area.w) * stride + (i % area.w) * 4, 4);
+            if (m_vkFormat == VK_FORMAT_D32_SFLOAT) {
+                const float depth = float(packed >> 8) / 16777215.0f;
+                memcpy(plane + i * 4, &depth, 4);
+            } else {
+                const uint32_t depth = packed >> 8;
+                memcpy(plane + i * 4, &depth, 4);
+            }
+            if (stencil) plane[depthBytes + i] = uint8_t(packed);
+        }
+    }
+    const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    const VkImageLayout transferLayout = upload ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = m_currentLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = upload ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.oldLayout = m_currentLayout;
+    barrier.newLayout = transferLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = m_image;
+    barrier.subresourceRange = {aspects, 0, m_mipLevels, 0, m_arrayLayers};
+    m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkBufferImageCopy regions[2] = {};
+    regions[0].imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, mipLevel, 0, 1};
+    regions[0].imageOffset = {int32_t(area.x), int32_t(area.y), int32_t(area.z)};
+    regions[0].imageExtent = {area.w, area.h, area.d};
+    regions[1] = regions[0];
+    regions[1].bufferOffset = depthBytes;
+    regions[1].imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (upload) m_backend->dispatch().vkCmdCopyBufferToImage(cb, buffer, m_image, transferLayout, stencil ? 2 : 1, regions);
+    else m_backend->dispatch().vkCmdCopyImageToBuffer(cb, m_image, transferLayout, buffer, stencil ? 2 : 1, regions);
+    barrier.oldLayout = transferLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    barrier.srcAccessMask = upload ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    m_currentLayout = barrier.newLayout;
+    st = m_backend->flushCommandBuffer();
+    if (st == SVGA3_VLKN_SUCCESS && !upload) {
+        for (size_t i = 0; i < pixels; ++i) {
+            uint32_t depth;
+            if (m_vkFormat == VK_FORMAT_D32_SFLOAT) {
+                float value;
+                memcpy(&value, plane + i * 4, 4);
+                depth = uint32_t(std::lround(std::clamp(double(value), 0.0, 1.0) * 16777215.0));
+            } else memcpy(&depth, plane + i * 4, 4);
+            const uint32_t packed = ((depth & 0xFFFFFF) << 8) | (stencil ? plane[depthBytes + i] : 0);
+            memcpy(guest + (i / area.w) * stride + (i % area.w) * 4, &packed, 4);
+        }
+    }
+    m_backend->dispatch().vkUnmapMemory(m_backend->device(), memory);
+    m_backend->destroyBuffer(buffer, memory);
+    return st;
+}
+
 Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
                                       const SVGA3dBox *box,
                                       const void *guestData,
@@ -881,6 +972,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     if (mipLevel > 0) {
         ensureViewMipLevels(mipLevel + 1);
     }
+    if (isPackedDepth()) return dmaPackedDepth(true, mipLevel, box, const_cast<void*>(guestData), guestStride);
 
     /* Validate the linear shadow-copy range BEFORE recording anything: a
      * failure here must not leave a half-recorded barrier in the open
@@ -1118,6 +1210,17 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     const size_t totalBytes = copyRowBytes * copyRows * bd;
 
 
+    if (isPackedDepth()) {
+        std::unique_lock<std::mutex> lock(m_backend->stagingMutex());
+        m_packedDepthReadback.resize(totalBytes);
+        auto st = dmaPackedDepth(false, mipLevel, box, m_packedDepthReadback.data(), copyRowBytes);
+        if (st != SVGA3_VLKN_SUCCESS) return st;
+        *outMappedData = m_packedDepthReadback.data();
+        *outRowPitch = copyRowBytes;
+        outLock = std::move(lock);
+        return SVGA3_VLKN_SUCCESS;
+    }
+
     if (totalBytes > m_backend->stagingSize() || !m_backend->stagingBuffer() || !m_backend->stagingMapped()) {
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
@@ -1281,6 +1384,8 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
                 m_sid, bx, by, bw, bh, mip.width, mip.height);
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
+
+    if (isPackedDepth()) return dmaPackedDepth(false, mipLevel, box, outGuestData, guestStride);
 
     if (totalBytes <= m_backend->stagingSize() && m_backend->stagingBuffer() && m_backend->stagingMapped()) {
         const void *mapped = nullptr;

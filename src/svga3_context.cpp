@@ -77,6 +77,8 @@ VkBlendFactor svga3_blend_factor_to_vk(SVGA3dBlendOp factor) {
         case SVGA3D_BLENDOP_SRCALPHASAT:     return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
         case SVGA3D_BLENDOP_BLENDFACTOR:     return VK_BLEND_FACTOR_CONSTANT_COLOR;
         case SVGA3D_BLENDOP_INVBLENDFACTOR:  return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+        case SVGA3D_BLENDOP_BLENDFACTORALPHA: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+        case SVGA3D_BLENDOP_INVBLENDFACTORALPHA: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
         default:                             return VK_BLEND_FACTOR_ONE;
     }
 }
@@ -698,6 +700,7 @@ void VlknContext::initDefaultRenderStates() {
     m_renderStates[SVGA3D_RS_CULLMODE] = SVGA3D_FACE_BACK;
     m_renderStates[SVGA3D_RS_DITHERENABLE] = 0;
     m_renderStates[SVGA3D_RS_BLENDENABLE] = 0;
+    m_renderStates[SVGA3D_RS_BLENDCOLOR] = 0xFFFFFFFF;
     m_renderStates[SVGA3D_RS_FOGENABLE] = 0;
     m_renderStates[SVGA3D_RS_SPECULARENABLE] = 0;
     m_renderStates[SVGA3D_RS_STENCILENABLE] = 0;
@@ -2013,22 +2016,12 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     rastInfo.polygonMode = (key.fillMode == SVGA3D_FILLMODE_LINE) ? VK_POLYGON_MODE_LINE :
                            (key.fillMode == SVGA3D_FILLMODE_POINT) ? VK_POLYGON_MODE_POINT : VK_POLYGON_MODE_FILL;
 
-    /* Compensate for vertex shader Y-inversion epilogue (pos.y = -pos.y):
-     * D3D9 front-face is CW, but clip-space Y-flip inverts winding order to CCW. */
-    rastInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    /* SVGA defines clockwise framebuffer triangles as front-facing. This
+     * convention drives vFace and the regular (rather than CCW) stencil
+     * states, independently of which orientation is culled. */
+    rastInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
-    /* In SVGA3D / D3D9:
-     * SVGA3D_FACE_FRONT = 2 (D3DCULL_CW: cull clockwise triangles)
-     * SVGA3D_FACE_BACK  = 3 (D3DCULL_CCW: cull counter-clockwise triangles)
-     * In Mesa Gallium (svga_pipe_rasterizer.c):
-     * hw_front_ccw = 0 (CW is front), OpenGL default front_ccw = 1.
-     * When OpenGL culls back faces (PIPE_FACE_BACK), Mesa emits SVGA3D_FACE_FRONT (D3DCULL_CW).
-     * With frontFace = CCW in Vulkan (due to pos.y inversion):
-     *   CW triangles are BACK faces   -> VK_CULL_MODE_BACK_BIT
-     *   CCW triangles are FRONT faces -> VK_CULL_MODE_FRONT_BIT
-     * Therefore:
-     *   SVGA3D_FACE_FRONT (cull CW)  -> VK_CULL_MODE_BACK_BIT
-     *   SVGA3D_FACE_BACK  (cull CCW) -> VK_CULL_MODE_FRONT_BIT */
+    /* FACE_FRONT culls clockwise triangles; FACE_BACK culls CCW. */
     switch (key.cullMode) {
         case SVGA3D_FACE_FRONT:
             rastInfo.cullMode = (rastInfo.frontFace == VK_FRONT_FACE_COUNTER_CLOCKWISE) ?
@@ -2128,10 +2121,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     pipeInfo.pColorBlendState = &blendInfo;
 
     /* Dynamic State */
-    VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS };
     VkPipelineDynamicStateCreateInfo dynInfo = {};
     dynInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynInfo.dynamicStateCount = 2;
+    dynInfo.dynamicStateCount = 3;
     dynInfo.pDynamicStates = dynStates;
     pipeInfo.pDynamicState = &dynInfo;
 
@@ -2577,6 +2570,17 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
     }
     m_backend->dispatch().vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    /* BLENDCOLOR is packed ARGB. Record it per draw so queued draws retain
+     * their own constants without creating a pipeline for every color. */
+    const uint32_t blendColor = m_renderStates[SVGA3D_RS_BLENDCOLOR];
+    const float blendConstants[4] = {
+        float((blendColor >> 16) & 0xFF) / 255.0f,
+        float((blendColor >> 8) & 0xFF) / 255.0f,
+        float(blendColor & 0xFF) / 255.0f,
+        float((blendColor >> 24) & 0xFF) / 255.0f
+    };
+    m_backend->dispatch().vkCmdSetBlendConstants(cb, blendConstants);
 
     if (m_descriptorSet) {
         uint32_t dynamicOffsets[2] = {m_vsConstDynamicOffset, m_psConstDynamicOffset};

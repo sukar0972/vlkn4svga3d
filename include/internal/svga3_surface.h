@@ -131,6 +131,12 @@ public:
     void storeReadback(uint32_t w, uint32_t h, size_t pitch, const void *src);
 
 private:
+    bool isPackedDepth() const {
+        return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8;
+    }
+    Svga3VlknStatus dmaPackedDepth(bool upload, uint32_t mipLevel, const SVGA3dBox *box,
+                                  void *guestData, size_t guestStride);
+    std::vector<uint8_t> m_packedDepthReadback;
     VlknBackend *m_backend;
     uint32_t m_sid;
     uint32_t m_flags;
