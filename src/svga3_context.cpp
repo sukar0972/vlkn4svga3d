@@ -761,17 +761,19 @@ Svga3VlknStatus VlknContext::setRenderTarget(SVGA3dRenderTargetType type, uint32
         m_renderTargets[idx].mipmap = mipmap;
 
         if (type == SVGA3D_RT_COLOR0 && sid != 0 && sid != SVGA3D_INVALID_ID) {
-            if (m_viewport.width <= 1.0f || m_viewport.height <= 1.0f) {
+            if (!m_viewportExplicit) {
                 VlknSurface *surf = m_surfaceMgr->getSurface(sid);
                 if (surf && surf->width() > 1 && surf->height() > 1) {
                     m_viewport.x = 0.0f;
                     m_viewport.y = 0.0f;
                     m_viewport.width = static_cast<float>(surf->width());
                     m_viewport.height = static_cast<float>(surf->height());
-                    m_scissor.offset.x = 0;
-                    m_scissor.offset.y = 0;
-                    m_scissor.extent.width = surf->width();
-                    m_scissor.extent.height = surf->height();
+                    if (!m_scissorExplicit) {
+                        m_scissor.offset.x = 0;
+                        m_scissor.offset.y = 0;
+                        m_scissor.extent.width = surf->width();
+                        m_scissor.extent.height = surf->height();
+                    }
                 }
             }
         }
@@ -880,13 +882,14 @@ Svga3VlknStatus VlknContext::setTextureStageState(uint32_t stage, SVGA3dTextureS
 
 Svga3VlknStatus VlknContext::setViewport(const SVGA3dRect *rect) {
     if (!rect) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    m_viewportExplicit = true;
     m_viewport.x = (float)(int32_t)rect->x;
     m_viewport.y = (float)(int32_t)rect->y;
     m_viewport.width = (float)rect->w;
     m_viewport.height = (float)rect->h;
     m_viewport.minDepth = 0.0f;
     m_viewport.maxDepth = 1.0f;
-    if (!m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) {
+    if (!m_scissorExplicit && !m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) {
         m_scissor.offset.x = rect->x;
         m_scissor.offset.y = rect->y;
         m_scissor.extent.width = rect->w;
@@ -897,6 +900,7 @@ Svga3VlknStatus VlknContext::setViewport(const SVGA3dRect *rect) {
 
 Svga3VlknStatus VlknContext::setScissorRect(const SVGA3dRect *rect) {
     if (!rect) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    m_scissorExplicit = true;
     m_scissor.offset.x = (int32_t)rect->x;
     m_scissor.offset.y = (int32_t)rect->y;
     m_scissor.extent.width = rect->w;
@@ -2240,6 +2244,8 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                 m_scissor.extent.width, m_scissor.extent.height,
                 m_renderTargets[0].sid);
     }
+    // The guest can emit an empty viewport for a fully clipped draw.
+    if (m_viewport.width <= 0 || m_viewport.height <= 0) return SVGA3_VLKN_SUCCESS;
     /* Retire bounded caches only after all recorded references complete, and
      * before allocating this draw's constants or descriptor inputs. */
     if (m_samplerCache.size() >= 64 || m_descriptorSetCache.size() >= 2048) {

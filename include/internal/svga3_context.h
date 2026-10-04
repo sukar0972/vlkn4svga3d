@@ -306,7 +306,9 @@ private:
     TextureStageState m_stages[SVGA3_MAX_TEXTURE_STAGES];
 
     VkViewport m_viewport;
+    bool m_viewportExplicit = false;
     VkRect2D m_scissor;
+    bool m_scissorExplicit = false;
 
     /* Fixed-function transforms and geometry */
     std::unordered_map<uint32_t, std::array<float, 16>> m_transforms;

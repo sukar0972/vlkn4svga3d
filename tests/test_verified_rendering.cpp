@@ -336,7 +336,9 @@ int main() {
             {SVGA3D_A2R10G10B10, UINT64_C(0xBFF80000), 4, {0, 128, 255, 170}},
             {SVGA3D_LUMINANCE16, 0x8000, 2, {128, 128, 128, 255}},
             {SVGA3D_LUMINANCE8_ALPHA8, 0x8040, 2, {64, 64, 64, 128}},
-            {SVGA3D_ALPHA8, 0x80, 1, {0, 0, 0, 128}}
+            {SVGA3D_ALPHA8, 0x80, 1, {0, 0, 0, 128}},
+            {SVGA3D_Z_DF24, 0xFFFFFF00, 4, {255, 255, 255, 255}},
+            {SVGA3D_Z_DF24, 0x80000000, 4, {128, 128, 128, 255}}
         };
         const float whiteTint[4] = {1, 1, 1, 1};
         memcpy(tintVal, whiteTint, sizeof(tintVal));
@@ -524,6 +526,23 @@ int main() {
         TEST_CHECK(pixelMatches(fb[24*RT_W+8],255,0,0,255) && pixelMatches(fb[24*RT_W+24],0,0,0,255),
             "Signed offscreen viewport keeps geometry while scissors clip to the framebuffer");
 
+        const SVGA3dRect emptyScissor = {0,64,0,0}, fullViewport = {0,0,64,64};
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, &fullClear, 1);
+        svga3_vlkn_context_set_scissor_rect(dev, CID, &emptyScissor);
+        svga3_vlkn_context_set_viewport(dev, CID, &fullViewport);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+24],0,0,0,255), "Explicit empty scissor survives viewport and target changes");
+        const SVGA3dRect emptyViewport = {0,0,0,0};
+        svga3_vlkn_context_set_viewport(dev, CID, &emptyViewport);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+            == SVGA3_VLKN_SUCCESS, "Explicit empty viewport clips the draw without a Vulkan viewport error");
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+24],0,0,0,255), "Explicit empty viewport survives target changes");
+
         /* Clean up Scene 1 */
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);
@@ -695,6 +714,12 @@ int main() {
             "Depth-stencil blit uses a legal nearest filter");
         svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
         TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface blit retains depth and stencil bits");
+        svga3_vlkn_surface_define(dev, 99, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_DF24, &packedSize, 1);
+        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy between integer and float-backed packed depth");
+        svga3_vlkn_surface_dma_download(dev, 99, 0, nullptr, packedReadback, 8);
+        for (uint32_t i = 0; i < 4; ++i)
+            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "Cross-format depth copy preserves the 24-bit depth value");
+        svga3_vlkn_surface_destroy(dev,99);
         for (uint32_t sid : {97u,98u}) svga3_vlkn_surface_destroy(dev,sid);
 
         /* Clean up Scene 2 */

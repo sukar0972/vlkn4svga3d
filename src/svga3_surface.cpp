@@ -1768,6 +1768,35 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
+    // DF24 uses a floating-point Vulkan image, while the wire still carries
+    // packed 24-bit depth. Vulkan cannot copy between differing depth formats.
+    if (src->isDepthStencil() && dst->isDepthStencil() && src->vkFormat() != dst->vkFormat() &&
+        src->svgaFormat() != SVGA3D_Z_D32 && dst->svgaFormat() != SVGA3D_Z_D32 &&
+        svga3_format_bytes_per_pixel(src->svgaFormat()) == 4 && svga3_format_bytes_per_pixel(dst->svgaFormat()) == 4) {
+        if (m_contextMgr) m_contextMgr->endAllRenderPasses();
+        for (uint32_t i = 0; i < numBoxes; ++i) {
+            const auto &box = boxes[i];
+            const uint32_t height = box.h ? box.h : 1, depth = box.d ? box.d : 1;
+            if ((uint64_t)box.srcx + box.w > srcMipInfo->width || (uint64_t)box.srcy + height > srcMipInfo->height ||
+                (uint64_t)box.srcz + depth > srcMipInfo->depth || (uint64_t)box.x + box.w > dstMipInfo->width ||
+                (uint64_t)box.y + height > dstMipInfo->height || (uint64_t)box.z + depth > dstMipInfo->depth)
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            uint64_t bytes = uint64_t(box.w) * height;
+            if (__builtin_mul_overflow(bytes, uint64_t(depth)*4, &bytes) || bytes > SVGA3_MAX_DMA_BYTES)
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (!bytes) continue;
+            std::vector<uint8_t> packed(bytes);
+            SVGA3dBox from = {box.srcx,box.srcy,box.srcz,box.w,height,depth};
+            SVGA3dBox to = {box.x,box.y,box.z,box.w,height,depth};
+            auto status = src->dmaDownload(srcMip,&from,packed.data(),size_t(box.w)*4,false,srcFace);
+            if (status != SVGA3_VLKN_SUCCESS) return status;
+            status = dst->dmaUpload(dstMip,&to,packed.data(),size_t(box.w)*4,false,dstFace);
+            if (status != SVGA3_VLKN_SUCCESS) return status;
+        }
+        dst->invalidateReadback();
+        return SVGA3_VLKN_SUCCESS;
+    }
+
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     const VkImageLayout srcLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;

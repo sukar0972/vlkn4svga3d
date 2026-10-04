@@ -134,7 +134,7 @@ public:
 
 private:
     bool isPackedDepth() const {
-        return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8;
+        return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8 || m_svgaFormat == SVGA3D_Z_DF24;
     }
     Svga3VlknStatus dmaPackedDepth(bool upload, uint32_t mipLevel, const SVGA3dBox *box,
                                   void *guestData, size_t guestStride, uint32_t face);
