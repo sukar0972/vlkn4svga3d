@@ -217,6 +217,13 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
              * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough.
              * (Mirrors advertised_devcap in qemu_svga3d_preload.cpp.) */
             switch (capIndex) {
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT1:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT2:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT3:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT4:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT5:
+                val = SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE;
+                break;
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D16:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8:

@@ -46,6 +46,7 @@ struct TextureStageState {
     uint32_t magFilter;
     uint32_t mipFilter;
     uint32_t maxAnisotropy;
+    uint32_t borderColor;
     float    mipLodBias;
     VkSampler sampler;
     bool     samplerDirty;
@@ -60,6 +61,7 @@ struct Svga3Shader {
     bool hasFragmentSideEffects = true;
     bool hasBytecodeKill = false;
     bool writesDepth = false;
+    std::array<uint32_t, 16> samplerDimensions = {};
     /* Pixel shaders are recompiled per depth-sampler mask. Bit N means stage N
      * was a depth texture when that variant was built. */
     std::unordered_map<uint32_t, VkShaderModule> depthVariants;
@@ -98,7 +100,7 @@ struct PipelineKey {
     uint32_t ccwStencilFail;
     uint32_t ccwStencilZFail;
     uint32_t ccwStencilPass;
-    uint32_t colorWriteMask;
+    uint32_t colorWriteMask[4];
     uint32_t numVertexDecls;
     VkRenderPass renderPass;
     uint64_t vertexDeclHash;
@@ -130,10 +132,10 @@ struct PipelineKeyHasher {
 };
 
 struct FramebufferKey {
-    uint32_t colorSid;
+    std::array<uint32_t, 4> colorSid;
     uint32_t depthSid;
     VkRenderPass renderPass;
-    VkImageView colorView;
+    std::array<VkImageView, 4> colorView;
     VkImageView depthView;
     uint32_t width;
     uint32_t height;
@@ -152,7 +154,7 @@ struct FramebufferKeyHasher {
     size_t operator()(const FramebufferKey &k) const {
         size_t h = 0xcbf29ce484222325ULL;
         h = (h ^ reinterpret_cast<uintptr_t>(k.renderPass)) * 0x100000001b3ULL;
-        h = (h ^ reinterpret_cast<uintptr_t>(k.colorView)) * 0x100000001b3ULL;
+        for (auto view : k.colorView) h = (h ^ reinterpret_cast<uintptr_t>(view)) * 0x100000001b3ULL;
         h = (h ^ reinterpret_cast<uintptr_t>(k.depthView)) * 0x100000001b3ULL;
         h = (h ^ (static_cast<size_t>(k.width) | (static_cast<size_t>(k.height) << 32))) * 0x100000001b3ULL;
         return h;
@@ -350,7 +352,7 @@ private:
     VkDescriptorSetLayout m_descriptorSetLayout;
     VkDescriptorSet m_descriptorSet;
     std::map<std::array<uint64_t, SVGA3_MAX_TEXTURE_STAGES * 2>, VkDescriptorSet> m_descriptorSetCache;
-    std::map<std::array<uint32_t, 9>, VkSampler> m_samplerCache;
+    std::map<std::array<uint32_t, 10>, VkSampler> m_samplerCache;
     bool m_descriptorSetInitialized;
     bool m_descriptorSetDirty;
     bool m_constantsDirty;

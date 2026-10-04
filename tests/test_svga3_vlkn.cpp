@@ -149,7 +149,10 @@ static void TestDeviceLifecycleAndCaps() {
         uint32_t supported = svga3_vlkn_query_cap(dev, dc.id, &capVal);
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
-            TEST_CHECK(capVal == dc.expectedValue, "Cap value " + std::string(dc.name));
+            const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
+            const uint32_t expected = compressedFormat ?
+                (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
+            TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
             TEST_CHECK(supported == 0, "Unsupported cap " + std::string(dc.name));
         }

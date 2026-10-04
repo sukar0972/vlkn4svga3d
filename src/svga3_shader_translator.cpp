@@ -181,6 +181,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     if (outHasBytecodeKill) *outHasBytecodeKill = false;
     if (outWritesDepth) *outWritesDepth = false;
     bool writesDepth = false;
+    uint32_t colorOutputMask = 0;
 
     /* Debug: dump D3D9 input alongside SPIR-V when SVGA3_VLKN_DUMP_SPIRV is set. */
     if (getenv("SVGA3_VLKN_DUMP_SPIRV")) {
@@ -390,6 +391,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             ParsedDest destination;
             if (parseDest(tokens[pc + 1], destination) && destination.regType == D3DSPR_DEPTHOUT)
                 writesDepth = true;
+            if (parseDest(tokens[pc + 1], destination) && destination.regType == D3DSPR_COLOROUT && destination.regNum < 4)
+                colorOutputMask |= 1u << destination.regNum;
         }
         /* Check for unsupported instructions */
         switch (op) {
@@ -677,7 +680,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     /* PS Interface */
     uint32_t psInColor[4] = { 0 };
     uint32_t psInTexCoords[8] = { 0 };
-    uint32_t psOutColor = 0;
+    uint32_t psOutColor[4] = {};
     uint32_t psOutDepth = 0;
     /* MISCTYPE sources: vPos -> BuiltIn FragCoord, vFace -> FrontFacing. */
     uint32_t psInFragCoord = 0;
@@ -740,8 +743,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             entryInterface.push_back(psInTexCoords[t]);
         }
         if (!depthOnly) {
-            psOutColor = b.allocId();
-            entryInterface.push_back(psOutColor);
+            for (uint32_t i = 0; i < 4; ++i) {
+                if (!(colorOutputMask & (1u << i)) && (i != 0 || colorOutputMask)) continue;
+                psOutColor[i] = b.allocId();
+                entryInterface.push_back(psOutColor[i]);
+            }
         }
         if (writesDepth) {
             psOutDepth = b.allocId();
@@ -806,7 +812,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.annotations, SpvOpDecorate, { psInTexCoords[t], SpvDecorationLocation, (uint32_t)(2 + t) });
         }
-        if (psOutColor) b.emitInst(b.annotations, SpvOpDecorate, { psOutColor, SpvDecorationLocation, 0 });
+        for (uint32_t i = 0; i < 4; ++i) if (psOutColor[i])
+            b.emitInst(b.annotations, SpvOpDecorate, { psOutColor[i], SpvDecorationLocation, i });
         if (psOutDepth) b.emitInst(b.annotations, SpvOpDecorate, {psOutDepth, SpvDecorationBuiltIn, SpvBuiltInFragDepth});
         if (psInFragCoord) {
             b.emitInst(b.annotations, SpvOpDecorate, { psInFragCoord, SpvDecorationBuiltIn, SpvBuiltInFragCoord });
@@ -937,7 +944,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, psInTexCoords[t], SpvStorageClassInput });
         }
-        if (psOutColor) b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, psOutColor, SpvStorageClassOutput });
+        for (uint32_t i = 0; i < 4; ++i) if (psOutColor[i])
+            b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, psOutColor[i], SpvStorageClassOutput });
         if (psOutDepth) b.emitInst(b.typesConstantsGlobals, SpvOpVariable, {ptrOutputFloat, psOutDepth, SpvStorageClassOutput});
         if (psInFragCoord) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, psInFragCoord, SpvStorageClassInput });
@@ -1329,7 +1337,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         } else if (effectiveRegType == D3DSPR_RASTOUT) {
             dstVar = outPosVar;
         } else if (effectiveRegType == D3DSPR_ATTROUT || effectiveRegType == D3DSPR_COLOROUT) {
-            dstVar = outColorVar[dst.regNum < 2 ? dst.regNum : 0];
+            dstVar = outColorVar[dst.regNum < 4 ? dst.regNum : 0];
         } else if (effectiveRegType == 6) { /* D3DSPR_TEXCRDOUT (SM 1/2) or D3DSPR_OUTPUT (SM 3) */
             if (isVS) {
                 if (major >= 3 && !outputRegToSemantic.empty()) {
@@ -2379,7 +2387,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpKill, {});
         b.emitInst(b.functionDefinitions, SpvOpLabel, { mergeLabel });
 
-        if (psOutColor) b.emitInst(b.functionDefinitions, SpvOpStore, { psOutColor, colVal });
+        for (uint32_t i = 0; i < 4; ++i) if (psOutColor[i]) {
+            const uint32_t value = b.allocId();
+            b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, value, outColorVar[i]});
+            b.emitInst(b.functionDefinitions, SpvOpStore, {psOutColor[i], value});
+        }
         if (psOutDepth) {
             const uint32_t depthVector = b.allocId(), depth = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, depthVector, outDepthVar});

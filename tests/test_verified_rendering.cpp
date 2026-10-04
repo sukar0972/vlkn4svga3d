@@ -402,6 +402,11 @@ int main() {
         const float projectedCoords[4] = {.8f, .8f, 0, 2};
         TEST_CHECK(sampleConstant(2, 1, SID_TEX, projectedCoords, {255,255,255,255}),
             "Projected TEX divides coordinates by w");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_ADDRESSU, SVGA3D_TEX_ADDRESS_BORDER);
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_BORDERCOLOR, 0xFF804020);
+        const float borderCoords[4] = {-2,.5f,0,1};
+        TEST_CHECK(sampleConstant(2, 0, SID_TEX, borderCoords, {32,64,128,255}), "Sampler preserves arbitrary border color");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_ADDRESSU, SVGA3D_TEX_ADDRESS_WRAP);
         const uint32_t volumeData[2] = {0xFFFF0000, 0xFF00FF00};
         const SVGA3dSize volumeSize = {1,1,2};
         TEST_CHECK(svga3_vlkn_surface_define(dev, 94, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8,
@@ -409,6 +414,10 @@ int main() {
         svga3_vlkn_surface_dma_upload(dev, 94, 0, nullptr, volumeData, 4);
         const float volumeCoords[4] = {.5f,.5f,.75f,1};
         TEST_CHECK(sampleConstant(4, 0, 94, volumeCoords, {0,255,0,255}), "Volume TEX samples the selected z slice");
+        const SVGA3dSize flatVolume = {1,1,1};
+        svga3_vlkn_surface_define(dev, 94, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8, &flatVolume, 1);
+        svga3_vlkn_surface_dma_upload(dev, 94, 0, nullptr, volumeData, 4);
+        TEST_CHECK(sampleConstant(4, 0, 94, volumeCoords, {0,0,255,255}), "Depth-one volume retains its data and a 3D view");
         const SVGA3dSize cubeSizes[6] = {{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1}};
         TEST_CHECK(svga3_vlkn_surface_define(dev, 95, SVGA3D_SURFACE_HINT_TEXTURE | SVGA3D_SURFACE_CUBEMAP,
             SVGA3D_A8R8G8B8, cubeSizes, 6) == SVGA3_VLKN_SUCCESS, "Define cube texture");
@@ -444,6 +453,44 @@ int main() {
         for (uint32_t sid = 94; sid <= 96; ++sid) svga3_vlkn_surface_destroy(dev, sid);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
         svga3_vlkn_surface_destroy(dev, 90);
+
+        // Distinct MRT outputs, a hole at location 0, and cached small targets.
+        const SVGA3dSize smallSize = {64,64,1};
+        for (uint32_t sid = 98; sid < 102; ++sid) {
+            TEST_CHECK(svga3_vlkn_surface_define(dev, sid, SVGA3D_SURFACE_HINT_RENDERTARGET,
+                SVGA3D_A8R8G8B8, &smallSize, 1) == SVGA3_VLKN_SUCCESS, "Define small MRT target");
+            svga3_vlkn_context_set_render_target(dev, CID, (SVGA3dRenderTargetType)(SVGA3D_RT_COLOR0 + sid - 98), sid, 0, 0);
+        }
+        const uint32_t mrtShader[] = {0xFFFF0300,
+            1 | (2 << 24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4),
+            1 | (2 << 24), D3D9_DST(8,1,15), D3D9_SRC(2,1,0xE4),
+            1 | (2 << 24), D3D9_DST(8,2,15), D3D9_SRC(2,2,0xE4),
+            1 | (2 << 24), D3D9_DST(8,3,15), D3D9_SRC(2,3,0xE4), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 98, SVGA3D_SHADERTYPE_PS,
+            mrtShader, sizeof(mrtShader)/4) == SVGA3_VLKN_SUCCESS, "Define four-output shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 98);
+        const float outputColors[4][4] = {{1,0,0,1},{0,1,0,1},{0,0,1,1},{1,1,0,1}};
+        std::vector<Pixel> smallPixels(64*64);
+        for (uint32_t i = 0; i < 4; ++i) {
+            uint32_t value[4]; memcpy(value, outputColors[i], sizeof(value));
+            svga3_vlkn_context_set_shader_const(dev, CID, i, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, value);
+            svga3_vlkn_surface_dma_download(dev, 98+i, 0, nullptr, smallPixels.data(), 64*4);
+        }
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+            == SVGA3_VLKN_SUCCESS, "Draw distinct MRT outputs");
+        for (uint32_t i = 0; i < 4; ++i) {
+            svga3_vlkn_surface_dma_download(dev, 98+i, 0, nullptr, smallPixels.data(), 64*4);
+            TEST_CHECK(pixelMatches(smallPixels[24*64+24], outputColors[i][0]*255,
+                outputColors[i][1]*255, outputColors[i][2]*255, 255), "Every MRT writes its independent color after a cached read");
+        }
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, nullptr, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 101, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],255,255,0,255), "MRT location 3 survives an unbound location 0");
+        for (uint32_t i = 1; i < 4; ++i)
+            svga3_vlkn_context_set_render_target(dev, CID, (SVGA3dRenderTargetType)(SVGA3D_RT_COLOR0+i), SVGA3D_INVALID_ID, 0, 0);
+        for (uint32_t sid = 98; sid < 102; ++sid) svga3_vlkn_surface_destroy(dev, sid);
 
         /* Clean up Scene 1 */
         svga3_vlkn_context_destroy(dev, CID);

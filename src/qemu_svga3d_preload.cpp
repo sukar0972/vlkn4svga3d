@@ -510,7 +510,7 @@ static void ensure_vlkn_device(void *s) {
     Svga3VlknConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.appName = "PlayBook SVGA3D Vulkan";
-    cfg.apiVersion = VK_API_VERSION_1_0;
+    cfg.apiVersion = VK_API_VERSION_1_1;
     cfg.stagingBufferSize = 64 * 1024 * 1024;
     cfg.forceMockBackend = false;
     cfg.enableValidationLayers = preload_validation_requested();
@@ -563,6 +563,12 @@ static uint32_t advertised_devcap(const DevCapInfo &cap) {
             | SVGA3DFORMAT_OP_3DACCELERATION
             | SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB
             | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT1:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT2:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT3:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT4:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT5:
+        return SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE;
     case SVGA3D_DEVCAP_SURFACEFMT_Z_D16:
     case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8:
     case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8:

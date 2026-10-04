@@ -72,12 +72,14 @@ public:
     uint32_t width() const { return m_width; }
     uint32_t height() const { return m_height; }
     uint32_t depth() const { return m_depth; }
+    bool isVolumeImage() const { return m_depth > 1 || m_volumeImage; }
     uint32_t mipLevels() const { return m_mipLevels; }
     uint32_t viewMipLevels() const { return m_viewMipLevels; }
     /* Expand the sampled view to cover `levels` mip levels. Returns false
      * if the wider view could not be created; the previous view is then
      * kept untouched, so callers may safely keep sampling through it. */
     bool ensureViewMipLevels(uint32_t levels);
+    Svga3VlknStatus ensureVolumeImage();
     uint32_t arrayLayers() const { return m_arrayLayers; }
     uint32_t multisampleCount() const { return m_multisampleCount; }
     SVGA3dTextureFilter autogenFilter() const { return m_autogenFilter; }
@@ -146,6 +148,7 @@ private:
     uint32_t m_width;
     uint32_t m_height;
     uint32_t m_depth;
+    bool m_volumeImage = false;
     uint32_t m_mipLevels;
     uint32_t m_arrayLayers;
     uint32_t m_multisampleCount;
@@ -208,6 +211,7 @@ public:
 
     Svga3VlknStatus destroySurface(uint32_t sid);
     VlknSurface* getSurface(uint32_t sid);
+    Svga3VlknStatus ensureVolumeSurface(uint32_t sid);
     bool exists(uint32_t sid) const;
     void clear();
 

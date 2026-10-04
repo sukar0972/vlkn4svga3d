@@ -352,7 +352,7 @@ Svga3VlknStatus VlknSurface::allocate() {
 
     VkImageCreateInfo imgInfo = {};
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imgInfo.imageType = (m_depth > 1 && !m_isCubeMap) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    imgInfo.imageType = ((m_depth > 1 || m_volumeImage) && !m_isCubeMap) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     imgInfo.format = m_vkFormat;
     imgInfo.extent.width = m_width;
     imgInfo.extent.height = m_height;
@@ -365,6 +365,7 @@ Svga3VlknStatus VlknSurface::allocate() {
     else if (m_multisampleCount >= 4) samples = (VkSampleCountFlagBits)0x00000004;
     else if (m_multisampleCount >= 2) samples = (VkSampleCountFlagBits)0x00000002;
     imgInfo.samples = samples;
+    if (imgInfo.imageType == VK_IMAGE_TYPE_3D) imgInfo.flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -423,7 +424,7 @@ Svga3VlknStatus VlknSurface::allocate() {
     viewInfo.image = m_image;
     if (m_isCubeMap) {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    } else if (m_depth > 1) {
+    } else if (m_depth > 1 || m_volumeImage) {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
     } else {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -478,6 +479,65 @@ Svga3VlknStatus VlknSurface::allocate() {
 
     }
     return SVGA3_VLKN_SUCCESS;
+}
+
+// SVGA's old surface definition has no volume flag when depth is one.
+// Promote it once the shader's sampler declaration supplies that information.
+Svga3VlknStatus VlknSurface::ensureVolumeImage() {
+    if (m_depth > 1 || m_volumeImage) return SVGA3_VLKN_SUCCESS;
+    if (!m_image || m_isCubeMap || m_buffer) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    auto status = m_backend->flushCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) return status;
+    VkImage oldImage = m_image;
+    VkDeviceMemory oldMemory = m_memory;
+    VkImageView oldView = m_imageView;
+    VkImageLayout oldLayout = m_currentLayout;
+    uint32_t oldLevels = m_viewMipLevels;
+    m_image = VK_NULL_HANDLE; m_memory = VK_NULL_HANDLE; m_imageView = VK_NULL_HANDLE;
+    m_volumeImage = true;
+    status = allocate();
+    if (status != SVGA3_VLKN_SUCCESS) {
+        m_volumeImage = false;
+        m_image = oldImage; m_memory = oldMemory; m_imageView = oldView;
+        m_currentLayout = oldLayout; m_viewMipLevels = oldLevels;
+        return status;
+    }
+    VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.oldLayout = oldLayout; barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = oldImage;
+    barrier.subresourceRange.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    if (svga3_format_has_stencil(m_svgaFormat)) barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    barrier.subresourceRange.levelCount = m_mipLevels; barrier.subresourceRange.layerCount = 1;
+    m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    transitionLayout(cb, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    for (uint32_t level = 0; level < m_mipLevels; ++level) {
+        VkImageCopy region = {};
+        region.srcSubresource.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+        region.srcSubresource.mipLevel = level; region.srcSubresource.layerCount = 1;
+        region.dstSubresource = region.srcSubresource;
+        region.extent = {m_mips[level].width, m_mips[level].height, 1};
+        m_backend->dispatch().vkCmdCopyImage(cb, oldImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        if (svga3_format_has_stencil(m_svgaFormat)) {
+            region.srcSubresource.aspectMask = region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+            m_backend->dispatch().vkCmdCopyImage(cb, oldImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+    }
+    status = m_backend->flushCommandBuffer();
+    m_backend->dispatch().vkDestroyImageView(m_backend->device(), oldView, nullptr);
+    for (auto &view : m_rtViews) m_backend->dispatch().vkDestroyImageView(m_backend->device(), view.second, nullptr);
+    m_rtViews.clear();
+    m_backend->dispatch().vkDestroyImage(m_backend->device(), oldImage, nullptr);
+    m_backend->freeMemory(oldMemory);
+    invalidateReadback();
+    return status;
 }
 
 /* The tracker describes the entire image, so every transition covers every
@@ -632,7 +692,7 @@ bool VlknSurface::ensureViewMipLevels(uint32_t levels) {
     viewInfo.image = m_image;
     if (m_isCubeMap) {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    } else if (m_depth > 1) {
+    } else if (m_depth > 1 || m_volumeImage) {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_3D;
     } else {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -1635,6 +1695,14 @@ Svga3VlknStatus VlknSurfaceManager::destroySurface(uint32_t sid) {
     m_backend->resourceBudgets().releaseSurfaceBytes(it->second->budgetedBytes());
     m_surfaces.erase(it);
     return SVGA3_VLKN_SUCCESS;
+}
+
+Svga3VlknStatus VlknSurfaceManager::ensureVolumeSurface(uint32_t sid) {
+    auto *surface = getSurface(sid);
+    if (!surface) return SVGA3_VLKN_ERROR_NOT_FOUND;
+    if (surface->isVolumeImage()) return SVGA3_VLKN_SUCCESS;
+    if (m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    return surface->ensureVolumeImage();
 }
 
 VlknSurface* VlknSurfaceManager::getSurface(uint32_t sid) {
