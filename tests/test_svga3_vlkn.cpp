@@ -27,6 +27,12 @@
 
 static int g_testsPassed = 0;
 static int g_testsFailed = 0;
+static void VKAPI_CALL formatWithoutBlend(VkPhysicalDevice, VkFormat, VkFormatProperties* properties) {
+    memset(properties, 0, sizeof(*properties));
+    properties->optimalTilingFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
+        | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+}
+
 static PFN_vkQueueSubmit g_originalQueueSubmit = nullptr;
 static uint32_t g_queueSubmitCount = 0;
 
@@ -157,6 +163,17 @@ static void TestDeviceLifecycleAndCaps() {
             TEST_CHECK(supported == 0, "Unsupported cap " + std::string(dc.name));
         }
     }
+
+    auto& dispatch = dev->backend->dispatch();
+    auto originalFormatProperties = dispatch.vkGetPhysicalDeviceFormatProperties;
+    dispatch.vkGetPhysicalDeviceFormatProperties = formatWithoutBlend;
+    sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4, &val);
+    TEST_CHECK(sup && (val & SVGA3DFORMAT_OP_NOALPHABLEND), "4444 advertises hardware blend restriction");
+    TEST_CHECK((val & SVGA3DFORMAT_OP_TEXTURE) && (val & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET),
+               "4444 keeps texturing and unblended render targets");
+    dispatch.vkGetPhysicalDeviceFormatProperties = originalFormatProperties;
+    svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4, &val);
+    TEST_CHECK(!(val & SVGA3DFORMAT_OP_NOALPHABLEND), "4444 blending remains enabled on capable hardware");
 
     /* Verify reset & wait idle */
     Svga3VlknStatus st = svga3_vlkn_device_reset(dev);

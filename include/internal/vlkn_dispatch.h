@@ -25,6 +25,7 @@ typedef struct VlknDispatchTable {
     PFN_vkDestroyInstance                    vkDestroyInstance;
     PFN_vkEnumeratePhysicalDevices           vkEnumeratePhysicalDevices;
     PFN_vkGetPhysicalDeviceProperties        vkGetPhysicalDeviceProperties;
+    PFN_vkGetPhysicalDeviceFormatProperties  vkGetPhysicalDeviceFormatProperties;
     PFN_vkGetPhysicalDeviceFeatures          vkGetPhysicalDeviceFeatures;
     PFN_vkGetPhysicalDeviceMemoryProperties  vkGetPhysicalDeviceMemoryProperties;
     PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;

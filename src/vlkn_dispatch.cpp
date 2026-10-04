@@ -125,6 +125,14 @@ static VkResult VKAPI_CALL mock_vkEnumeratePhysicalDevices(VkInstance instance, 
     return VK_INCOMPLETE;
 }
 
+static void VKAPI_CALL mock_vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice, VkFormat,
+                                                               VkFormatProperties* properties) {
+    memset(properties, 0, sizeof(*properties));
+    properties->optimalTilingFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
+        | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT
+        | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+}
+
 static void VKAPI_CALL mock_vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties* pProperties) {
     (void)physicalDevice;
     memset(pProperties, 0, sizeof(*pProperties));
@@ -980,6 +988,7 @@ static void populate_mock_table(VlknDispatchTable *t) {
     t->vkDestroyInstance = mock_vkDestroyInstance;
     t->vkEnumeratePhysicalDevices = mock_vkEnumeratePhysicalDevices;
     t->vkGetPhysicalDeviceProperties = mock_vkGetPhysicalDeviceProperties;
+    t->vkGetPhysicalDeviceFormatProperties = mock_vkGetPhysicalDeviceFormatProperties;
     t->vkGetPhysicalDeviceFeatures = mock_vkGetPhysicalDeviceFeatures;
     t->vkGetPhysicalDeviceMemoryProperties = mock_vkGetPhysicalDeviceMemoryProperties;
     t->vkGetPhysicalDeviceQueueFamilyProperties = mock_vkGetPhysicalDeviceQueueFamilyProperties;
@@ -1115,13 +1124,15 @@ bool vlkn_dispatch_init_instance(VlknDispatchTable *table, VkInstance instance) 
     table->vkDestroyInstance = (PFN_vkDestroyInstance)table->vkGetInstanceProcAddr(instance, "vkDestroyInstance");
     table->vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)table->vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices");
     table->vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)table->vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties");
+    table->vkGetPhysicalDeviceFormatProperties = (PFN_vkGetPhysicalDeviceFormatProperties)table->vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties");
     table->vkGetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)table->vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures");
     table->vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)table->vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceMemoryProperties");
     table->vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)table->vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
     table->vkCreateDevice = (PFN_vkCreateDevice)table->vkGetInstanceProcAddr(instance, "vkCreateDevice");
 
     if (!table->vkDestroyInstance || !table->vkEnumeratePhysicalDevices ||
-        !table->vkGetPhysicalDeviceProperties || !table->vkGetPhysicalDeviceFeatures ||
+        !table->vkGetPhysicalDeviceProperties || !table->vkGetPhysicalDeviceFormatProperties ||
+        !table->vkGetPhysicalDeviceFeatures ||
         !table->vkGetPhysicalDeviceMemoryProperties ||
         !table->vkGetPhysicalDeviceQueueFamilyProperties || !table->vkCreateDevice) {
         return false;

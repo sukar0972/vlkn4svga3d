@@ -127,3 +127,91 @@
     case TGSI_TEXTURE_SHADOW2D:
        return SVGA3DSAMP_2D_SHADOW;
     case TGSI_TEXTURE_3D:
+--- a/src/gallium/drivers/svga/svga_screen.c
++++ b/src/gallium/drivers/svga/svga_screen.c
+@@ -205,0 +206,2 @@
++   case PIPE_CAP_RGB_OVERRIDE_DST_ALPHA_BLEND:
++      return debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false);
+--- a/src/gallium/drivers/svga/svga_pipe_blit.c
++++ b/src/gallium/drivers/svga/svga_pipe_blit.c
+@@ -34 +34,2 @@
+-//#include "util/u_blit_sw.h"
++#include "util/u_inlines.h"
++#include "util/u_memory.h"
+@@ -748,0 +750,72 @@
++/** Copy matching packed depth/stencil pixels when a framebuffer flip prevents
++ * the ordinary copy-region path. Snapshot the source before mapping the
++ * destination so overlapping copies are safe too.
++ */
++static bool
++try_flipped_depth_stencil_copy(struct svga_context *svga,
++                              const struct pipe_blit_info *blit)
++{
++   const struct pipe_box *src = &blit->src.box, *dst = &blit->dst.box;
++   if (!debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) ||
++       blit->mask != PIPE_MASK_ZS || blit->filter != PIPE_TEX_FILTER_NEAREST ||
++       blit->src.resource->format != blit->dst.resource->format ||
++       blit->src.format != blit->src.resource->format ||
++       blit->dst.format != blit->dst.resource->format ||
++       !util_format_is_depth_and_stencil(blit->src.format) ||
++       blit->scissor_enable || blit->window_rectangle_include || blit->alpha_blend ||
++       (svga->render_condition && blit->render_condition_enable) ||
++       blit->src.resource->nr_samples > 1 || blit->dst.resource->nr_samples > 1 ||
++       src->depth != 1 || dst->depth != 1 ||
++       abs(src->width) != abs(dst->width) || abs(src->height) != abs(dst->height))
++      return false;
++
++   unsigned width = abs(src->width), height = abs(src->height);
++   if (!width || !height)
++      return true;
++   int sx = src->x + MIN2(src->width, 0), sy = src->y + MIN2(src->height, 0);
++   int dx = dst->x + MIN2(dst->width, 0), dy = dst->y + MIN2(dst->height, 0);
++   if (sx < 0 || sy < 0 || dx < 0 || dy < 0 ||
++       (uint64_t)sx + width > u_minify(blit->src.resource->width0, blit->src.level) ||
++       (uint64_t)sy + height > u_minify(blit->src.resource->height0, blit->src.level) ||
++       (uint64_t)dx + width > u_minify(blit->dst.resource->width0, blit->dst.level) ||
++       (uint64_t)dy + height > u_minify(blit->dst.resource->height0, blit->dst.level))
++      return false;
++
++   unsigned pixel_size = util_format_get_blocksize(blit->src.format);
++   size_t row_size = (size_t)width * pixel_size;
++   uint8_t *snapshot = MALLOC(row_size * height);
++   if (!snapshot)
++      return false;
++   struct pipe_transfer *transfer = NULL;
++   uint8_t *map = pipe_texture_map(&svga->pipe, blit->src.resource, blit->src.level,
++                                 src->z, PIPE_MAP_READ, sx, sy, width, height, &transfer);
++   if (!map) {
++      FREE(snapshot);
++      return false;
++   }
++   for (unsigned y = 0; y < height; ++y)
++      memcpy(snapshot + y * row_size, map + y * transfer->stride, row_size);
++   pipe_texture_unmap(&svga->pipe, transfer);
++
++   map = pipe_texture_map(&svga->pipe, blit->dst.resource, blit->dst.level,
++                          dst->z, PIPE_MAP_WRITE, dx, dy, width, height, &transfer);
++   if (!map) {
++      FREE(snapshot);
++      return false;
++   }
++   bool flip_x = (src->width < 0) != (dst->width < 0);
++   bool flip_y = (src->height < 0) != (dst->height < 0);
++   for (unsigned y = 0; y < height; ++y) {
++      const uint8_t *row = snapshot + (flip_y ? height - 1 - y : y) * row_size;
++      uint8_t *out = map + y * transfer->stride;
++      if (!flip_x)
++         memcpy(out, row, row_size);
++      else
++         for (unsigned x = 0; x < width; ++x)
++            memcpy(out + x * pixel_size, row + (width - 1 - x) * pixel_size, pixel_size);
++   }
++   pipe_texture_unmap(&svga->pipe, transfer);
++   FREE(snapshot);
++   return true;
++}
++
+@@ -755,0 +829,3 @@
++   if (try_flipped_depth_stencil_copy(svga, blit))
++      return true;
++

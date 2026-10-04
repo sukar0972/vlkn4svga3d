@@ -34,3 +34,5 @@ python3 scripts/run_piglit.py --ssh svga3d@10.0.0.144 \
 The runner checks the loaded module path and records its SHA-256. It clears the driver path and extension environment for the llvmpipe reference.
 
 Color-write states use the same `0x564c` tag, retain the RGBA mask in bits 0–3, and mark a logical RGB attachment with bit 8. Mesa emits each attachment separately so blending can treat its destination alpha as one even when the physical image is RGBA.
+
+The opt-in driver also requests Mesa’s logical RGB destination-alpha override, emits valid 1D shadow sampler declarations, and copies matching packed depth/stencil pixels through CPU maps when framebuffer orientation requires a flip. The fallback preserves both planes and snapshots the source before writing, including overlapping copies; scaling and multisampling retain the existing paths.
