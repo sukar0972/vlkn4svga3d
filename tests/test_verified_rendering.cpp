@@ -324,6 +324,50 @@ int main() {
         savePPM("artifacts/scene1_reference.ppm", refFb.data(), RT_W, RT_H);
         saveDiffPPM("artifacts/scene1_diff.ppm", fb.data(), refFb.data(), RT_W, RT_H);
 
+        /* Packed guest formats must sample by component, not merely round-trip
+         * their bytes. These values are independent of the oracle's tables. */
+        struct FormatProbe { SVGA3dSurfaceFormat format; uint64_t word; size_t bytes; Pixel expected; };
+        const FormatProbe probes[] = {
+            {SVGA3D_R5G6B5, 0xF800, 2, {0, 0, 255, 255}},
+            {SVGA3D_A1R5G5B5, 0x83E0, 2, {0, 255, 0, 255}},
+            {SVGA3D_X1R5G5B5, 0x001F, 2, {255, 0, 0, 255}},
+            {SVGA3D_A4R4G4B4, 0x8421, 2, {17, 34, 68, 136}},
+            {SVGA3D_A16B16G16R16, UINT64_C(0xFFFFBFFF80004000), 8, {191, 128, 64, 255}},
+            {SVGA3D_A2R10G10B10, UINT64_C(0xBFF80000), 4, {0, 128, 255, 170}},
+            {SVGA3D_LUMINANCE16, 0x8000, 2, {128, 128, 128, 255}},
+            {SVGA3D_LUMINANCE8_ALPHA8, 0x8040, 2, {64, 64, 64, 128}},
+            {SVGA3D_ALPHA8, 0x80, 1, {0, 0, 0, 128}}
+        };
+        const float whiteTint[4] = {1, 1, 1, 1};
+        memcpy(tintVal, whiteTint, sizeof(tintVal));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, tintVal);
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 90, SVGA3D_SURFACE_HINT_RENDERTARGET,
+            SVGA3D_A8R8G8B8, &rtSize, 1) == SVGA3_VLKN_SUCCESS, "Define format probe target");
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 90, 0, 0);
+        for (const auto &probe : probes) {
+            TEST_CHECK(svga3_vlkn_surface_define(dev, 91, SVGA3D_SURFACE_HINT_TEXTURE,
+                probe.format, &texSize, 1) == SVGA3_VLKN_SUCCESS, "Define packed/component texture");
+            std::vector<uint8_t> data(probe.bytes * 4);
+            for (size_t i = 0; i < 4; ++i) memcpy(data.data() + i * probe.bytes, &probe.word, probe.bytes);
+            TEST_CHECK(svga3_vlkn_surface_dma_upload(dev, 91, 0, nullptr, data.data(), probe.bytes * 2)
+                == SVGA3_VLKN_SUCCESS, "Upload packed/component texture");
+            svga3_vlkn_context_set_texture(dev, CID, 0, 91);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+                == SVGA3_VLKN_SUCCESS, "Sample packed/component texture");
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4)
+                == SVGA3_VLKN_SUCCESS, "Read packed/component pixels");
+            Pixel actual = fb[32 * RT_W + 32];
+            TEST_CHECK(pixelMatches(actual, probe.expected.r, probe.expected.g, probe.expected.b, probe.expected.a),
+                "Packed/component texture has the expected RGBA values");
+            std::vector<uint8_t> readback(data.size());
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, 91, 0, nullptr, readback.data(), probe.bytes * 2)
+                == SVGA3_VLKN_SUCCESS && readback == data, "Packed/component texture retains guest byte layout");
+            svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+            svga3_vlkn_surface_destroy(dev, 91);
+        }
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_surface_destroy(dev, 90);
+
         /* Clean up Scene 1 */
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);

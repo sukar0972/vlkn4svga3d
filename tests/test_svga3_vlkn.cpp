@@ -189,7 +189,7 @@ static void TestSurfaceFormatMappings() {
     TEST_CHECK(svga3_format_to_vk(SVGA3D_Z_D24S8) == VK_FORMAT_D24_UNORM_S8_UINT, "SVGA3D_Z_D24S8 format");
     TEST_CHECK(svga3_format_to_vk(SVGA3D_Z_D16) == VK_FORMAT_D16_UNORM, "SVGA3D_Z_D16 format");
     TEST_CHECK(svga3_format_to_vk(SVGA3D_X8R8G8B8) == VK_FORMAT_B8G8R8A8_UNORM, "SVGA3D_X8R8G8B8 format");
-    TEST_CHECK(svga3_format_to_vk(SVGA3D_R5G6B5) == VK_FORMAT_B5G6R5_UNORM_PACK16, "SVGA3D_R5G6B5 format");
+    TEST_CHECK(svga3_format_to_vk(SVGA3D_R5G6B5) == VK_FORMAT_R5G6B5_UNORM_PACK16, "SVGA3D_R5G6B5 format");
 
     std::cout << ANSI_GREEN << "  Verified " << matchedCount << "/" << fmtCount << " surface formats matching Oracle." << ANSI_RESET << std::endl;
 }

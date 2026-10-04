@@ -14,6 +14,22 @@ extern "C" void log_msg(const char *fmt, ...);
 
 namespace svga3_vlkn {
 
+static VkComponentMapping sampleComponents(SVGA3dSurfaceFormat format) {
+    VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    switch (format) {
+        case SVGA3D_X8R8G8B8: case SVGA3D_X1R5G5B5:
+            identity.a = VK_COMPONENT_SWIZZLE_ONE; return identity;
+        case SVGA3D_LUMINANCE8: case SVGA3D_LUMINANCE16:
+            return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ONE};
+        case SVGA3D_LUMINANCE8_ALPHA8:
+            return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G};
+        case SVGA3D_ALPHA8:
+            return {VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_R};
+        default: return identity;
+    }
+}
+
 size_t svga3_format_bytes_per_pixel(SVGA3dSurfaceFormat format) {
     switch (format) {
         case SVGA3D_BUFFER:
@@ -413,16 +429,9 @@ Svga3VlknStatus VlknSurface::allocate() {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     }
     viewInfo.format = m_vkFormat;
-    viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.a = (m_svgaFormat == SVGA3D_X8R8G8B8 || m_svgaFormat == SVGA3D_X1R5G5B5) ?
-                            VK_COMPONENT_SWIZZLE_ONE : VK_COMPONENT_SWIZZLE_IDENTITY;
-
-    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ?
-        (svga3_format_has_stencil(m_svgaFormat) ?
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
-            VK_IMAGE_ASPECT_DEPTH_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.components = sampleComponents(m_svgaFormat);
+    /* Sample only depth; attachment views retain both depth and stencil. */
+    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     m_viewMipLevels = (m_autogenFilter != SVGA3D_TEX_FILTER_NONE) ? m_mipLevels : 1;
     viewInfo.subresourceRange.levelCount = m_viewMipLevels;
@@ -629,16 +638,9 @@ bool VlknSurface::ensureViewMipLevels(uint32_t levels) {
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     }
     viewInfo.format = m_vkFormat;
-    viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    viewInfo.components.a = (m_svgaFormat == SVGA3D_X8R8G8B8 || m_svgaFormat == SVGA3D_X1R5G5B5) ?
-                            VK_COMPONENT_SWIZZLE_ONE : VK_COMPONENT_SWIZZLE_IDENTITY;
-
-    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ?
-        (svga3_format_has_stencil(m_svgaFormat) ?
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
-            VK_IMAGE_ASPECT_DEPTH_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.components = sampleComponents(m_svgaFormat);
+    /* Sample only depth; attachment views retain both depth and stencil. */
+    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = targetLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -1089,6 +1091,18 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
         }
     }
 
+    /* Guest A4R4G4B4 is ARGB in a 16-bit word; the portable Vulkan
+     * B4G4R4A4 format reverses the component nibble order. */
+    if (m_svgaFormat == SVGA3D_A4R4G4B4) {
+        for (size_t i = 0; i < totalBytes; i += 2) {
+            uint16_t value;
+            memcpy(&value, static_cast<uint8_t*>(mapped) + i, 2);
+            value = uint16_t(((value & 0x000F) << 12) | ((value & 0x00F0) << 4) |
+                             ((value & 0x0F00) >> 4) | ((value & 0xF000) >> 12));
+            memcpy(static_cast<uint8_t*>(mapped) + i, &value, 2);
+        }
+    }
+
     if (!usingPersistentStaging) {
         m_backend->dispatch().vkUnmapMemory(m_backend->device(), stagingMem);
     }
@@ -1309,6 +1323,16 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
         return flushSt;
     }
 
+    if (m_svgaFormat == SVGA3D_A4R4G4B4) {
+        auto *packed = static_cast<uint8_t*>(m_backend->stagingMappedAt(stagingOffset));
+        for (size_t i = 0; i < totalBytes; i += 2) {
+            uint16_t value;
+            memcpy(&value, packed + i, 2);
+            value = uint16_t(((value & 0x000F) << 12) | ((value & 0x00F0) << 4) |
+                             ((value & 0x0F00) >> 4) | ((value & 0xF000) >> 12));
+            memcpy(packed + i, &value, 2);
+        }
+    }
     *outMappedData = m_backend->stagingMappedAt(stagingOffset);
     *outRowPitch = copyRowBytes;
     outLock = std::move(lock);
@@ -1500,6 +1524,15 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
 
+    if (m_svgaFormat == SVGA3D_A4R4G4B4) {
+        for (size_t i = 0; i < totalBytes; i += 2) {
+            uint16_t value;
+            memcpy(&value, static_cast<uint8_t*>(mapped) + i, 2);
+            value = uint16_t(((value & 0x000F) << 12) | ((value & 0x00F0) << 4) |
+                             ((value & 0x0F00) >> 4) | ((value & 0xF000) >> 12));
+            memcpy(static_cast<uint8_t*>(mapped) + i, &value, 2);
+        }
+    }
     if (guestStride == 0 || guestStride == copyRowBytes) {
         memcpy(outGuestData, mapped, totalBytes);
     } else {
