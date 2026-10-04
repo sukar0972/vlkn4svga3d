@@ -2046,6 +2046,27 @@ static void TestMemoryTypeFailureHardening() {
     TEST_CHECK(dev != nullptr, "Create hardening-test device");
     if (!dev) return;
 
+    // A cache preference must never select incoherent memory or override
+    // the buffer's compatible memory-type mask.
+    const auto required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    const auto cached = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    auto& memory = const_cast<VkPhysicalDeviceMemoryProperties&>(dev->backend->memoryProperties());
+    const auto originalFlags = memory.memoryTypes[2].propertyFlags;
+    TEST_CHECK(dev->backend->findMemoryType(7, required, cached) == 1,
+               "Cached noncoherent memory cannot satisfy coherent staging");
+    memory.memoryTypes[2].propertyFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    TEST_CHECK(dev->backend->findMemoryType(7, required, cached) == 2,
+               "Coherent cached memory is preferred when compatible");
+    TEST_CHECK(dev->backend->findMemoryType(7, required) == 1,
+               "Unspecified preference preserves ordinary allocation choice");
+    TEST_CHECK(dev->backend->findMemoryType(2, required, cached) == 1,
+               "Unavailable cache preference retains compatible coherent fallback");
+    TEST_CHECK(dev->backend->findMemoryType(1, required, cached) == -1,
+               "Preference cannot relax required host-visible properties");
+    TEST_CHECK(dev->backend->findMemoryType(2, required | cached) == -1,
+               "Mandatory cached property retains strict failure semantics");
+    memory.memoryTypes[2].propertyFlags = originalFlags;
+
     const long baseImages = svga3_mock_live_images();
     const long baseMemory = svga3_mock_live_memory();
     const long baseViews  = svga3_mock_live_views();

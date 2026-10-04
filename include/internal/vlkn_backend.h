@@ -62,7 +62,8 @@ public:
     /* Memory allocation helpers */
     /* Returns the memory type index, or -1 if no type in typeFilter has all
      * requested properties. Never falls back to a type lacking the properties. */
-    int findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    int findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties,
+                       VkMemoryPropertyFlags preferredProperties = 0);
     Svga3VlknStatus allocateMemory(VkDeviceSize size, uint32_t memoryTypeIndex, VkDeviceMemory *outMemory);
     void freeMemory(VkDeviceMemory memory);
 
@@ -71,7 +72,8 @@ public:
                                  VkBufferUsageFlags usage,
                                  VkMemoryPropertyFlags properties,
                                  VkBuffer *outBuffer,
-                                 VkDeviceMemory *outMemory);
+                                 VkDeviceMemory *outMemory,
+                                 VkMemoryPropertyFlags preferredProperties = 0);
     void destroyBuffer(VkBuffer buffer, VkDeviceMemory memory);
 
     /* Staging buffer operations */
