@@ -1534,8 +1534,7 @@ Svga3VlknStatus VlknContext::ensureRenderPassActive() {
         barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
         barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         barrier.image = depthSurf->image();
-        barrier.subresourceRange.aspectMask = svga3_format_has_stencil(depthSurf->svgaFormat()) ?
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) : VK_IMAGE_ASPECT_DEPTH_BIT;
+        barrier.subresourceRange.aspectMask = depthSurf->nativeAspectMask();
         barrier.subresourceRange.baseMipLevel = 0;
         barrier.subresourceRange.levelCount = depthSurf->mipLevels();
         barrier.subresourceRange.baseArrayLayer = 0;
@@ -1807,6 +1806,19 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             key.ccwStencilFail = m_renderStates[SVGA3D_RS_CCWSTENCILFAIL];
             key.ccwStencilZFail = m_renderStates[SVGA3D_RS_CCWSTENCILZFAIL];
             key.ccwStencilPass = m_renderStates[SVGA3D_RS_CCWSTENCILPASS];
+            key.ccwStencilRef = key.stencilRef;
+            key.ccwStencilMask = key.stencilMask;
+            key.ccwStencilWriteMask = key.stencilWriteMask;
+            // Opt-in Mesa extension: tag + CW byte + CCW byte.
+            auto unpack = [](uint32_t &cw, uint32_t &ccw) {
+                if ((cw & 0xFFFF0000u) == 0x564C0000u) {
+                    ccw = (cw >> 8) & 255;
+                    cw &= 255;
+                }
+            };
+            unpack(key.stencilRef, key.ccwStencilRef);
+            unpack(key.stencilMask, key.ccwStencilMask);
+            unpack(key.stencilWriteMask, key.ccwStencilWriteMask);
         }
     }
     key.colorWriteMask[0] = m_renderStates[SVGA3D_RS_COLORWRITEENABLE];
@@ -2126,9 +2138,9 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             dsInfo.back.passOp = ::svga3_stencil_op_to_vk((SVGA3dStencilOp)key.ccwStencilPass);
             dsInfo.back.depthFailOp = ::svga3_stencil_op_to_vk((SVGA3dStencilOp)key.ccwStencilZFail);
             dsInfo.back.compareOp = ::svga3_cmp_func_to_vk((SVGA3dCmpFunc)key.ccwStencilFunc);
-            dsInfo.back.compareMask = key.stencilMask;
-            dsInfo.back.writeMask = key.stencilWriteMask;
-            dsInfo.back.reference = key.stencilRef;
+            dsInfo.back.compareMask = key.ccwStencilMask;
+            dsInfo.back.writeMask = key.ccwStencilWriteMask;
+            dsInfo.back.reference = key.ccwStencilRef;
         } else {
             dsInfo.back = dsInfo.front;
         }
@@ -2394,10 +2406,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                 barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
                 barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
                 barrier.image = surf->image();
-                barrier.subresourceRange.aspectMask = surf->isDepthStencil() ?
-                    (svga3_format_has_stencil(surf->svgaFormat()) ?
-                        (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
-                        VK_IMAGE_ASPECT_DEPTH_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.aspectMask = surf->nativeAspectMask();
                 barrier.subresourceRange.baseMipLevel = 0;
                 barrier.subresourceRange.levelCount = surf->mipLevels();
                 barrier.subresourceRange.baseArrayLayer = 0;

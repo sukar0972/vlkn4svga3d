@@ -1,0 +1,89 @@
+--- a/src/gallium/drivers/svga/svga_pipe_blend.c
++++ b/src/gallium/drivers/svga/svga_pipe_blend.c
+@@ -55,12 +55,12 @@
+    case PIPE_BLENDFACTOR_CONST_COLOR:     return SVGA3D_BLENDOP_BLENDFACTOR;
+    case PIPE_BLENDFACTOR_INV_CONST_COLOR: return SVGA3D_BLENDOP_INVBLENDFACTOR;
+    case PIPE_BLENDFACTOR_CONST_ALPHA:
+-      if (svga_have_vgpu10(svga))
++      if (svga_have_vgpu10(svga) || debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false))
+          return SVGA3D_BLENDOP_BLENDFACTORALPHA;
+       else
+          return SVGA3D_BLENDOP_BLENDFACTOR; /* as close as we can get */
+    case PIPE_BLENDFACTOR_INV_CONST_ALPHA:
+-      if (svga_have_vgpu10(svga))
++      if (svga_have_vgpu10(svga) || debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false))
+          return SVGA3D_BLENDOP_INVBLENDFACTORALPHA;
+       else
+          return SVGA3D_BLENDOP_INVBLENDFACTOR; /* as close as we can get */
+@@ -388,7 +388,7 @@
+        * PIPE_BLENDFACTOR_CONST_COLOR and PIPE_BLENDFACTOR_CONST_ALPHA
+        * at the same time.  There's no work-around for that.
+        */
+-      if (!svga_have_vgpu10(svga)) {
++      if (!svga_have_vgpu10(svga) && !debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false)) {
+          if (templ->rt[0].rgb_src_factor == PIPE_BLENDFACTOR_CONST_ALPHA ||
+              templ->rt[0].rgb_dst_factor == PIPE_BLENDFACTOR_CONST_ALPHA ||
+              templ->rt[0].rgb_src_factor == PIPE_BLENDFACTOR_INV_CONST_ALPHA ||
+--- a/src/gallium/drivers/svga/svga_context.h
++++ b/src/gallium/drivers/svga/svga_context.h
+@@ -169,6 +169,8 @@
+    /* SVGA3D has one ref/mask/writemask triple shared between front &
+     * back face stencil.  We really need two:
+     */
++   uint8_t vlkn_stencil_mask[2];
++   uint8_t vlkn_stencil_writemask[2];
+    unsigned stencil_mask:8;
+    unsigned stencil_writemask:8;
+ 
+--- a/src/gallium/drivers/svga/svga_pipe_depthstencil.c
++++ b/src/gallium/drivers/svga/svga_pipe_depthstencil.c
+@@ -132,6 +132,10 @@
+     * stencil[0]/[1] at this point.  Presumably this can change as
+     * back/front face are modified.
+     */
++   for (unsigned face = 0; face < 2; ++face) {
++      ds->vlkn_stencil_mask[face] = templ->stencil[face].valuemask;
++      ds->vlkn_stencil_writemask[face] = templ->stencil[face].writemask;
++   }
+    ds->stencil[0].enabled = templ->stencil[0].enabled;
+    if (ds->stencil[0].enabled) {
+       ds->stencil[0].func  = svga_translate_compare_func(templ->stencil[0].func);
+--- a/src/gallium/drivers/svga/svga_state_rss.c
++++ b/src/gallium/drivers/svga/svga_state_rss.c
+@@ -194,8 +194,16 @@
+          EMIT_RS(svga, curr->stencil[ccw].zfail, CCWSTENCILZFAIL);
+          EMIT_RS(svga, curr->stencil[ccw].pass,  CCWSTENCILPASS);
+ 
+-         EMIT_RS(svga, curr->stencil_mask, STENCILMASK);
+-         EMIT_RS(svga, curr->stencil_writemask, STENCILWRITEMASK);
++         if (debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false)) {
++            /* VLKN opt-in: CW occupies the low byte, CCW the next byte. */
++            EMIT_RS(svga, 0x564c0000u | curr->vlkn_stencil_mask[cw] |
++                    (curr->vlkn_stencil_mask[ccw] << 8), STENCILMASK);
++            EMIT_RS(svga, 0x564c0000u | curr->vlkn_stencil_writemask[cw] |
++                    (curr->vlkn_stencil_writemask[ccw] << 8), STENCILWRITEMASK);
++         } else {
++            EMIT_RS(svga, curr->stencil_mask, STENCILMASK);
++            EMIT_RS(svga, curr->stencil_writemask, STENCILWRITEMASK);
++         }
+       }
+ 
+       EMIT_RS(svga, curr->zenable, ZENABLE);
+@@ -211,8 +219,15 @@
+       }
+    }
+ 
+-   if (dirty & SVGA_NEW_STENCIL_REF) {
+-      EMIT_RS(svga, svga->curr.stencil_ref.ref_value[0], STENCILREF);
++   if (dirty & (SVGA_NEW_STENCIL_REF | SVGA_NEW_RAST | SVGA_NEW_DEPTH_STENCIL_ALPHA)) {
++      if (debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) && svga->curr.depth->stencil[1].enabled) {
++         unsigned cw = svga->curr.rast->templ.front_ccw ? 1 : 0;
++         unsigned ccw = 1 - cw;
++         EMIT_RS(svga, 0x564c0000u | (svga->curr.stencil_ref.ref_value[cw] & 0xff) |
++                 ((svga->curr.stencil_ref.ref_value[ccw] & 0xff) << 8), STENCILREF);
++      } else {
++         EMIT_RS(svga, svga->curr.stencil_ref.ref_value[0], STENCILREF);
++      }
+    }
+ 
+    if (dirty & (SVGA_NEW_RAST | SVGA_NEW_NEED_PIPELINE)) {

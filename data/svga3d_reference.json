@@ -806,8 +806,8 @@
       "name": "SVGA3D_Z_D24X8",
       "d3d_format": 77,
       "d3d_format_name": "D3DFMT_D24X8",
-      "vk_format": 126,
-      "vk_format_name": "VK_FORMAT_D32_SFLOAT"
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
     },
     {
       "id": 39,
@@ -886,8 +886,8 @@
       "name": "SVGA3D_Z_DF24",
       "d3d_format": 83,
       "d3d_format_name": "D3DFMT_D24FS8",
-      "vk_format": 126,
-      "vk_format_name": "VK_FORMAT_D32_SFLOAT"
+      "vk_format": 129,
+      "vk_format_name": "VK_FORMAT_D24_UNORM_S8_UINT"
     },
     {
       "id": 120,

@@ -84,6 +84,12 @@ public:
     uint32_t multisampleCount() const { return m_multisampleCount; }
     SVGA3dTextureFilter autogenFilter() const { return m_autogenFilter; }
     bool isDepthStencil() const { return m_isDepthStencil; }
+    VkImageAspectFlags nativeAspectMask() const {
+        if (!m_isDepthStencil) return VK_IMAGE_ASPECT_COLOR_BIT;
+        const bool stencil = m_vkFormat == VK_FORMAT_D24_UNORM_S8_UINT ||
+            m_vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || m_vkFormat == VK_FORMAT_D16_UNORM_S8_UINT;
+        return VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    }
     bool isCubeMap() const { return m_isCubeMap; }
     bool isActive() const { return m_active; }
     void setActive(bool active) { m_active = active; }

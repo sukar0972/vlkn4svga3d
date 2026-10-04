@@ -100,6 +100,9 @@ struct PipelineKey {
     uint32_t ccwStencilFail;
     uint32_t ccwStencilZFail;
     uint32_t ccwStencilPass;
+    uint32_t ccwStencilRef;
+    uint32_t ccwStencilMask;
+    uint32_t ccwStencilWriteMask;
     uint32_t colorWriteMask[4];
     uint32_t numVertexDecls;
     VkRenderPass renderPass;

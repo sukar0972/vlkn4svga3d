@@ -1,0 +1,2 @@
+FROM debian:12-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential meson ninja-build python3-mako python3-yaml bison flex pkg-config libdrm-dev libexpat1-dev libx11-dev libx11-xcb-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev libxcb-glx0-dev libxcb-shm0-dev libxcb-randr0-dev libxshmfence-dev libxxf86vm-dev libxrandr-dev libxfixes-dev libxext-dev libxdamage-dev libzstd-dev libelf-dev llvm-15-dev libglvnd-dev && rm -rf /var/lib/apt/lists/*

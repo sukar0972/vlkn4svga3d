@@ -715,12 +715,47 @@ int main() {
         svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
         TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface blit retains depth and stencil bits");
         svga3_vlkn_surface_define(dev, 99, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_DF24, &packedSize, 1);
-        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy between integer and float-backed packed depth");
+        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy packed depth into DF24");
         svga3_vlkn_surface_dma_download(dev, 99, 0, nullptr, packedReadback, 8);
         for (uint32_t i = 0; i < 4; ++i)
-            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "Cross-format depth copy preserves the 24-bit depth value");
+            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "DF24 copy preserves the 24-bit depth value");
         svga3_vlkn_surface_destroy(dev,99);
         for (uint32_t sid : {97u,98u}) svga3_vlkn_surface_destroy(dev,sid);
+
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_ZENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE2SIDED, 1);
+        for (auto state : {SVGA3D_RS_STENCILFUNC,SVGA3D_RS_CCWSTENCILFUNC})
+            svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_CMP_ALWAYS);
+        for (auto state : {SVGA3D_RS_STENCILPASS,SVGA3D_RS_CCWSTENCILPASS})
+            svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_STENCILOP_REPLACE);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILMASK,0x564CFFFF);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILWRITEMASK,0x564C1666);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILREF,0x564CFFFF);
+        for (bool compareMasks : {false,true}) {
+            if (compareMasks) {
+                for (auto state : {SVGA3D_RS_STENCILFUNC,SVGA3D_RS_CCWSTENCILFUNC})
+                    svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_CMP_EQUAL);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILMASK,0x564C0FF0);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILWRITEMASK,0x564CFFFF);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILREF,0x564C0240);
+            }
+            uint32_t observedStencil[2] = {};
+            for (uint32_t winding = 0; winding < 2; ++winding) {
+                svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_STENCIL,0,1,compareMasks ? 0x42 : 0,nullptr,0);
+                svga3_vlkn_surface_dma_upload(dev,SID_VB3,0,&bBox,q3.data(),sizeof(Vertex)*6);
+                svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_TRIANGLELIST,decls,2,&r1,1);
+                std::vector<uint32_t> stencilPixels(RT_W*RT_H);
+                svga3_vlkn_surface_dma_download(dev,SID_DS,0,nullptr,stencilPixels.data(),RT_W*4);
+                observedStencil[winding] = stencilPixels[(RT_H/2)*RT_W+RT_W/2] & 255;
+                std::swap(q3[1],q3[2]); std::swap(q3[4],q3[5]);
+            }
+            const uint32_t front = compareMasks ? 0x40 : 0x66, back = compareMasks ? 0x02 : 0x16;
+            TEST_CHECK((observedStencil[0]==front && observedStencil[1]==back) ||
+                (observedStencil[0]==back && observedStencil[1]==front),
+                "Front and back stencil references, compare masks and write masks remain independent");
+        }
 
         /* Clean up Scene 2 */
         svga3_vlkn_context_destroy(dev, CID);

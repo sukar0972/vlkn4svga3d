@@ -510,8 +510,7 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
     barrier.oldLayout = oldLayout; barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = oldImage;
-    barrier.subresourceRange.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-    if (svga3_format_has_stencil(m_svgaFormat)) barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    barrier.subresourceRange.aspectMask = nativeAspectMask();
     barrier.subresourceRange.levelCount = m_mipLevels; barrier.subresourceRange.layerCount = 1;
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
@@ -553,9 +552,7 @@ void VlknSurface::transitionLayout(VkCommandBuffer cb, VkImageLayout layout) {
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = m_isDepthStencil ?
-        (VK_IMAGE_ASPECT_DEPTH_BIT | (svga3_format_has_stencil(m_svgaFormat) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)) :
-        VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = nativeAspectMask();
     barrier.subresourceRange.levelCount = m_mipLevels;
     barrier.subresourceRange.layerCount = m_arrayLayers;
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -795,10 +792,7 @@ VkImageView VlknSurface::getRenderTargetView(uint32_t mip, uint32_t face) {
     viewInfo.image = m_image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = m_vkFormat;
-    viewInfo.subresourceRange.aspectMask = m_isDepthStencil ?
-        (svga3_format_has_stencil(m_svgaFormat) ?
-            (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) :
-            VK_IMAGE_ASPECT_DEPTH_BIT) : VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = nativeAspectMask();
     viewInfo.subresourceRange.baseMipLevel = mip;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = face;
@@ -864,7 +858,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
             if (stencil) plane[depthBytes + i] = uint8_t(packed);
         }
     }
-    const VkImageAspectFlags aspects = VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    const VkImageAspectFlags aspects = nativeAspectMask();
     const VkImageLayout transferLayout = upload ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     VkImageMemoryBarrier barrier = {};
@@ -1186,8 +1180,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     barrier.oldLayout = m_currentLayout;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = m_isDepthStencil ?
-        (VK_IMAGE_ASPECT_DEPTH_BIT | (svga3_format_has_stencil(m_svgaFormat) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)) : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = nativeAspectMask();
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = m_mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -1322,8 +1315,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     barrier.oldLayout = m_currentLayout;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = m_isDepthStencil ?
-        (VK_IMAGE_ASPECT_DEPTH_BIT | (svga3_format_has_stencil(m_svgaFormat) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)) : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = nativeAspectMask();
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = m_mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -1522,8 +1514,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     barrier.oldLayout = m_currentLayout;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = m_isDepthStencil ?
-        (VK_IMAGE_ASPECT_DEPTH_BIT | (svga3_format_has_stencil(m_svgaFormat) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)) : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = nativeAspectMask();
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = m_mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -1766,35 +1757,6 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
         log_msg("[libqemu_svga3d] copy error: mip/face out of range (src mip=%u face=%u, dst mip=%u face=%u)\n",
                 srcMip, srcFace, dstMip, dstFace);
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    }
-
-    // DF24 uses a floating-point Vulkan image, while the wire still carries
-    // packed 24-bit depth. Vulkan cannot copy between differing depth formats.
-    if (src->isDepthStencil() && dst->isDepthStencil() && src->vkFormat() != dst->vkFormat() &&
-        src->svgaFormat() != SVGA3D_Z_D32 && dst->svgaFormat() != SVGA3D_Z_D32 &&
-        svga3_format_bytes_per_pixel(src->svgaFormat()) == 4 && svga3_format_bytes_per_pixel(dst->svgaFormat()) == 4) {
-        if (m_contextMgr) m_contextMgr->endAllRenderPasses();
-        for (uint32_t i = 0; i < numBoxes; ++i) {
-            const auto &box = boxes[i];
-            const uint32_t height = box.h ? box.h : 1, depth = box.d ? box.d : 1;
-            if ((uint64_t)box.srcx + box.w > srcMipInfo->width || (uint64_t)box.srcy + height > srcMipInfo->height ||
-                (uint64_t)box.srcz + depth > srcMipInfo->depth || (uint64_t)box.x + box.w > dstMipInfo->width ||
-                (uint64_t)box.y + height > dstMipInfo->height || (uint64_t)box.z + depth > dstMipInfo->depth)
-                return SVGA3_VLKN_ERROR_INVALID_PARAM;
-            uint64_t bytes = uint64_t(box.w) * height;
-            if (__builtin_mul_overflow(bytes, uint64_t(depth)*4, &bytes) || bytes > SVGA3_MAX_DMA_BYTES)
-                return SVGA3_VLKN_ERROR_INVALID_PARAM;
-            if (!bytes) continue;
-            std::vector<uint8_t> packed(bytes);
-            SVGA3dBox from = {box.srcx,box.srcy,box.srcz,box.w,height,depth};
-            SVGA3dBox to = {box.x,box.y,box.z,box.w,height,depth};
-            auto status = src->dmaDownload(srcMip,&from,packed.data(),size_t(box.w)*4,false,srcFace);
-            if (status != SVGA3_VLKN_SUCCESS) return status;
-            status = dst->dmaUpload(dstMip,&to,packed.data(),size_t(box.w)*4,false,dstFace);
-            if (status != SVGA3_VLKN_SUCCESS) return status;
-        }
-        dst->invalidateReadback();
-        return SVGA3_VLKN_SUCCESS;
     }
 
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
