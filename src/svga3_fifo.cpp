@@ -33,8 +33,11 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
 {
     *bytesRead = 0;
 
-    /* Temporary: trace every FIFO command for rendering investigation. */
-    if (getenv("SVGA3_VLKN_TRACE_FIFO")) {
+    /* Optional FIFO tracing for rendering investigation. */
+    // Tracing is configured when the process starts; avoid walking the
+    // environment on every command/draw when tracing is disabled.
+    static const bool traceFifo = std::getenv("SVGA3_VLKN_TRACE_FIFO") != nullptr;
+    if (traceFifo) {
         fprintf(stderr, "[fifo-trace] cmd=%u payloadSize=%zu\n", cmd, payloadSize);
     }
 
