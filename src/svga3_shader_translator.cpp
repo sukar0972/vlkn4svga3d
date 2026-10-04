@@ -649,11 +649,13 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     std::unordered_map<uint32_t, VsInputInfo> vsInRegs;
 
     uint32_t vsGlPerVertex = 0;
-    uint32_t vsOutColor[2] = { 0 };
+    /* Front COLOR0/1 use locations 0/1; back COLOR2/3 use 10/11,
+     * leaving texture-coordinate locations 2..9 unchanged. */
+    uint32_t vsOutColor[4] = { 0 };
     uint32_t vsOutTexCoords[8] = { 0 };
 
     /* PS Interface */
-    uint32_t psInColor[2] = { 0 };
+    uint32_t psInColor[4] = { 0 };
     uint32_t psInTexCoords[8] = { 0 };
     uint32_t psOutColor = 0;
     /* MISCTYPE sources: vPos -> BuiltIn FragCoord, vFace -> FrontFacing. */
@@ -678,7 +680,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         vsGlPerVertex = b.allocId();
         entryInterface.push_back(vsGlPerVertex);
 
-        for (int c = 0; c < 2; ++c) {
+        for (int c = 0; c < 4; ++c) {
             vsOutColor[c] = b.allocId();
             entryInterface.push_back(vsOutColor[c]);
         }
@@ -709,7 +711,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         }
         if (outInputMask) *outInputMask = inLocMask;
     } else {
-        for (int c = 0; c < 2; ++c) {
+        for (int c = 0; c < 4; ++c) {
             psInColor[c] = b.allocId();
             entryInterface.push_back(psInColor[c]);
         }
@@ -759,8 +761,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             b.emitInst(b.annotations, SpvOpDecorate, { pair.second.varId, SpvDecorationLocation, pair.second.location });
         }
 
-        for (int c = 0; c < 2; ++c) {
-            b.emitInst(b.annotations, SpvOpDecorate, { vsOutColor[c], SpvDecorationLocation, (uint32_t)c });
+        for (int c = 0; c < 4; ++c) {
+            b.emitInst(b.annotations, SpvOpDecorate, { vsOutColor[c], SpvDecorationLocation, uint32_t(c < 2 ? c : 8 + c) });
         }
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.annotations, SpvOpDecorate, { vsOutTexCoords[t], SpvDecorationLocation, (uint32_t)(2 + t) });
@@ -771,8 +773,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.annotations, SpvOpMemberDecorate, { perVertexStructType, 0, SpvDecorationBuiltIn, SpvBuiltInPosition });
         b.emitInst(b.annotations, SpvOpDecorate, { perVertexStructType, SpvDecorationBlock });
     } else {
-        for (int c = 0; c < 2; ++c) {
-            b.emitInst(b.annotations, SpvOpDecorate, { psInColor[c], SpvDecorationLocation, (uint32_t)c });
+        for (int c = 0; c < 4; ++c) {
+            b.emitInst(b.annotations, SpvOpDecorate, { psInColor[c], SpvDecorationLocation, uint32_t(c < 2 ? c : 8 + c) });
         }
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.annotations, SpvOpDecorate, { psInTexCoords[t], SpvDecorationLocation, (uint32_t)(2 + t) });
@@ -893,14 +895,14 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrOutputPerVertex, SpvStorageClassOutput, perVertexStructType });
         b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputPerVertex, vsGlPerVertex, SpvStorageClassOutput });
 
-        for (int c = 0; c < 2; ++c) {
+        for (int c = 0; c < 4; ++c) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, vsOutColor[c], SpvStorageClassOutput });
         }
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, vsOutTexCoords[t], SpvStorageClassOutput });
         }
     } else {
-        for (int c = 0; c < 2; ++c) {
+        for (int c = 0; c < 4; ++c) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, psInColor[c], SpvStorageClassInput });
         }
         for (int t = 0; t < 8; ++t) {
@@ -951,13 +953,13 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
 
     /* Output Registers Function locals */
     uint32_t outPosVar = b.allocId();
-    uint32_t outColorVar[2] = { b.allocId(), b.allocId() };
+    uint32_t outColorVar[4] = { b.allocId(), b.allocId(), b.allocId(), b.allocId() };
     uint32_t outTexCoordVar[8];
     for (int t = 0; t < 8; ++t) outTexCoordVar[t] = b.allocId();
 
     b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outPosVar, SpvStorageClassFunction, const0_v4 });
-    b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outColorVar[0], SpvStorageClassFunction, const1_v4 });
-    b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outColorVar[1], SpvStorageClassFunction, const1_v4 });
+    for (int c = 0; c < 4; ++c)
+        b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outColorVar[c], SpvStorageClassFunction, const1_v4 });
     for (int t = 0; t < 8; ++t) {
         b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outTexCoordVar[t], SpvStorageClassFunction, const0_v4 });
     }
@@ -1066,7 +1068,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 auto it = inputRegToSemantic.find(src.regNum);
                 if (it != inputRegToSemantic.end()) {
                     if (it->second.usage == 10) {
-                        inVar = psInColor[it->second.usageIndex < 2 ? it->second.usageIndex : 0];
+                        inVar = psInColor[it->second.usageIndex < 4 ? it->second.usageIndex : 0];
                     } else if (it->second.usage == 5) {
                         inVar = psInTexCoords[it->second.usageIndex < 8 ? it->second.usageIndex : 0];
                     } else {
@@ -1300,7 +1302,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                         if (it->second.usage == 0 || it->second.usage == 9) { /* POSITION or POSITIONT */
                             dstVar = outPosVar;
                         } else if (it->second.usage == 10) { /* COLOR */
-                            dstVar = outColorVar[it->second.usageIndex < 2 ? it->second.usageIndex : 0];
+                            dstVar = outColorVar[it->second.usageIndex < 4 ? it->second.usageIndex : 0];
                         } else if (it->second.usage == 5) { /* TEXCOORD */
                             dstVar = outTexCoordVar[it->second.usageIndex < 8 ? it->second.usageIndex : 0];
                         } else {
@@ -1365,7 +1367,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         }
 
         /* Direct3D 9 rasterizer clamps vertex shader color outputs (oD0/oD1) to [0.0, 1.0] */
-        if (isVS && (dstVar == outColorVar[0] || dstVar == outColorVar[1])) {
+        if (isVS && (dstVar == outColorVar[0] || dstVar == outColorVar[1] || dstVar == outColorVar[2] || dstVar == outColorVar[3])) {
             uint32_t satVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeV4Float, satVal, glslSetId, GLSLstd450FClamp, finalVal, const0_v4, const1_v4 });
             finalVal = satVal;
@@ -2243,8 +2245,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpAccessChain, { ptrOutputV4Float, posPtr, vsGlPerVertex, intConsts[0] });
         b.emitInst(b.functionDefinitions, SpvOpStore, { posPtr, flippedPos });
 
-        /* Store out_color[0..1] */
-        for (int c = 0; c < 2; ++c) {
+        /* Store front and back color interpolants. */
+        for (int c = 0; c < 4; ++c) {
             uint32_t colVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpLoad, { typeV4Float, colVal, outColorVar[c] });
             b.emitInst(b.functionDefinitions, SpvOpStore, { vsOutColor[c], colVal });

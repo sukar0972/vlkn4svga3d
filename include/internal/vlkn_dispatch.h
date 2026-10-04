@@ -92,6 +92,7 @@ typedef struct VlknDispatchTable {
     PFN_vkCmdBindPipeline                    vkCmdBindPipeline;
     PFN_vkCmdSetViewport                     vkCmdSetViewport;
     PFN_vkCmdSetScissor                      vkCmdSetScissor;
+    PFN_vkCmdSetBlendConstants               vkCmdSetBlendConstants;
     PFN_vkCmdBindVertexBuffers               vkCmdBindVertexBuffers;
     PFN_vkCmdBindIndexBuffer                 vkCmdBindIndexBuffer;
     PFN_vkCmdDraw                            vkCmdDraw;
