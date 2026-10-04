@@ -1,0 +1,3 @@
+# Select the corrected SVGA module while keeping the system software driver available.
+export LIBGL_DRIVERS_PATH="$HOME/vlkn-mesa/dri:/usr/lib/x86_64-linux-gnu/dri"
+export SVGA_VLKN_EXTENDED_STATE=1

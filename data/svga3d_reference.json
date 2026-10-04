@@ -266,19 +266,19 @@
       "id": 43,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D16",
       "description": "Format Z_D16 capability flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 44,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8",
       "description": "Format Z_D24S8 capability flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 45,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8",
       "description": "Format Z_D24X8 capability flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 46,
@@ -464,7 +464,7 @@
       "id": 77,
       "name": "SVGA3D_DEVCAP_MAX_CONTEXT_IDS",
       "description": "Maximum context ID space",
-      "expected_value": 256
+      "expected_value": 64
     },
     {
       "id": 78,
@@ -476,19 +476,19 @@
       "id": 79,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_DF16",
       "description": "Format Z_DF16 flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 80,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_DF24",
       "description": "Format Z_DF24 flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 81,
       "name": "SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT",
       "description": "Format Z_D24S8_INT flags",
-      "expected_value": 16
+      "expected_value": 193
     },
     {
       "id": 82,
@@ -526,31 +526,31 @@
       "name": "SVGA3D_R5G6B5",
       "d3d_format": 23,
       "d3d_format_name": "D3DFMT_R5G6B5",
-      "vk_format": 84,
-      "vk_format_name": "VK_FORMAT_B5G6R5_UNORM_PACK16"
+      "vk_format": 4,
+      "vk_format_name": "VK_FORMAT_R5G6B5_UNORM_PACK16"
     },
     {
       "id": 4,
       "name": "SVGA3D_X1R5G5B5",
       "d3d_format": 24,
       "d3d_format_name": "D3DFMT_X1R5G5B5",
-      "vk_format": 86,
-      "vk_format_name": "VK_FORMAT_B5G5R5A1_UNORM_PACK16"
+      "vk_format": 8,
+      "vk_format_name": "VK_FORMAT_A1R5G5B5_UNORM_PACK16"
     },
     {
       "id": 5,
       "name": "SVGA3D_A1R5G5B5",
       "d3d_format": 25,
       "d3d_format_name": "D3DFMT_A1R5G5B5",
-      "vk_format": 86,
-      "vk_format_name": "VK_FORMAT_B5G5R5A1_UNORM_PACK16"
+      "vk_format": 8,
+      "vk_format_name": "VK_FORMAT_A1R5G5B5_UNORM_PACK16"
     },
     {
       "id": 6,
       "name": "SVGA3D_A4R4G4B4",
       "d3d_format": 26,
       "d3d_format_name": "D3DFMT_A4R4G4B4",
-      "vk_format": 80,
+      "vk_format": 3,
       "vk_format_name": "VK_FORMAT_B4G4R4A4_UNORM_PACK16"
     },
     {
@@ -710,7 +710,7 @@
       "name": "SVGA3D_A2R10G10B10",
       "d3d_format": 35,
       "d3d_format_name": "D3DFMT_A2R10G10B10",
-      "vk_format": 64,
+      "vk_format": 58,
       "vk_format_name": "VK_FORMAT_A2R10G10B10_UNORM_PACK32"
     },
     {
@@ -750,7 +750,7 @@
       "name": "SVGA3D_A2W10V10U10",
       "d3d_format": 67,
       "d3d_format_name": "D3DFMT_A2W10V10U10",
-      "vk_format": 64,
+      "vk_format": 58,
       "vk_format_name": "VK_FORMAT_A2R10G10B10_UNORM_PACK32"
     },
     {
@@ -830,8 +830,8 @@
       "name": "SVGA3D_A16B16G16R16",
       "d3d_format": 36,
       "d3d_format_name": "D3DFMT_A16B16G16R16",
-      "vk_format": 97,
-      "vk_format_name": "VK_FORMAT_R16G16B16A16_SFLOAT"
+      "vk_format": 91,
+      "vk_format_name": "VK_FORMAT_R16G16B16A16_UNORM"
     },
     {
       "id": 42,

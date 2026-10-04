@@ -27,6 +27,12 @@
 
 static int g_testsPassed = 0;
 static int g_testsFailed = 0;
+static void VKAPI_CALL formatWithoutBlend(VkPhysicalDevice, VkFormat, VkFormatProperties* properties) {
+    memset(properties, 0, sizeof(*properties));
+    properties->optimalTilingFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
+        | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+}
+
 static PFN_vkQueueSubmit g_originalQueueSubmit = nullptr;
 static uint32_t g_queueSubmitCount = 0;
 
@@ -149,11 +155,25 @@ static void TestDeviceLifecycleAndCaps() {
         uint32_t supported = svga3_vlkn_query_cap(dev, dc.id, &capVal);
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
-            TEST_CHECK(capVal == dc.expectedValue, "Cap value " + std::string(dc.name));
+            const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
+            const uint32_t expected = compressedFormat ?
+                (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
+            TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
             TEST_CHECK(supported == 0, "Unsupported cap " + std::string(dc.name));
         }
     }
+
+    auto& dispatch = dev->backend->dispatch();
+    auto originalFormatProperties = dispatch.vkGetPhysicalDeviceFormatProperties;
+    dispatch.vkGetPhysicalDeviceFormatProperties = formatWithoutBlend;
+    sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4, &val);
+    TEST_CHECK(sup && (val & SVGA3DFORMAT_OP_NOALPHABLEND), "4444 advertises hardware blend restriction");
+    TEST_CHECK((val & SVGA3DFORMAT_OP_TEXTURE) && (val & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET),
+               "4444 keeps texturing and unblended render targets");
+    dispatch.vkGetPhysicalDeviceFormatProperties = originalFormatProperties;
+    svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4, &val);
+    TEST_CHECK(!(val & SVGA3DFORMAT_OP_NOALPHABLEND), "4444 blending remains enabled on capable hardware");
 
     /* Verify reset & wait idle */
     Svga3VlknStatus st = svga3_vlkn_device_reset(dev);
@@ -189,7 +209,7 @@ static void TestSurfaceFormatMappings() {
     TEST_CHECK(svga3_format_to_vk(SVGA3D_Z_D24S8) == VK_FORMAT_D24_UNORM_S8_UINT, "SVGA3D_Z_D24S8 format");
     TEST_CHECK(svga3_format_to_vk(SVGA3D_Z_D16) == VK_FORMAT_D16_UNORM, "SVGA3D_Z_D16 format");
     TEST_CHECK(svga3_format_to_vk(SVGA3D_X8R8G8B8) == VK_FORMAT_B8G8R8A8_UNORM, "SVGA3D_X8R8G8B8 format");
-    TEST_CHECK(svga3_format_to_vk(SVGA3D_R5G6B5) == VK_FORMAT_B5G6R5_UNORM_PACK16, "SVGA3D_R5G6B5 format");
+    TEST_CHECK(svga3_format_to_vk(SVGA3D_R5G6B5) == VK_FORMAT_R5G6B5_UNORM_PACK16, "SVGA3D_R5G6B5 format");
 
     std::cout << ANSI_GREEN << "  Verified " << matchedCount << "/" << fmtCount << " surface formats matching Oracle." << ANSI_RESET << std::endl;
 }

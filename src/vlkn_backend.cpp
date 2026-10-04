@@ -24,7 +24,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vlkn_debug_callback(
     if (backend) {
         backend->addValidationMessage(isError, msg);
     }
-    fprintf(stderr, "[Vulkan Validation %s] %s\n", isError ? "ERROR" : "WARN", msg.c_str());
+    log_msg("[Vulkan Validation %s] %s\n", isError ? "ERROR" : "WARN", msg.c_str());
     return VK_FALSE;
 }
 
@@ -65,7 +65,7 @@ VlknBackend::~VlknBackend() {
 }
 
 void VlknBackend::addValidationMessage(bool isError, const std::string &msg) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_validationMutex);
     if (isError) {
         m_validationErrors++;
     } else {
@@ -366,12 +366,41 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     enabledFeatures.depthBiasClamp = m_features.depthBiasClamp;
     enabledFeatures.fillModeNonSolid = m_features.fillModeNonSolid;
     enabledFeatures.wideLines = m_features.wideLines;
+    enabledFeatures.largePoints = m_features.largePoints;
+    enabledFeatures.independentBlend = m_features.independentBlend;
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.queueCreateInfoCount = 1;
     deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
     deviceCreateInfo.pEnabledFeatures = &enabledFeatures;
+
+    VkPhysicalDeviceCustomBorderColorFeaturesEXT borderFeatures = {};
+    borderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
+    const char *borderExtension = VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME;
+    if (!m_dispatch.isMock && m_dispatch.vkGetInstanceProcAddr) {
+        auto enumerate = (PFN_vkEnumerateDeviceExtensionProperties)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkEnumerateDeviceExtensionProperties");
+        auto getFeatures = (PFN_vkGetPhysicalDeviceFeatures2)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2");
+        uint32_t count = 0;
+        if (enumerate && getFeatures && enumerate(m_physicalDevice, nullptr, &count, nullptr) == VK_SUCCESS) {
+            std::vector<VkExtensionProperties> extensions(count);
+            if (enumerate(m_physicalDevice, nullptr, &count, extensions.data()) == VK_SUCCESS) {
+                for (const auto &extension : extensions) if (strcmp(extension.extensionName, borderExtension) == 0) {
+                    VkPhysicalDeviceFeatures2 features = {};
+                    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+                    features.pNext = &borderFeatures;
+                    getFeatures(m_physicalDevice, &features);
+                    m_customBorderColors = borderFeatures.customBorderColors && borderFeatures.customBorderColorWithoutFormat;
+                    break;
+                }
+            }
+        }
+    }
+    if (m_customBorderColors) {
+        deviceCreateInfo.pNext = &borderFeatures;
+        deviceCreateInfo.enabledExtensionCount = 1;
+        deviceCreateInfo.ppEnabledExtensionNames = &borderExtension;
+    }
 
     VkResult res = m_dispatch.vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_device);
     if (res != VK_SUCCESS) {
@@ -412,7 +441,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 8192 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 * 8 }
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 * 16 }
     };
     VkDescriptorPoolCreateInfo descPoolInfo = {};
     descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -837,32 +866,36 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
 }
 
 VkRenderPass VlknBackend::getOrCreateRenderPass(VkFormat colorFormat, VkFormat depthFormat) {
+    return getOrCreateRenderPass({colorFormat, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED}, depthFormat);
+}
+
+VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat) {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (const auto &entry : m_renderPasses) {
-        if (entry.colorFormat == colorFormat && entry.depthFormat == depthFormat) {
+        if (entry.colorFormats == colorFormats && entry.depthFormat == depthFormat) {
             return entry.renderPass;
         }
     }
 
-    VkAttachmentDescription attachments[2] = {};
+    VkAttachmentDescription attachments[5] = {};
     uint32_t attachmentCount = 0;
 
-    VkAttachmentReference colorRef = {};
-    colorRef.attachment = VK_ATTACHMENT_UNUSED;
-    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    if (colorFormat != VK_FORMAT_UNDEFINED) {
-        attachments[attachmentCount].format = colorFormat;
-        attachments[attachmentCount].samples = VK_SAMPLE_COUNT_1_BIT;
-        attachments[attachmentCount].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        attachments[attachmentCount].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[attachmentCount].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        attachments[attachmentCount].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachments[attachmentCount].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        attachments[attachmentCount].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        colorRef.attachment = attachmentCount;
-        attachmentCount++;
+    VkAttachmentReference colorRefs[4] = {};
+    uint32_t colorCount = 0;
+    for (uint32_t i = 0; i < 4; ++i) {
+        colorRefs[i].attachment = VK_ATTACHMENT_UNUSED;
+        colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        if (colorFormats[i] == VK_FORMAT_UNDEFINED) continue;
+        auto &a = attachments[attachmentCount];
+        a.format = colorFormats[i];
+        a.samples = VK_SAMPLE_COUNT_1_BIT;
+        a.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorRefs[i].attachment = attachmentCount++;
+        colorCount = i + 1;
     }
 
     VkAttachmentReference depthRef = {};
@@ -888,9 +921,9 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(VkFormat colorFormat, VkFormat d
 
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    if (colorRef.attachment != VK_ATTACHMENT_UNUSED) {
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorRef;
+    if (colorCount) {
+        subpass.colorAttachmentCount = colorCount;
+        subpass.pColorAttachments = colorRefs;
     }
     if (depthRef.attachment != VK_ATTACHMENT_UNUSED) {
         subpass.pDepthStencilAttachment = &depthRef;
@@ -910,7 +943,7 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(VkFormat colorFormat, VkFormat d
         return VK_NULL_HANDLE;
     }
 
-    m_renderPasses.push_back({ colorFormat, depthFormat, rp });
+    m_renderPasses.push_back({ colorFormats, depthFormat, rp });
     return rp;
 }
 

@@ -9,6 +9,7 @@
 #include "vlkn_dispatch.h"
 #include "vlkn_resource_budgets.h"
 #include <vector>
+#include <array>
 #include <string>
 #include <memory>
 #include <mutex>
@@ -99,6 +100,7 @@ public:
     uint32_t queueFamilyIndex() const { return m_queueFamilyIndex; }
     const VkPhysicalDeviceProperties& properties() const { return m_props; }
     const VkPhysicalDeviceFeatures& features() const { return m_features; }
+    bool customBorderColors() const { return m_customBorderColors; }
     const VkPhysicalDeviceMemoryProperties& memoryProperties() const { return m_memProps; }
     VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
 
@@ -123,6 +125,7 @@ public:
 
     /* Default / shared RenderPass for color + depth/stencil */
     VkRenderPass getOrCreateRenderPass(VkFormat colorFormat, VkFormat depthFormat);
+    VkRenderPass getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat);
 
     /* Staging Buffer Accessors */
     VkBuffer stagingBuffer() const { return m_stagingBuffer; }
@@ -167,6 +170,7 @@ private:
 
     VkPhysicalDeviceProperties m_props;
     VkPhysicalDeviceFeatures m_features;
+    bool m_customBorderColors = false;
     VkPhysicalDeviceMemoryProperties m_memProps;
 
     VkCommandPool m_cmdPool;
@@ -193,6 +197,7 @@ private:
     uint32_t m_validationErrors;
     uint32_t m_validationWarnings;
     std::vector<std::string> m_validationMessages;
+    std::mutex m_validationMutex;
 
     std::function<void()> m_preFlushHook;
 
@@ -214,7 +219,7 @@ private:
 
     /* Default RenderPass cache */
     struct RenderPassEntry {
-        VkFormat colorFormat;
+        std::array<VkFormat, 4> colorFormats;
         VkFormat depthFormat;
         VkRenderPass renderPass;
     };

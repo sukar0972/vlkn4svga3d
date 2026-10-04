@@ -1,0 +1,13 @@
+--- a/tests/spec/ext_packed_depth_stencil/depth-stencil-texture.c
++++ b/tests/spec/ext_packed_depth_stencil/depth-stencil-texture.c
+@@ -393 +393,9 @@
+-		pass = piglit_check_gl_error(expected_cube_error) && pass;
++		/* Unsized storage is INVALID_ENUM even when depth cube maps
++		 * are unsupported. Either applicable error is permitted.
++		 */
++		if (internalFormat == GL_DEPTH_STENCIL &&
++		    !has_depth_texture_cube_map)
++			pass = check_gl_error2(GL_INVALID_ENUM,
++					       expected_cube_error) && pass;
++		else
++			pass = piglit_check_gl_error(expected_cube_error) && pass;

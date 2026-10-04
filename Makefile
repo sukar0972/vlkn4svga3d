@@ -12,6 +12,7 @@ DEFINES = \
     -DLOG_GROUP=LOG_GROUP_DEV_VMSVGA
 
 INCLUDES_ORACLE = \
+    -Iinclude \
     -I. \
     -Ivbox_headers \
     -Ishim/include \

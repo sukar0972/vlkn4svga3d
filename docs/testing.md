@@ -80,6 +80,8 @@ Each run creates a new `artifacts/piglit-*` directory with renderer/system ident
 
 Exit status is nonzero for test failures, crashes, timeouts, warnings, incomplete/missing results, mismatched comparison test lists, or runs without any passing cases. A nonzero Piglit runner exit retains partial evidence and still attempts the software reference. The summary marks interrupted runs as incomplete and planned cases that never started as `notrun`. Skips remain separate from passes. `summary.json` distinguishes SVGA problems, skips, and unverified cases that pass on llvmpipe; skips can reflect differing advertised capabilities. Such differences identify investigation targets, not their cause. This is independent of `make acceptance` and `make harness-loop`; CI checks the result-reporting logic, while guest tests require the live VM. Piglit does not certify VM stability, desktop scanout, or full API conformance.
 
+The [recorded VM119 comparison](piglit-accuracy-20261004.md) documents the corrected guest driver, raw accuracy results, and benchmark conditions. Slow texture probes on a contended VM119 needed `--test-timeout 600`; retain raw timeout results when comparing different limits.
+
 ## Harness loop
 
 `make harness-loop` runs the tight build/test loop used for iterative translator and driver work:

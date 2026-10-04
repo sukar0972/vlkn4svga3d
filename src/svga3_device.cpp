@@ -204,7 +204,6 @@ void svga3_vlkn_get_stats(Svga3VlknDevice *dev, Svga3VlknStats *outStats)
 
 uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t *outCapValue)
 {
-    (void)dev;
     if (!outCapValue) return 0;
 
     for (size_t i = 0; i < sizeof(kDeviceCaps) / sizeof(kDeviceCaps[0]); ++i) {
@@ -217,6 +216,25 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
              * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough.
              * (Mirrors advertised_devcap in qemu_svga3d_preload.cpp.) */
             switch (capIndex) {
+            case SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4:
+                /* Some hardware can render to native 4444 but cannot blend.
+                 * Let Mesa choose a blend-capable fallback for GL_RGBA4. */
+                if (dev && dev->backend) {
+                    VkFormatProperties properties{};
+                    auto& dispatch = dev->backend->dispatch();
+                    dispatch.vkGetPhysicalDeviceFormatProperties(dev->backend->physicalDevice(),
+                        VK_FORMAT_B4G4R4A4_UNORM_PACK16, &properties);
+                    if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT))
+                        val |= SVGA3DFORMAT_OP_NOALPHABLEND;
+                }
+                break;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT1:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT2:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT3:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT4:
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT5:
+                val = SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE;
+                break;
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D16:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8:

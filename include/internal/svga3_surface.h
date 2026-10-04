@@ -72,16 +72,24 @@ public:
     uint32_t width() const { return m_width; }
     uint32_t height() const { return m_height; }
     uint32_t depth() const { return m_depth; }
+    bool isVolumeImage() const { return m_depth > 1 || m_volumeImage; }
     uint32_t mipLevels() const { return m_mipLevels; }
     uint32_t viewMipLevels() const { return m_viewMipLevels; }
     /* Expand the sampled view to cover `levels` mip levels. Returns false
      * if the wider view could not be created; the previous view is then
      * kept untouched, so callers may safely keep sampling through it. */
     bool ensureViewMipLevels(uint32_t levels);
+    Svga3VlknStatus ensureVolumeImage();
     uint32_t arrayLayers() const { return m_arrayLayers; }
     uint32_t multisampleCount() const { return m_multisampleCount; }
     SVGA3dTextureFilter autogenFilter() const { return m_autogenFilter; }
     bool isDepthStencil() const { return m_isDepthStencil; }
+    VkImageAspectFlags nativeAspectMask() const {
+        if (!m_isDepthStencil) return VK_IMAGE_ASPECT_COLOR_BIT;
+        const bool stencil = m_vkFormat == VK_FORMAT_D24_UNORM_S8_UINT ||
+            m_vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || m_vkFormat == VK_FORMAT_D16_UNORM_S8_UINT;
+        return VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+    }
     bool isCubeMap() const { return m_isCubeMap; }
     bool isActive() const { return m_active; }
     void setActive(bool active) { m_active = active; }
@@ -96,7 +104,7 @@ public:
                               const SVGA3dBox *box,
                               const void *guestData,
                               size_t guestStride,
-                              bool isLinear);
+                              bool isLinear, uint32_t face = 0);
     Svga3VlknStatus dmaUpload(uint32_t mipLevel,
                               const SVGA3dBox *box,
                               const void *guestData,
@@ -108,7 +116,7 @@ public:
                                 const SVGA3dBox *box,
                                 void *outGuestData,
                                 size_t guestStride,
-                                bool isLinear);
+                                bool isLinear, uint32_t face = 0);
     Svga3VlknStatus dmaDownload(uint32_t mipLevel,
                                 const SVGA3dBox *box,
                                 void *outGuestData,
@@ -120,7 +128,7 @@ public:
                                         const SVGA3dBox *box,
                                         const void **outMappedData,
                                         size_t *outRowPitch,
-                                        std::unique_lock<std::mutex> &outLock);
+                                        std::unique_lock<std::mutex> &outLock, uint32_t face = 0);
 
     void invalidateReadback() { m_readbackValid = false; }
     bool hasReadback(uint32_t w, uint32_t h) const {
@@ -132,10 +140,10 @@ public:
 
 private:
     bool isPackedDepth() const {
-        return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8;
+        return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8 || m_svgaFormat == SVGA3D_Z_DF24;
     }
     Svga3VlknStatus dmaPackedDepth(bool upload, uint32_t mipLevel, const SVGA3dBox *box,
-                                  void *guestData, size_t guestStride);
+                                  void *guestData, size_t guestStride, uint32_t face);
     std::vector<uint8_t> m_packedDepthReadback;
     VlknBackend *m_backend;
     uint32_t m_sid;
@@ -146,6 +154,7 @@ private:
     uint32_t m_width;
     uint32_t m_height;
     uint32_t m_depth;
+    bool m_volumeImage = false;
     uint32_t m_mipLevels;
     uint32_t m_arrayLayers;
     uint32_t m_multisampleCount;
@@ -208,6 +217,7 @@ public:
 
     Svga3VlknStatus destroySurface(uint32_t sid);
     VlknSurface* getSurface(uint32_t sid);
+    Svga3VlknStatus ensureVolumeSurface(uint32_t sid);
     bool exists(uint32_t sid) const;
     void clear();
 

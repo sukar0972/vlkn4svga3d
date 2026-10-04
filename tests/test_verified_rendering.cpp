@@ -157,7 +157,7 @@ int main() {
     const uint32_t ps1Bytecode[] = {
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 5, D3D9_DST(1, 1, 0xF), /* dcl_texcoord v1 */
-        (31) | (2 << 24), 0x80000000 | (2 << 28), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
+        (31) | (2 << 24), 0x80000000 | (2 << 27), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
         (66) | (3 << 24), D3D9_DST(0, 0, 0xF), D3D9_SRC(1, 1, 0xE4), D3D9_SRC(10, 0, 0xE4), /* texld r0, v1, s0 */
         (5)  | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(0, 0, 0xE4), D3D9_SRC(2, 0, 0xE4), /* mul oC0, r0, c0 */
         0x0000FFFF
@@ -324,6 +324,382 @@ int main() {
         savePPM("artifacts/scene1_reference.ppm", refFb.data(), RT_W, RT_H);
         saveDiffPPM("artifacts/scene1_diff.ppm", fb.data(), refFb.data(), RT_W, RT_H);
 
+        /* Packed guest formats must sample by component, not merely round-trip
+         * their bytes. These values are independent of the oracle's tables. */
+        struct FormatProbe { SVGA3dSurfaceFormat format; uint64_t word; size_t bytes; Pixel expected; };
+        const FormatProbe probes[] = {
+            {SVGA3D_R5G6B5, 0xF800, 2, {0, 0, 255, 255}},
+            {SVGA3D_A1R5G5B5, 0x83E0, 2, {0, 255, 0, 255}},
+            {SVGA3D_X1R5G5B5, 0x001F, 2, {255, 0, 0, 255}},
+            {SVGA3D_A4R4G4B4, 0x8421, 2, {17, 34, 68, 136}},
+            {SVGA3D_A16B16G16R16, UINT64_C(0xFFFFBFFF80004000), 8, {191, 128, 64, 255}},
+            {SVGA3D_A2R10G10B10, UINT64_C(0xBFF80000), 4, {0, 128, 255, 170}},
+            {SVGA3D_LUMINANCE16, 0x8000, 2, {128, 128, 128, 255}},
+            {SVGA3D_LUMINANCE8_ALPHA8, 0x8040, 2, {64, 64, 64, 128}},
+            {SVGA3D_ALPHA8, 0x80, 1, {0, 0, 0, 128}},
+            {SVGA3D_Z_DF24, 0xFFFFFF00, 4, {255, 255, 255, 255}},
+            {SVGA3D_Z_DF24, 0x80000000, 4, {128, 128, 128, 255}}
+        };
+        const float whiteTint[4] = {1, 1, 1, 1};
+        memcpy(tintVal, whiteTint, sizeof(tintVal));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, tintVal);
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 90, SVGA3D_SURFACE_HINT_RENDERTARGET,
+            SVGA3D_A8R8G8B8, &rtSize, 1) == SVGA3_VLKN_SUCCESS, "Define format probe target");
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 90, 0, 0);
+        std::vector<uint32_t> shadowPS(std::begin(ps1Bytecode),std::end(ps1Bytecode));
+        for (auto &token : shadowPS) if (token == (0x80000000u | (2u<<27))) token = 0x80000000u | (5u<<27);
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev,CID,102,SVGA3D_SHADERTYPE_PS,shadowPS.data(),shadowPS.size())
+            == SVGA3_VLKN_SUCCESS, "Accept the valid SVGA 2D shadow sampler declaration");
+        for (const auto &probe : probes) {
+            TEST_CHECK(svga3_vlkn_surface_define(dev, 91, SVGA3D_SURFACE_HINT_TEXTURE,
+                probe.format, &texSize, 1) == SVGA3_VLKN_SUCCESS, "Define packed/component texture");
+            std::vector<uint8_t> data(probe.bytes * 4);
+            for (size_t i = 0; i < 4; ++i) memcpy(data.data() + i * probe.bytes, &probe.word, probe.bytes);
+            TEST_CHECK(svga3_vlkn_surface_dma_upload(dev, 91, 0, nullptr, data.data(), probe.bytes * 2)
+                == SVGA3_VLKN_SUCCESS, "Upload packed/component texture");
+            svga3_vlkn_context_set_texture(dev, CID, 0, 91);
+            svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,probe.format==SVGA3D_Z_DF24 ? 102 : 1);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+                == SVGA3_VLKN_SUCCESS, "Sample packed/component texture");
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4)
+                == SVGA3_VLKN_SUCCESS, "Read packed/component pixels");
+            Pixel actual = fb[32 * RT_W + 32];
+            TEST_CHECK(pixelMatches(actual, probe.expected.r, probe.expected.g, probe.expected.b, probe.expected.a),
+                "Packed/component texture has the expected RGBA values");
+            std::vector<uint8_t> readback(data.size());
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, 91, 0, nullptr, readback.data(), probe.bytes * 2)
+                == SVGA3_VLKN_SUCCESS && readback == data, "Packed/component texture retains guest byte layout");
+            svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+            svga3_vlkn_surface_destroy(dev, 91);
+        }
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,1);
+        // Depth clears used to generate shadow mipmaps must sample in every component.
+        svga3_vlkn_surface_define(dev, 91, SVGA3D_SURFACE_HINT_DEPTHSTENCIL | SVGA3D_SURFACE_HINT_TEXTURE,
+            SVGA3D_Z_DF24, &texSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, 91, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_DEPTH, 0, 0.1f, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 90, 0, 0);
+        svga3_vlkn_context_set_texture(dev, CID, 0, 91);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[32*RT_W+32],26,26,26,255), "Cleared DF24 depth samples in RGB components");
+        svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+        svga3_vlkn_surface_destroy(dev,91);
+        /* Shader samplers 8..15 are independent of the eight interpolators. */
+        std::vector<uint32_t> lastStageShader(std::begin(ps1Bytecode), std::end(ps1Bytecode));
+        lastStageShader[6] = D3D9_DST(10, 15, 0xF);
+        lastStageShader[10] = D3D9_SRC(10, 15, 0xE4);
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 92, SVGA3D_SHADERTYPE_PS,
+            lastStageShader.data(), lastStageShader.size()) == SVGA3_VLKN_SUCCESS, "Define sampler 15 shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 92);
+        TEST_CHECK(svga3_vlkn_context_set_texture(dev, CID, 15, SID_TEX) == SVGA3_VLKN_SUCCESS,
+            "Bind independent texture stage 15");
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4);
+        TEST_CHECK(pixelMatches(fb[24 * RT_W + 24], 255, 255, 255, 255) &&
+            pixelMatches(fb[40 * RT_W + 24], 0, 255, 0, 255), "Sampler 15 reads its own image");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 1);
+        auto sampleConstant = [&](uint32_t dimension, uint32_t controls, uint32_t sid,
+                                  const float *coords, const Pixel &expected) -> bool {
+            const uint32_t bytecode[] = {
+                0xFFFF0300, 31 | (2 << 24), 0x80000000u | (dimension << 27), D3D9_DST(10, 0, 15),
+                66 | (3 << 24) | (controls << 16), D3D9_DST(0, 0, 15), D3D9_SRC(2, 1, 0xE4), D3D9_SRC(10, 0, 0xE4),
+                1 | (2 << 24), D3D9_DST(8, 0, 15), D3D9_SRC(0, 0, 0xE4), 0xFFFF};
+            if (svga3_vlkn_context_define_shader(dev, CID, 93, SVGA3D_SHADERTYPE_PS, bytecode,
+                sizeof(bytecode)/4) != SVGA3_VLKN_SUCCESS) return false;
+            svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 93);
+            uint32_t constants[4]; memcpy(constants, coords, sizeof(constants));
+            svga3_vlkn_context_set_shader_const(dev, CID, 1, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, constants);
+            svga3_vlkn_context_set_texture(dev, CID, 0, sid);
+            if (svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+                != SVGA3_VLKN_SUCCESS) return false;
+            if (svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W*4)
+                != SVGA3_VLKN_SUCCESS) return false;
+            return pixelMatches(fb[32 * RT_W + 32], expected.r, expected.g, expected.b, expected.a);
+        };
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MINFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MAGFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        const float projectedCoords[4] = {.8f, .8f, 0, 2};
+        TEST_CHECK(sampleConstant(2, 1, SID_TEX, projectedCoords, {255,255,255,255}),
+            "Projected TEX divides coordinates by w");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_ADDRESSU, SVGA3D_TEX_ADDRESS_BORDER);
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_BORDERCOLOR, 0xFF804020);
+        const float borderCoords[4] = {-2,.5f,0,1};
+        TEST_CHECK(sampleConstant(2, 0, SID_TEX, borderCoords, {32,64,128,255}), "Sampler preserves arbitrary border color");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_ADDRESSU, SVGA3D_TEX_ADDRESS_WRAP);
+        const uint32_t volumeData[2] = {0xFFFF0000, 0xFF00FF00};
+        const SVGA3dSize volumeSize = {1,1,2};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 94, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8,
+            &volumeSize, 1) == SVGA3_VLKN_SUCCESS, "Define 3D texture");
+        svga3_vlkn_surface_dma_upload(dev, 94, 0, nullptr, volumeData, 4);
+        const float volumeCoords[4] = {.5f,.5f,.75f,1};
+        TEST_CHECK(sampleConstant(4, 0, 94, volumeCoords, {0,255,0,255}), "Volume TEX samples the selected z slice");
+        const SVGA3dSize flatVolume = {1,1,1};
+        svga3_vlkn_surface_define(dev, 94, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8, &flatVolume, 1);
+        svga3_vlkn_surface_dma_upload(dev, 94, 0, nullptr, volumeData, 4);
+        TEST_CHECK(sampleConstant(4, 0, 94, volumeCoords, {0,0,255,255}), "Depth-one volume retains its data and a 3D view");
+        const SVGA3dSize cubeSizes[6] = {{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1}};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 95, SVGA3D_SURFACE_HINT_TEXTURE | SVGA3D_SURFACE_CUBEMAP,
+            SVGA3D_A8R8G8B8, cubeSizes, 6) == SVGA3_VLKN_SUCCESS, "Define cube texture");
+        auto *cube = dev->surfaceMgr->getSurface(95);
+        for (uint32_t face = 0; face < 6; ++face)
+            TEST_CHECK(cube->dmaUpload(0, nullptr, &volumeData[face%2], 4, false, face) == SVGA3_VLKN_SUCCESS,
+                "Upload independent cube face");
+        const float positiveX[4] = {1,0,0,1}, negativeX[4] = {-1,0,0,1};
+        TEST_CHECK(sampleConstant(3, 0, 95, positiveX, {0,0,255,255}), "Cube TEX samples positive X face");
+        TEST_CHECK(sampleConstant(3, 0, 95, negativeX, {0,255,0,255}), "Cube TEX samples negative X face");
+        uint32_t cubeReadback = 0;
+        TEST_CHECK(cube->dmaDownload(0, nullptr, &cubeReadback, 4, false, 1) == SVGA3_VLKN_SUCCESS &&
+            cubeReadback == volumeData[1], "Cube face readback retains the selected layer");
+        const SVGA3dSize mipSizes[3] = {{64,64,1},{32,32,1},{16,16,1}};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 96, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8,
+            mipSizes, 3) == SVGA3_VLKN_SUCCESS, "Define bias texture");
+        const uint32_t mipColors[3] = {0xFFFF0000,0xFF00FF00,0xFF0000FF};
+        for (uint32_t level = 0; level < 3; ++level) {
+            std::vector<uint32_t> mipData(mipSizes[level].width * mipSizes[level].height, mipColors[level]);
+            svga3_vlkn_surface_dma_upload(dev, 96, level, nullptr, mipData.data(), mipSizes[level].width * 4);
+        }
+        std::vector<uint32_t> biasShader(std::begin(ps1Bytecode), std::end(ps1Bytecode));
+        biasShader[7] |= 2 << 16; /* texldb; FLOAT2 vertex coordinate supplies w=1. */
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 97, SVGA3D_SHADERTYPE_PS,
+            biasShader.data(), biasShader.size()) == SVGA3_VLKN_SUCCESS, "Define biased TEX shader");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MIPFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture(dev, CID, 0, 96);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 97);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4);
+        TEST_CHECK(pixelMatches(fb[24 * RT_W + 24], 0,0,255,255), "TEX bias selects mip 2 instead of implicit mip 1");
+        svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+        for (uint32_t sid = 94; sid <= 96; ++sid) svga3_vlkn_surface_destroy(dev, sid);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_surface_destroy(dev, 90);
+
+        // Distinct MRT outputs, a hole at location 0, and cached small targets.
+        const SVGA3dSize smallSize = {64,64,1};
+        for (uint32_t sid = 98; sid < 102; ++sid) {
+            TEST_CHECK(svga3_vlkn_surface_define(dev, sid, SVGA3D_SURFACE_HINT_RENDERTARGET,
+                SVGA3D_A8R8G8B8, &smallSize, 1) == SVGA3_VLKN_SUCCESS, "Define small MRT target");
+            svga3_vlkn_context_set_render_target(dev, CID, (SVGA3dRenderTargetType)(SVGA3D_RT_COLOR0 + sid - 98), sid, 0, 0);
+        }
+        const uint32_t mrtShader[] = {0xFFFF0300,
+            1 | (2 << 24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4),
+            1 | (2 << 24), D3D9_DST(8,1,15), D3D9_SRC(2,1,0xE4),
+            1 | (2 << 24), D3D9_DST(8,2,15), D3D9_SRC(2,2,0xE4),
+            1 | (2 << 24), D3D9_DST(8,3,15), D3D9_SRC(2,3,0xE4), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 98, SVGA3D_SHADERTYPE_PS,
+            mrtShader, sizeof(mrtShader)/4) == SVGA3_VLKN_SUCCESS, "Define four-output shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 98);
+        const float outputColors[4][4] = {{1,0,0,1},{0,1,0,1},{0,0,1,1},{1,1,0,1}};
+        std::vector<Pixel> smallPixels(64*64);
+        for (uint32_t i = 0; i < 4; ++i) {
+            uint32_t value[4]; memcpy(value, outputColors[i], sizeof(value));
+            svga3_vlkn_context_set_shader_const(dev, CID, i, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, value);
+            svga3_vlkn_surface_dma_download(dev, 98+i, 0, nullptr, smallPixels.data(), 64*4);
+        }
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+            == SVGA3_VLKN_SUCCESS, "Draw distinct MRT outputs");
+        for (uint32_t i = 0; i < 4; ++i) {
+            svga3_vlkn_surface_dma_download(dev, 98+i, 0, nullptr, smallPixels.data(), 64*4);
+            TEST_CHECK(pixelMatches(smallPixels[24*64+24], outputColors[i][0]*255,
+                outputColors[i][1]*255, outputColors[i][2]*255, 255), "Every MRT writes its independent color after a cached read");
+        }
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 2);
+        uint32_t whiteConstants[4]; memcpy(whiteConstants, whiteTint, sizeof(whiteConstants));
+        svga3_vlkn_context_set_shader_const(dev, CID, 2, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, whiteConstants);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 100, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],0,255,255,255), "Legacy global color mask applies to every target");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE2, 1);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 100, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],255,255,255,255), "Explicit per-target color mask overrides the global mask");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE2, 15);
+        uint32_t blueConstants[4]; memcpy(blueConstants, outputColors[2], sizeof(blueConstants));
+        svga3_vlkn_context_set_shader_const(dev, CID, 2, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, blueConstants);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, nullptr, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 101, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],255,255,0,255), "MRT location 3 survives an unbound location 0");
+        for (uint32_t i = 1; i < 4; ++i)
+            svga3_vlkn_context_set_render_target(dev, CID, (SVGA3dRenderTargetType)(SVGA3D_RT_COLOR0+i), SVGA3D_INVALID_ID, 0, 0);
+        for (uint32_t sid = 98; sid < 102; ++sid) svga3_vlkn_surface_destroy(dev, sid);
+
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        const uint32_t flatPS[] = {0xFFFF0300, 1 | (2<<24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4), 0xFFFF};
+        svga3_vlkn_context_define_shader(dev, CID, 99, SVGA3D_SHADERTYPE_PS, flatPS, sizeof(flatPS)/4);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 99);
+        // Legacy alpha-only attachments store A in native R, including blending.
+        svga3_vlkn_surface_define(dev, 103, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_ALPHA8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 103, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40C00000, 1, 0, nullptr, 0);
+        std::vector<uint8_t> alphaPixels(64*64);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(alphaPixels[0] == 64, "Alpha attachment clear stores A instead of R");
+        const float alphaColor[4] = {0.8f,0.2f,0.3f,0.5f};
+        uint32_t alphaConstant[4]; memcpy(alphaConstant,alphaColor,sizeof(alphaConstant));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, alphaConstant);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 7);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(alphaPixels[24*64+24] == 64, "RGB-only mask leaves an alpha attachment unchanged");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 8);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(abs(int(alphaPixels[24*64+24])-128) <= 1, "Alpha-only mask stores the shader alpha");
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40C00000, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_SRCALPHA);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLEND, SVGA3D_BLENDOP_DESTALPHA);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(abs(int(alphaPixels[24*64+24])-80) <= 1, "Alpha attachment blends using stored source and destination alpha");
+        svga3_vlkn_surface_define(dev, 104, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_X8R8G8B8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 104, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_ZERO);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 104, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 128, "XRGB destination alpha is one regardless of unused alpha bits");
+        svga3_vlkn_surface_define(dev, 105, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_A8R8G8B8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 105, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(abs(int(smallPixels[24*64+24].r)-32) <= 1, "RGBA destination alpha does not reuse an opaque-target pipeline");
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 0x564C010F);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 128, "Guest RGB view preserves opaque blending on an RGBA native image");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_SRCALPHASAT);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLEND, SVGA3D_BLENDOP_ZERO);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 0, "Source alpha saturation is zero for an opaque RGB view");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
+        svga3_vlkn_surface_destroy(dev, 105);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_surface_destroy(dev, 103); svga3_vlkn_surface_destroy(dev, 104);
+        // SWTNL sends screen-space POSITIONT and remapped color as TEXCOORD1.
+        const uint32_t windowPS[] = {0xFFFF0300,
+            31 | (2<<24), 0x80010005, D3D9_DST(1,0,15),
+            1 | (2<<24), D3D9_DST(8,0,15), D3D9_SRC(1,0,0xE4), 0xFFFF};
+        svga3_vlkn_context_define_shader(dev,CID,101,SVGA3D_SHADERTYPE_PS,windowPS,sizeof(windowPS)/4);
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,101);
+        const float windowVertices[4][8] = {
+            {1.125f,1,0.5f,1, 0,1,0,0}, {5.125f,1,0.5f,2, 0,1,0,0},
+            {1.125f,5,0.5f,1, 0,1,0,0}, {5.125f,5,0.5f,2, 0,1,0,0}};
+        const uint16_t lineIndices[4] = {0,1,2,3};
+        const SVGA3dSize windowBufferSize = {sizeof(windowVertices),1,1}, lineBufferSize = {sizeof(lineIndices),1,1};
+        svga3_vlkn_surface_define(dev,106,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&windowBufferSize,1);
+        svga3_vlkn_surface_define(dev,107,SVGA3D_SURFACE_HINT_INDEXBUFFER,SVGA3D_BUFFER,&lineBufferSize,1);
+        svga3_vlkn_surface_dma_upload(dev,106,0,nullptr,windowVertices,sizeof(windowVertices));
+        svga3_vlkn_surface_dma_upload(dev,107,0,nullptr,lineIndices,sizeof(lineIndices));
+        SVGA3dVertexDecl windowDecls[2] = {decls[0],decls[1]};
+        windowDecls[0].identity.usage = SVGA3D_DECLUSAGE_POSITIONT;
+        windowDecls[0].identity.type = SVGA3D_DECLTYPE_FLOAT4;
+        windowDecls[1].identity.usage = SVGA3D_DECLUSAGE_TEXCOORD;
+        windowDecls[1].identity.usageIndex = 1;
+        windowDecls[1].identity.type = SVGA3D_DECLTYPE_FLOAT4;
+        for (uint32_t i=0;i<2;++i) {
+            windowDecls[i].array.surfaceId=106; windowDecls[i].array.stride=32; windowDecls[i].array.offset=i*16;
+        }
+        SVGA3dPrimitiveRange lineRange = range;
+        lineRange.primType=SVGA3D_PRIMITIVE_LINELIST; lineRange.primitiveCount=2; lineRange.indexArray.surfaceId=107;
+        svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_COLOR,0,1,0,nullptr,0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_LINELIST,windowDecls,2,&lineRange,1)==SVGA3_VLKN_SUCCESS,
+            "POSITIONT bypasses a bound guest vertex shader");
+        svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
+        TEST_CHECK(pixelMatches(fb[RT_W+3],0,255,0,0) && pixelMatches(fb[5*RT_W+3],0,255,0,0),
+            "Pretransformed horizontal lines retain their screen coordinates, RHW and remapped color");
+        TEST_CHECK(pixelMatches(fb[3*RT_W+1],0,0,0,0), "Pretransformed lines leave the vertical edge absent");
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,99);
+        svga3_vlkn_surface_destroy(dev,106); svga3_vlkn_surface_destroy(dev,107);
+        uint32_t redConst[4]; memcpy(redConst, outputColors[0], sizeof(redConst));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, redConst);
+        const uint32_t selfCopyPS[] = {0xFFFF0300,
+            31 | (2<<24), 0x90000000, D3D9_DST(10,0,15),
+            81 | (5<<24), D3D9_DST(2,0,15), 0x3F800000,0x3F800000,0x3F800000,0x3F800000,
+            66 | (3<<24), D3D9_DST(0,0,15), D3D9_SRC(2,1,0xE4), D3D9_SRC(10,0,0xE4),
+            3 | (3<<24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4), D3D9_SRC(0,0,0xE4), 0xFFFF};
+        svga3_vlkn_context_define_shader(dev,CID,111,SVGA3D_SHADERTYPE_PS,selfCopyPS,sizeof(selfCopyPS)/4);
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,111);
+        svga3_vlkn_context_set_texture(dev,CID,0,SID_RT);
+        const float centerCoords[4]={.5f,.5f,0,1};uint32_t coordsBits[4];memcpy(coordsBits,centerCoords,sizeof(coordsBits));
+        svga3_vlkn_context_set_shader_const(dev,CID,1,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,coordsBits);
+        svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_COLOR,0xFF112233,1,0,nullptr,0);
+        for (unsigned iteration=0;iteration<2;++iteration) {
+            TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_TRIANGLELIST,decls,2,&range,1)==SVGA3_VLKN_SUCCESS,
+                "Copy from the current attachment through a preserved sampled image");
+            svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
+            const auto& center=fb[32*RT_W+32];
+            TEST_CHECK(abs(int(center.r)-(iteration?17:238))<=1 && abs(int(center.g)-(iteration?34:221))<=1 && abs(int(center.b)-(iteration?51:204))<=1,
+                "Overlapping attachment copy reads the complete previous draw, including a refreshed snapshot");
+        }
+        svga3_vlkn_context_set_texture(dev,CID,0,SVGA3D_INVALID_ID);
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,99);
+        const uint32_t pointVS[] = {0xFFFE0300,
+            81 | (5<<24), D3D9_DST(2,0,15), 0,0,0x3F000000,0x3F800000,
+            81 | (5<<24), D3D9_DST(2,1,15), 0x40400000,0x40400000,0x40400000,0x40400000,
+            1 | (2<<24), D3D9_DST(4,0,15), D3D9_SRC(2,0,0xE4),
+            1 | (2<<24), D3D9_DST(4,2,1), D3D9_SRC(2,1,0xE4), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev,CID,110,SVGA3D_SHADERTYPE_VS,pointVS,sizeof(pointVS)/4)==SVGA3_VLKN_SUCCESS,
+            "Define point-size shader with separate position and PSIZE outputs");
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_VS,110);
+        svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_COLOR,0xFF000000,1,0,nullptr,0);
+        TEST_CHECK(svga3_vlkn_context_begin_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION)==SVGA3_VLKN_SUCCESS,
+            "Begin query outside the point render pass");
+        SVGA3dPrimitiveRange pointRange{};
+        pointRange.primType=SVGA3D_PRIMITIVE_POINTLIST;pointRange.primitiveCount=1;
+        pointRange.indexArray.surfaceId=SVGA3D_INVALID_ID;
+        TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_POINTLIST,decls,2,&pointRange,1)==SVGA3_VLKN_SUCCESS,
+            "Render a three-pixel point");
+        TEST_CHECK(svga3_vlkn_context_end_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION)==SVGA3_VLKN_SUCCESS,
+            "End query outside the point render pass");
+        uint32_t samples=0;
+        TEST_CHECK(svga3_vlkn_context_wait_for_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION,&samples)==SVGA3_VLKN_SUCCESS && samples==9,
+            "Occlusion query counts the nine covered point samples");
+        svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
+        unsigned redPoints=0;
+        for (const auto& pixel : fb) redPoints += pixelMatches(pixel,255,0,0,255);
+        TEST_CHECK(redPoints==9 && pixelMatches(fb[32*RT_W+32],255,0,0,255),
+            "PSIZE changes coverage while leaving the point position intact");
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_VS,1);
+        const SVGA3dRect negativeViewport = {uint32_t(-32),0,64,64};
+        const SVGA3dRect oversizedScissor = {uint32_t(-5),uint32_t(-5),69,69};
+        const SVGA3dRect fullClear = {0,0,64,64};
+        svga3_vlkn_context_set_viewport(dev, CID, &negativeViewport);
+        svga3_vlkn_context_set_scissor_rect(dev, CID, &oversizedScissor);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 1);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, &fullClear, 1);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+8],255,0,0,255) && pixelMatches(fb[24*RT_W+24],0,0,0,255),
+            "Signed offscreen viewport keeps geometry while scissors clip to the framebuffer");
+
+        const SVGA3dRect emptyScissor = {0,64,0,0}, fullViewport = {0,0,64,64};
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, &fullClear, 1);
+        svga3_vlkn_context_set_scissor_rect(dev, CID, &emptyScissor);
+        svga3_vlkn_context_set_viewport(dev, CID, &fullViewport);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+24],0,0,0,255), "Explicit empty scissor survives viewport and target changes");
+        const SVGA3dRect emptyViewport = {0,0,0,0};
+        svga3_vlkn_context_set_viewport(dev, CID, &emptyViewport);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
+        TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+            == SVGA3_VLKN_SUCCESS, "Explicit empty viewport clips the draw without a Vulkan viewport error");
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+24],0,0,0,255), "Explicit empty viewport survives target changes");
+
         /* Clean up Scene 1 */
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);
@@ -457,6 +833,86 @@ int main() {
         savePPM("artifacts/scene2_depth_rendered.ppm", fb.data(), RT_W, RT_H);
         savePPM("artifacts/scene2_depth_reference.ppm", refFb2.data(), RT_W, RT_H);
         saveDiffPPM("artifacts/scene2_depth_diff.ppm", fb.data(), refFb2.data(), RT_W, RT_H);
+
+        /* Fragment depth overrides interpolated z, including depth-only draws. */
+        const uint32_t depthShader[] = {0xFFFF0300,
+            1 | (2 << 24), D3D9_DST(8, 0, 15), D3D9_SRC(2, 0, 0xE4),
+            1 | (2 << 24), D3D9_DST(9, 0, 1), D3D9_SRC(2, 1, 0), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 98, SVGA3D_SHADERTYPE_PS,
+            depthShader, sizeof(depthShader)/4) == SVGA3_VLKN_SUCCESS, "Define fragment depth shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 98);
+        const float replacedDepth[4] = {.7f,0,0,0};
+        memcpy(cVal, replacedDepth, sizeof(cVal));
+        svga3_vlkn_context_set_shader_const(dev, CID, 1, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, cVal);
+        for (bool depthOnly : {false,true}) {
+            if (depthOnly) svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+            svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_DEPTH, 0, 1.f, 0, nullptr, 0);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &r1, 1)
+                == SVGA3_VLKN_SUCCESS, "Draw with fragment depth output");
+            std::vector<uint32_t> depthPixels(RT_W * RT_H);
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_DS, 0, nullptr, depthPixels.data(), RT_W * 4)
+                == SVGA3_VLKN_SUCCESS, "Read replaced fragment depth");
+            TEST_CHECK(std::abs(double(depthPixels[32 * RT_W + 32] >> 8) / 16777215. - .7) < .000001,
+                "Fragment depth 0.7 replaces geometry depth 0.2 with and without a color target");
+        }
+        // Packed depth and stencil must survive both surface-copy and blit paths.
+        const SVGA3dSize packedSize = {2,2,1};
+        const uint32_t packedDepth[4] = {0x123456A5,0x6543215A,0xFEDCBA12,0xABCDEF34};
+        for (uint32_t sid : {97u,98u})
+            svga3_vlkn_surface_define(dev, sid, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_D24S8, &packedSize, 1);
+        svga3_vlkn_surface_dma_upload(dev, 97, 0, nullptr, packedDepth, 8);
+        const SVGA3dCopyBox packedCopy = {0,0,0,2,2,1,0,0,0};
+        TEST_CHECK(dev->surfaceMgr->copy(97,98,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy packed depth-stencil surface");
+        uint32_t packedReadback[4] = {};
+        svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
+        TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface copy retains depth and stencil bits");
+        const SVGA3dBox packedBox = {0,0,0,2,2,1};
+        TEST_CHECK(dev->surfaceMgr->stretchBlt(97,98,packedBox,packedBox,SVGA3D_STRETCH_BLT_LINEAR) == SVGA3_VLKN_SUCCESS,
+            "Depth-stencil blit uses a legal nearest filter");
+        svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
+        TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface blit retains depth and stencil bits");
+        svga3_vlkn_surface_define(dev, 99, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_DF24, &packedSize, 1);
+        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy packed depth into DF24");
+        svga3_vlkn_surface_dma_download(dev, 99, 0, nullptr, packedReadback, 8);
+        for (uint32_t i = 0; i < 4; ++i)
+            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "DF24 copy preserves the 24-bit depth value");
+        svga3_vlkn_surface_destroy(dev,99);
+        for (uint32_t sid : {97u,98u}) svga3_vlkn_surface_destroy(dev,sid);
+
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_ZENABLE, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_STENCILENABLE2SIDED, 1);
+        for (auto state : {SVGA3D_RS_STENCILFUNC,SVGA3D_RS_CCWSTENCILFUNC})
+            svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_CMP_ALWAYS);
+        for (auto state : {SVGA3D_RS_STENCILPASS,SVGA3D_RS_CCWSTENCILPASS})
+            svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_STENCILOP_REPLACE);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILMASK,0x564CFFFF);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILWRITEMASK,0x564C1666);
+        svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILREF,0x564CFFFF);
+        for (bool compareMasks : {false,true}) {
+            if (compareMasks) {
+                for (auto state : {SVGA3D_RS_STENCILFUNC,SVGA3D_RS_CCWSTENCILFUNC})
+                    svga3_vlkn_context_set_render_state(dev,CID,state,SVGA3D_CMP_EQUAL);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILMASK,0x564C0FF0);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILWRITEMASK,0x564CFFFF);
+                svga3_vlkn_context_set_render_state(dev,CID,SVGA3D_RS_STENCILREF,0x564C0240);
+            }
+            uint32_t observedStencil[2] = {};
+            for (uint32_t winding = 0; winding < 2; ++winding) {
+                svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_STENCIL,0,1,compareMasks ? 0x42 : 0,nullptr,0);
+                svga3_vlkn_surface_dma_upload(dev,SID_VB3,0,&bBox,q3.data(),sizeof(Vertex)*6);
+                svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_TRIANGLELIST,decls,2,&r1,1);
+                std::vector<uint32_t> stencilPixels(RT_W*RT_H);
+                svga3_vlkn_surface_dma_download(dev,SID_DS,0,nullptr,stencilPixels.data(),RT_W*4);
+                observedStencil[winding] = stencilPixels[(RT_H/2)*RT_W+RT_W/2] & 255;
+                std::swap(q3[1],q3[2]); std::swap(q3[4],q3[5]);
+            }
+            const uint32_t front = compareMasks ? 0x40 : 0x66, back = compareMasks ? 0x02 : 0x16;
+            TEST_CHECK((observedStencil[0]==front && observedStencil[1]==back) ||
+                (observedStencil[0]==back && observedStencil[1]==front),
+                "Front and back stencil references, compare masks and write masks remain independent");
+        }
 
         /* Clean up Scene 2 */
         svga3_vlkn_context_destroy(dev, CID);
