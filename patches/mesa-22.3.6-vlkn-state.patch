@@ -114,3 +114,16 @@
     }
  
     if (dirty & (SVGA_NEW_RAST | SVGA_NEW_NEED_PIPELINE)) {
+--- a/src/gallium/drivers/svga/svga_tgsi_decl_sm30.c
++++ b/src/gallium/drivers/svga/svga_tgsi_decl_sm30.c
+@@ -525,6 +525,10 @@
+    case TGSI_TEXTURE_2D:
+    case TGSI_TEXTURE_RECT:
+       return SVGA3DSAMP_2D;
++   case TGSI_TEXTURE_SHADOW1D:
++   case TGSI_TEXTURE_SHADOWRECT:
++      return debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) ?
++             SVGA3DSAMP_2D_SHADOW : SVGA3DSAMP_UNKNOWN;
+    case TGSI_TEXTURE_SHADOW2D:
+       return SVGA3DSAMP_2D_SHADOW;
+    case TGSI_TEXTURE_3D:

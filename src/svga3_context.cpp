@@ -146,6 +146,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     , m_renderPassRecordingSerial(0)
     , m_defaultPipelineLayout(VK_NULL_HANDLE)
     , m_defaultVS(VK_NULL_HANDLE)
+    , m_defaultPositionTVS(VK_NULL_HANDLE)
     , m_defaultFS(VK_NULL_HANDLE)
     , m_defaultFSTex(VK_NULL_HANDLE)
     , m_descriptorSet(VK_NULL_HANDLE)
@@ -498,6 +499,27 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     smInfo.pCode = defVsSpirv.data();
     m_backend->dispatch().vkCreateShaderModule(m_backend->device(), &smInfo, nullptr, &m_defaultVS);
 
+    // POSITIONT vertices have already passed guest transformation and lighting.
+    // Convert window XYZ/RHW back to homogeneous clip coordinates using c4/c5.
+    std::vector<uint32_t> positionTokens(std::begin(defVsTokens), std::end(defVsTokens));
+    const uint32_t positionOps[] = {
+        1 | (2<<24), D3D9_DST(0,0,7), D3D9_SRC(1,0,0xE4),
+        1 | (2<<24), D3D9_DST(0,0,8), D3D9_SRC(2,5,0xFF),
+        4 | (4<<24), D3D9_DST(0,0,7), D3D9_SRC(0,0,0xE4), D3D9_SRC(2,4,0xE4), D3D9_SRC(2,5,0xE4),
+        6 | (2<<24), D3D9_DST(0,1,15), D3D9_SRC(1,0,0xFF),
+        5 | (3<<24), D3D9_DST(4,0,15), D3D9_SRC(0,0,0xE4), D3D9_SRC(0,1,0xE4)
+    };
+    positionTokens.erase(positionTokens.begin()+13, positionTokens.begin()+17);
+    positionTokens.insert(positionTokens.begin()+13, std::begin(positionOps), std::end(positionOps));
+    std::vector<uint32_t> positionSpirv;
+    const auto positionStatus = svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,
+        positionTokens.data(), positionTokens.size(), positionSpirv, defErr);
+    if (positionStatus == SVGA3_VLKN_SUCCESS) {
+        smInfo.codeSize = positionSpirv.size()*sizeof(uint32_t);
+        smInfo.pCode = positionSpirv.data();
+        m_backend->dispatch().vkCreateShaderModule(m_backend->device(), &smInfo, nullptr, &m_defaultPositionTVS);
+    } else log_msg("[libqemu_svga3d] POSITIONT shader failed: %s\n", defErr.c_str());
+
     static const uint32_t defPsTokens[] = {
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 10, D3D9_DST(1, 0, 0xF), /* dcl_color v0 */
@@ -601,6 +623,10 @@ VlknContext::~VlknContext() {
     }
     m_pixelShaders.clear();
 
+    if (m_defaultPositionTVS) {
+        m_backend->dispatch().vkDestroyShaderModule(m_backend->device(), m_defaultPositionTVS, nullptr);
+        m_defaultPositionTVS = VK_NULL_HANDLE;
+    }
     if (m_defaultVS) {
         m_backend->dispatch().vkDestroyShaderModule(m_backend->device(), m_defaultVS, nullptr);
         m_defaultVS = VK_NULL_HANDLE;
@@ -1761,6 +1787,8 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
 {
     PipelineKey key = {};
     key.topology = (uint32_t)::svga3_primitive_to_vk(primitiveType);
+    for (uint32_t i = 0; i < numDecls; ++i)
+        key.pretransformed |= decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT;
 
     SVGA3dFillMode fm;
     fm.uintValue = m_renderStates[SVGA3D_RS_FILLMODE];
@@ -1901,9 +1929,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     VkPipelineShaderStageCreateInfo stages[2] = {};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = m_defaultVS;
+    stages[0].module = key.pretransformed ? m_defaultPositionTVS : m_defaultVS;
+    if (!stages[0].module) return VK_NULL_HANDLE;
     stages[0].pName = "main";
-    if (m_boundVS != SVGA3D_INVALID_ID) {
+    if (!key.pretransformed && m_boundVS != SVGA3D_INVALID_ID) {
         auto vit = m_vertexShaders.find(m_boundVS);
         if (vit != m_vertexShaders.end() && vit->second.module) {
             stages[0].module = vit->second.module;
@@ -2013,7 +2042,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             VkVertexInputAttributeDescription a = {};
             a.binding = i;
             uint32_t loc = i;
-            if (decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION) {
+            if ((decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION || decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT)) {
                 loc = 0;
             } else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_COLOR) {
                 loc = (decls[i].identity.usageIndex == 0) ? 1 : 7;
@@ -2040,7 +2069,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         }
     }
 
-    uint32_t requiredInputMask = (m_boundVS != SVGA3D_INVALID_ID) ?
+    uint32_t requiredInputMask = (!key.pretransformed && m_boundVS != SVGA3D_INVALID_ID) ?
         m_vertexShaders[m_boundVS].inputLocationMask : m_defaultVsInputMask;
 
     uint32_t missingInputMask = requiredInputMask & ~providedInputMask;
@@ -2312,6 +2341,9 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             stage.samplerDirty = true;
         }
     }
+    bool pretransformed = false;
+    for (uint32_t i = 0; i < numDecls; ++i)
+        pretransformed |= decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT;
     /* Compute MVP = World * View * Projection when using fixed-function vertex shader */
     std::array<float, 16> ffMvp{};
     if (m_boundVS == SVGA3D_INVALID_ID) {
@@ -2566,13 +2598,22 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             const size_t vsOffset = m_constantRingCursor;
             const size_t psOffset = vsOffset + m_constantRingStride;
             uint8_t *mapped = static_cast<uint8_t*>(m_constantRingMapped);
-            if (m_boundVS == SVGA3D_INVALID_ID) {
+            if (m_boundVS == SVGA3D_INVALID_ID || pretransformed) {
                 float tempConsts[256][4];
                 memcpy(tempConsts, m_vsConsts.floatConsts, sizeof(tempConsts));
                 for (int col = 0; col < 4; ++col) {
                     for (int row = 0; row < 4; ++row) {
                         tempConsts[col][row] = ffMvp[row * 4 + col];
                     }
+                }
+                if (pretransformed) {
+                    const float sx = 2.0f/m_viewport.width, sy = -2.0f/m_viewport.height;
+                    const float range = m_viewport.maxDepth - m_viewport.minDepth;
+                    const float sz = range != 0 ? 1.0f/range : 0.0f;
+                    const float scale[4] = {sx,sy,sz,0};
+                    const float bias[4] = {(.5f-m_viewport.x)*sx-1,
+                        (.5f-m_viewport.y)*sy+1,-m_viewport.minDepth*sz,1};
+                    memcpy(tempConsts[4],scale,sizeof(scale)); memcpy(tempConsts[5],bias,sizeof(bias));
                 }
                 memcpy(mapped + vsOffset, tempConsts, sizeof(tempConsts));
                 m_lastFfMvp = ffMvp;
@@ -2750,12 +2791,12 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     }
 
     /* Bind dummy vertex buffer if any required shader inputs were missing from decls */
-    uint32_t requiredInputMask = (m_boundVS != SVGA3D_INVALID_ID) ?
+    uint32_t requiredInputMask = (!pretransformed && m_boundVS != SVGA3D_INVALID_ID) ?
         m_vertexShaders[m_boundVS].inputLocationMask : m_defaultVsInputMask;
     uint32_t providedInputMask = 0;
     for (uint32_t i = 0; i < std::min(numDecls, SVGA3_MAX_VERTEX_DECLS); ++i) {
         uint32_t loc = i;
-        if (decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION) loc = 0;
+        if ((decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION || decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT)) loc = 0;
         else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_COLOR) loc = (decls[i].identity.usageIndex == 0) ? 1 : 7;
         else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_TEXCOORD) loc = 2 + std::min(decls[i].identity.usageIndex, SVGA3_MAX_DECL_USAGE_INDEX);
         else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_NORMAL) loc = 6;

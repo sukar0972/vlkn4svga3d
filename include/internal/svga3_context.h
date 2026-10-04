@@ -75,6 +75,7 @@ struct ShaderConstantBank {
 
 struct PipelineKey {
     uint32_t topology;
+    uint32_t pretransformed;
     uint32_t fillMode;
     uint32_t cullMode;
     uint32_t depthTestEnable;
@@ -351,6 +352,7 @@ private:
     std::unordered_map<PipelineKey, VkPipeline, PipelineKeyHasher> m_pipelineCache;
     VkPipelineLayout m_defaultPipelineLayout;
     VkShaderModule m_defaultVS;
+    VkShaderModule m_defaultPositionTVS;
     VkShaderModule m_defaultFS;
     VkShaderModule m_defaultFSTex;
     VkShaderModule m_defaultFSTexPure;

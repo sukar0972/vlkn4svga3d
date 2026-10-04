@@ -637,11 +637,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         uint32_t regType = ((regToken >> 28) & 0x7) | (((regToken >> 8) & 0x18));
         if (regType == D3DSPR_SAMPLER) {
             const uint32_t dimension = (semToken >> 27) & 0xF;
-            if (regNum >= 16 || (dimension != 2 && dimension != 3 && dimension != 4)) {
+            if (regNum >= 16 || (dimension != 2 && dimension != 3 && dimension != 4 && dimension != 5)) {
                 outError = "Invalid sampler declaration";
                 return SVGA3_VLKN_ERROR_INVALID_PARAM;
             }
-            samplerDimensions[regNum] = dimension;
+            samplerDimensions[regNum] = dimension == 5 ? 2 : dimension;
         } else if (regType == D3DSPR_INPUT || regType == D3DSPR_TEXTURE) {
             inputRegToSemantic[regNum] = { usage, usageIndex };
         } else if (regType == 6) { /* D3DSPR_OUTPUT in SM 3.0 */
