@@ -1845,6 +1845,10 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
                 dst->image(), dstLayout,
                 1, &copyRegion
             );
+            if (svga3_format_has_stencil(src->svgaFormat()) && svga3_format_has_stencil(dst->svgaFormat())) {
+                copyRegion.srcSubresource.aspectMask = copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+                m_backend->dispatch().vkCmdCopyImage(cb, src->image(), srcLayout, dst->image(), dstLayout, 1, &copyRegion);
+            }
         }
     }
 
@@ -1935,7 +1939,7 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
     blit.dstOffsets[0] = { (int32_t)boxDest.x, (int32_t)boxDest.y, (int32_t)boxDest.z };
     blit.dstOffsets[1] = { (int32_t)(boxDest.x + boxDest.w), (int32_t)(boxDest.y + boxDest.h), (int32_t)(boxDest.z + (boxDest.d ? boxDest.d : 1)) };
 
-    VkFilter filter = (mode == SVGA3D_STRETCH_BLT_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    VkFilter filter = (!src->isDepthStencil() && mode == SVGA3D_STRETCH_BLT_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 
     m_backend->dispatch().vkCmdBlitImage(
         cb,
@@ -1943,6 +1947,10 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
         dst->image(), dstLayout,
         1, &blit, filter
     );
+    if (svga3_format_has_stencil(src->svgaFormat()) && svga3_format_has_stencil(dst->svgaFormat())) {
+        blit.srcSubresource.aspectMask = blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+        m_backend->dispatch().vkCmdBlitImage(cb, src->image(), srcLayout, dst->image(), dstLayout, 1, &blit, VK_FILTER_NEAREST);
+    }
 
     dst->invalidateReadback();
     return m_backend->flushCommandBuffer();

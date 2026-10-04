@@ -679,6 +679,24 @@ int main() {
             TEST_CHECK(std::abs(double(depthPixels[32 * RT_W + 32] >> 8) / 16777215. - .7) < .000001,
                 "Fragment depth 0.7 replaces geometry depth 0.2 with and without a color target");
         }
+        // Packed depth and stencil must survive both surface-copy and blit paths.
+        const SVGA3dSize packedSize = {2,2,1};
+        const uint32_t packedDepth[4] = {0x123456A5,0x6543215A,0xFEDCBA12,0xABCDEF34};
+        for (uint32_t sid : {97u,98u})
+            svga3_vlkn_surface_define(dev, sid, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_D24S8, &packedSize, 1);
+        svga3_vlkn_surface_dma_upload(dev, 97, 0, nullptr, packedDepth, 8);
+        const SVGA3dCopyBox packedCopy = {0,0,0,2,2,1,0,0,0};
+        TEST_CHECK(dev->surfaceMgr->copy(97,98,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy packed depth-stencil surface");
+        uint32_t packedReadback[4] = {};
+        svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
+        TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface copy retains depth and stencil bits");
+        const SVGA3dBox packedBox = {0,0,0,2,2,1};
+        TEST_CHECK(dev->surfaceMgr->stretchBlt(97,98,packedBox,packedBox,SVGA3D_STRETCH_BLT_LINEAR) == SVGA3_VLKN_SUCCESS,
+            "Depth-stencil blit uses a legal nearest filter");
+        svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
+        TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface blit retains depth and stencil bits");
+        for (uint32_t sid : {97u,98u}) svga3_vlkn_surface_destroy(dev,sid);
+
         /* Clean up Scene 2 */
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);
