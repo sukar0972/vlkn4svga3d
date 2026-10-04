@@ -2245,7 +2245,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpAccessChain, { ptrOutputV4Float, posPtr, vsGlPerVertex, intConsts[0] });
         b.emitInst(b.functionDefinitions, SpvOpStore, { posPtr, flippedPos });
 
-        /* Store out_color[0..1] */
+        /* Store front and back color interpolants. */
         for (int c = 0; c < 4; ++c) {
             uint32_t colVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpLoad, { typeV4Float, colVal, outColorVar[c] });

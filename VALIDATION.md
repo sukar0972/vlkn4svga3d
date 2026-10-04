@@ -1,5 +1,31 @@
 # Validation
 
+## Piglit accuracy fixes — 2026-10-03; continuation 2026-10-04
+
+PR #26 fixes four rendering errors exposed by Piglit:
+
+- Packed guest blend color was never supplied to Vulkan. Blend constants now record per draw, including queued draws with different colors and separate alpha factors.
+- SVGA's clockwise front-face convention was reversed. Front-facing shader values and two-sided stencil selection now use that convention while the culled triangle orientation stays consistent.
+- COLOR2/COLOR3 back-face interpolants were aliased to COLOR0. They now have independent shader locations without displacing texture coordinates.
+- Packed D24 transfers omitted stencil and used the wrong depth bit layout. Depth and stencil now copy through separate Vulkan planes; D24X8 converts packed normalized depth to/from the Vulkan float format.
+
+Wire values and guest layouts were checked against the [Mesa 22.3.6 source](https://archive.mesa3d.org/older-versions/22.x/mesa-22.3.6.tar.xz). Real-Vulkan pixel tests reproduced the missing blend constants, aliased back colors and packed readback failures before the fixes. New tests cover both windings, stencil operations, changing blend constants, color/alpha factors, pitched partial depth transfers and direct staging readback. All 14 host suites passed with lavapipe and validation, as did `make test` and all seven reporting tests.
+
+The replay completed 141 of the same 146 cases before the coordinator stopped. On October 4, both Proxmox `10.0.0.200` and VM119 `10.0.0.144` were unreachable; the local gateway remained reachable. The remaining five cases and matched benchmark are pending. PR #26 remains a draft.
+
+| Outcome | Before, matched 141 cases | Accuracy fixes, 141 cases |
+| --- | ---: | ---: |
+| Pass | 63 | 82 |
+| Fail | 67 | 48 |
+| Skip | 5 | 5 |
+| Timeout | 6 | 6 |
+
+Nineteen former failures now pass: thirteen enabled two-sided vertex color combinations, two front-facing shader checks, two packed depth/stencil readbacks, stencil drawpixels and two-sided stencil. All 63 previous passes in this subset still pass. The separate `gl-1.0-blend-func` test remains failing, but failed probes fell from 1,043 to 388. The unchecked cases are `texsubimage`, `texsubimage-unpack`, `texsubimage-depth-formats`, `fbo-copyteximage-simple` and packed depth/stencil `texsubimage`. These partial counts must not be compared as a completed 146-case result.
+
+Each exact Piglit binary and argument list was replayed directly with GLX, the runner's clean environment and a 60-second timeout. A small graphics health probe followed each case unless a kernel GPU hang had already been detected. Four GPU hangs required recovery through the completed subset; two cube mip-level timeouts retained graphics health. GPU hangs remain unresolved, and separate invocations with recovery do not establish continuous-run stability. The preceding llvmpipe reference passed all 146 cases and 309 subtests; a fresh reference and benchmark have not yet run for these fixes.
+
+The installed release adapter was `6df0d2d780520849238dcc39bba8fa04a4087aa41415b524debe34d5a474ed11`, built from runtime source `5b6f7f6e9de33169b87e48d9713e647aff2b35fc`. Evidence is preserved in `artifacts/piglit-accuracy-final/`, including raw per-case outputs, commands, health probes, renderer identities and recovery logs. Host logs are `artifacts/piglit-accuracy-harness.log`, `piglit-accuracy-mock.log` and `piglit-accuracy-python.log`. These artifacts are excluded from Git. Current VM health cannot be verified while the host is unreachable.
+
 ## PR review and matched VM benchmarks — 2026-10-03
 
 Reviewed PRs #18, #22, #23, #24 and #25 on the combined source. Fixed staging-wrap command ordering and context initialization, corrected VMware DX opcodes and isolated context bookkeeping, tested copied host-adapter tables and RAM boundaries, removed stale QEMU members from the core archive, and tested the explicit preload build fence. DX rendering remains unsupported.
