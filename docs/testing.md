@@ -119,3 +119,5 @@ What each suite proves:
 
 `src/qemu_svga3d_preload.cpp` is an experimental, build-specific hook with guest-specific workarounds. Do not install it globally or preload it into an arbitrary QEMU build. It requires separate review of binary offsets, device layouts, capabilities, and guest-memory handling. This repository does not provide a supported Proxmox deployment procedure. Use disposable, isolated VMs for integration work.
 
+
+The [renderer performance report](renderer-performance-20261004.md) records the renderer optimization, matched benchmark conditions, and retained Piglit/glmark2 accuracy.
