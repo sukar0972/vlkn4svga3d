@@ -111,6 +111,8 @@ struct PipelineKey {
     uint32_t boundPS;
     uint32_t ffTextureStage0;
     uint32_t depthSamplerMask;
+    uint32_t alphaTargetMask;
+    uint32_t opaqueTargetMask;
     uint32_t alphaTestEnable;
     uint32_t alphaFunc;
     uint32_t alphaRef;

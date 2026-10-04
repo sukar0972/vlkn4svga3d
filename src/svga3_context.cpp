@@ -1695,7 +1695,8 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         float g = ((colorRGBA >> 8) & 0xFF) / 255.0f;
         float b = (colorRGBA & 0xFF) / 255.0f;
         float alpha = ((colorRGBA >> 24) & 0xFF) / 255.0f;
-        a.clearValue.color.float32[0] = r;
+        const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
+        a.clearValue.color.float32[0] = target->svgaFormat() == SVGA3D_ALPHA8 ? alpha : r;
         a.clearValue.color.float32[1] = g;
         a.clearValue.color.float32[2] = b;
         a.clearValue.color.float32[3] = alpha;
@@ -1827,6 +1828,12 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         // Legacy Mesa emits one mask for the whole framebuffer.
         key.colorWriteMask[i] = mask == m_renderStates.end() ? key.colorWriteMask[0] : mask->second;
     }
+    for (uint32_t i = 0; i < 4; ++i) {
+        const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
+        if (target && target->svgaFormat() == SVGA3D_ALPHA8) key.alphaTargetMask |= 1u << i;
+        if (target && (target->svgaFormat() == SVGA3D_X8R8G8B8 || target->svgaFormat() == SVGA3D_X1R5G5B5))
+            key.opaqueTargetMask |= 1u << i;
+    }
     key.numVertexDecls = numDecls;
     key.renderPass = renderPass;
 
@@ -1915,7 +1922,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             stages[1].module = pit->second.module;
             const bool depthOnly = hasDepthAttachment &&
                 std::none_of(std::begin(m_renderTargets), std::end(m_renderTargets), [](const auto &rt) { return rt.sid != 0 && rt.sid != SVGA3D_INVALID_ID; });
-            const uint32_t variantKey = key.depthSamplerMask | (depthOnly ? 0x80000000u : 0);
+            const uint32_t variantKey = key.depthSamplerMask | (key.alphaTargetMask << 16) | (depthOnly ? 0x80000000u : 0);
             if (variantKey != 0) {
                 auto variant = pit->second.depthVariants.find(variantKey);
                 if (variant == pit->second.depthVariants.end()) {
@@ -1924,7 +1931,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
                     Svga3VlknStatus st = svga3_translate_shader_d3d9(
                         SVGA3D_SHADERTYPE_PS, pit->second.bytecode.data(),
                         (uint32_t)pit->second.bytecode.size(), spirv, err, nullptr,
-                        key.depthSamplerMask, nullptr, nullptr, depthOnly);
+                        key.depthSamplerMask, nullptr, nullptr, depthOnly, key.alphaTargetMask);
                     VkShaderModule depthModule = VK_NULL_HANDLE;
                     if (st == SVGA3_VLKN_SUCCESS) {
                         VkShaderModuleCreateInfo info = {};
@@ -2176,7 +2183,35 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     for (uint32_t i = 0; i < 4; ++i) {
         blendAttachments[i] = cbAttach;
         blendAttachments[i].colorWriteMask = key.colorWriteMask[i] & 0xF;
-        if (m_surfaceMgr->getSurface(m_renderTargets[i].sid)) colorCount = i + 1;
+        const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
+        if (target) colorCount = i + 1;
+        if (target && target->svgaFormat() == SVGA3D_ALPHA8) {
+            // Native R stores logical alpha, so use alpha blending and masking.
+            auto alphaFactor = [](VkBlendFactor factor) {
+                switch (factor) {
+                    case VK_BLEND_FACTOR_SRC_ALPHA: return VK_BLEND_FACTOR_SRC_COLOR;
+                    case VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+                    case VK_BLEND_FACTOR_DST_ALPHA: return VK_BLEND_FACTOR_DST_COLOR;
+                    case VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+                    case VK_BLEND_FACTOR_CONSTANT_COLOR: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+                    case VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+                    default: return factor;
+                }
+            };
+            blendAttachments[i].srcColorBlendFactor = alphaFactor(cbAttach.srcAlphaBlendFactor);
+            blendAttachments[i].dstColorBlendFactor = alphaFactor(cbAttach.dstAlphaBlendFactor);
+            blendAttachments[i].colorBlendOp = cbAttach.alphaBlendOp;
+            blendAttachments[i].colorWriteMask = (key.colorWriteMask[i] & 8) ? VK_COLOR_COMPONENT_R_BIT : 0;
+        } else if (target && (target->svgaFormat() == SVGA3D_X8R8G8B8 || target->svgaFormat() == SVGA3D_X1R5G5B5)) {
+            // The unused alpha bits are logically one, including for blending.
+            auto opaqueFactor = [](VkBlendFactor factor) {
+                if (factor == VK_BLEND_FACTOR_DST_ALPHA) return VK_BLEND_FACTOR_ONE;
+                if (factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA) return VK_BLEND_FACTOR_ZERO;
+                return factor;
+            };
+            blendAttachments[i].srcColorBlendFactor = opaqueFactor(cbAttach.srcColorBlendFactor);
+            blendAttachments[i].dstColorBlendFactor = opaqueFactor(cbAttach.dstColorBlendFactor);
+        }
     }
     bool hasColorTarget = colorCount != 0;
     bool hasDepthTarget = (m_depthStencilTarget.sid != 0 &&

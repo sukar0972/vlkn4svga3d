@@ -19,6 +19,6 @@ docker run --rm --cpus=4 \
   vlkn-mesa-guest:22.3.6 sh /build.sh
 ```
 
-Place the built Gallium DRI module in a guest directory as `vmwgfx_dri.so`. Select it for a test process with `MESA_DRIVERS_PATH=/path/to/dri` and `SVGA_VLKN_EXTENDED_STATE=1`. The installed system driver can remain available for comparison. Software reference runs should use the system driver and unset both variables.
+Place the built Gallium DRI module in a guest directory as `vmwgfx_dri.so`. Select it for a test process with `LIBGL_DRIVERS_PATH=/path/to/dri` and `SVGA_VLKN_EXTENDED_STATE=1`. The installed system driver can remain available for comparison. Software reference runs should use the system driver and unset both variables.
 
 Record the module hash and these options alongside the backend hash. A change to either driver requires a new comparison. This guest patch is intended for the VLKN backend.

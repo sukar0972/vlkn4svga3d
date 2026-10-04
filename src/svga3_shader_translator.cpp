@@ -173,7 +173,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                                             uint32_t *outInputMask,
                                             uint32_t depthSamplerMask,
                                             bool *outHasBytecodeKill,
-                                            bool *outWritesDepth, bool depthOnly)
+                                            bool *outWritesDepth, bool depthOnly, uint32_t alphaTargetMask)
 {
     outSpirv.clear();
     outError.clear();
@@ -2390,7 +2390,14 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         for (uint32_t i = 0; i < 4; ++i) if (psOutColor[i]) {
             const uint32_t value = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, value, outColorVar[i]});
-            b.emitInst(b.functionDefinitions, SpvOpStore, {psOutColor[i], value});
+            uint32_t stored = value;
+            if (alphaTargetMask & (1u << i)) {
+                // ALPHA8 is backed by R8; preserve the shader's logical alpha.
+                stored = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpVectorShuffle,
+                    {typeV4Float, stored, value, value, 3, 3, 3, 3});
+            }
+            b.emitInst(b.functionDefinitions, SpvOpStore, {psOutColor[i], stored});
         }
         if (psOutDepth) {
             const uint32_t depthVector = b.allocId(), depth = b.allocId();

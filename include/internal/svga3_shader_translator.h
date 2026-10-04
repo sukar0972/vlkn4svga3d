@@ -28,7 +28,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType type,
                                             uint32_t depthSamplerMask = 0,
                                             bool *outHasBytecodeKill = nullptr,
                                             bool *outWritesDepth = nullptr,
-                                            bool depthOnly = false);
+                                            bool depthOnly = false, uint32_t alphaTargetMask = 0);
 
 } // namespace svga3_vlkn
 

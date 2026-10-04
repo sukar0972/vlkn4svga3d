@@ -367,6 +367,20 @@ int main() {
             svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
             svga3_vlkn_surface_destroy(dev, 91);
         }
+        // Depth clears used to generate shadow mipmaps must sample in every component.
+        svga3_vlkn_surface_define(dev, 91, SVGA3D_SURFACE_HINT_DEPTHSTENCIL | SVGA3D_SURFACE_HINT_TEXTURE,
+            SVGA3D_Z_DF24, &texSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, 91, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_DEPTH, 0, 0.1f, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, SVGA3D_INVALID_ID, 0, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 90, 0, 0);
+        svga3_vlkn_context_set_texture(dev, CID, 0, 91);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[32*RT_W+32],26,26,26,255), "Cleared DF24 depth samples in RGB components");
+        svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+        svga3_vlkn_surface_destroy(dev,91);
         /* Shader samplers 8..15 are independent of the eight interpolators. */
         std::vector<uint32_t> lastStageShader(std::begin(ps1Bytecode), std::end(ps1Bytecode));
         lastStageShader[6] = D3D9_DST(10, 15, 0xF);
@@ -512,6 +526,49 @@ int main() {
         const uint32_t flatPS[] = {0xFFFF0300, 1 | (2<<24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4), 0xFFFF};
         svga3_vlkn_context_define_shader(dev, CID, 99, SVGA3D_SHADERTYPE_PS, flatPS, sizeof(flatPS)/4);
         svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 99);
+        // Legacy alpha-only attachments store A in native R, including blending.
+        svga3_vlkn_surface_define(dev, 103, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_ALPHA8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 103, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40C00000, 1, 0, nullptr, 0);
+        std::vector<uint8_t> alphaPixels(64*64);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(alphaPixels[0] == 64, "Alpha attachment clear stores A instead of R");
+        const float alphaColor[4] = {0.8f,0.2f,0.3f,0.5f};
+        uint32_t alphaConstant[4]; memcpy(alphaConstant,alphaColor,sizeof(alphaConstant));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, alphaConstant);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 7);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(alphaPixels[24*64+24] == 64, "RGB-only mask leaves an alpha attachment unchanged");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 8);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(abs(int(alphaPixels[24*64+24])-128) <= 1, "Alpha-only mask stores the shader alpha");
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40C00000, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 1);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_SRCALPHA);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLEND, SVGA3D_BLENDOP_DESTALPHA);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 103, 0, nullptr, alphaPixels.data(), 64);
+        TEST_CHECK(abs(int(alphaPixels[24*64+24])-80) <= 1, "Alpha attachment blends using stored source and destination alpha");
+        svga3_vlkn_surface_define(dev, 104, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_X8R8G8B8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 104, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_ZERO);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 104, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 128, "XRGB destination alpha is one regardless of unused alpha bits");
+        svga3_vlkn_surface_define(dev, 105, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_A8R8G8B8, &smallSize, 1);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, 105, 0, 0);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(abs(int(smallPixels[24*64+24].r)-32) <= 1, "RGBA destination alpha does not reuse an opaque-target pipeline");
+        svga3_vlkn_surface_destroy(dev, 105);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        svga3_vlkn_surface_destroy(dev, 103); svga3_vlkn_surface_destroy(dev, 104);
         uint32_t redConst[4]; memcpy(redConst, outputColors[0], sizeof(redConst));
         svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, redConst);
         const SVGA3dRect negativeViewport = {uint32_t(-32),0,64,64};
