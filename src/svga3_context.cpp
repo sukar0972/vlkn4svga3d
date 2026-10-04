@@ -1830,6 +1830,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     }
     for (uint32_t i = 0; i < 4; ++i) {
         const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
+        if ((key.colorWriteMask[i] & 0xFFFF0000u) == 0x564C0000u) {
+            if (key.colorWriteMask[i] & 0x100) key.opaqueTargetMask |= 1u << i;
+            key.colorWriteMask[i] &= 15;
+        }
         if (target && target->svgaFormat() == SVGA3D_ALPHA8) key.alphaTargetMask |= 1u << i;
         if (target && (target->svgaFormat() == SVGA3D_X8R8G8B8 || target->svgaFormat() == SVGA3D_X1R5G5B5))
             key.opaqueTargetMask |= 1u << i;
@@ -2202,11 +2206,11 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             blendAttachments[i].dstColorBlendFactor = alphaFactor(cbAttach.dstAlphaBlendFactor);
             blendAttachments[i].colorBlendOp = cbAttach.alphaBlendOp;
             blendAttachments[i].colorWriteMask = (key.colorWriteMask[i] & 8) ? VK_COLOR_COMPONENT_R_BIT : 0;
-        } else if (target && (target->svgaFormat() == SVGA3D_X8R8G8B8 || target->svgaFormat() == SVGA3D_X1R5G5B5)) {
+        } else if (key.opaqueTargetMask & (1u << i)) {
             // The unused alpha bits are logically one, including for blending.
             auto opaqueFactor = [](VkBlendFactor factor) {
                 if (factor == VK_BLEND_FACTOR_DST_ALPHA) return VK_BLEND_FACTOR_ONE;
-                if (factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA) return VK_BLEND_FACTOR_ZERO;
+                if (factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA || factor == VK_BLEND_FACTOR_SRC_ALPHA_SATURATE) return VK_BLEND_FACTOR_ZERO;
                 return factor;
             };
             blendAttachments[i].srcColorBlendFactor = opaqueFactor(cbAttach.srcColorBlendFactor);

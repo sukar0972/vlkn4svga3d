@@ -22,3 +22,15 @@ docker run --rm --cpus=4 \
 Place the built Gallium DRI module in a guest directory as `vmwgfx_dri.so`. Select it for a test process with `LIBGL_DRIVERS_PATH=/path/to/dri` and `SVGA_VLKN_EXTENDED_STATE=1`. The installed system driver can remain available for comparison. Software reference runs should use the system driver and unset both variables.
 
 Record the module hash and these options alongside the backend hash. A change to either driver requires a new comparison. This guest patch is intended for the VLKN backend.
+
+Run the paired Piglit comparison with the custom hardware module and an unchanged software reference:
+
+```sh
+python3 scripts/run_piglit.py --ssh svga3d@10.0.0.144 \
+  --mesa-driver-path /home/svga3d/vlkn-mesa/dri --extended-state \
+  --test-timeout 180 --run-timeout 7200
+```
+
+The runner checks the loaded module path and records its SHA-256. It clears the driver path and extension environment for the llvmpipe reference.
+
+Color-write states use the same `0x564c` tag, retain the RGBA mask in bits 0–3, and mark a logical RGB attachment with bit 8. Mesa emits each attachment separately so blending can treat its destination alpha as one even when the physical image is RGBA.

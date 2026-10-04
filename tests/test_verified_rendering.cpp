@@ -565,6 +565,17 @@ int main() {
         svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
         svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
         TEST_CHECK(abs(int(smallPixels[24*64+24].r)-32) <= 1, "RGBA destination alpha does not reuse an opaque-target pipeline");
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0x40808080, 1, 0, nullptr, 0);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 0x564C010F);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 128, "Guest RGB view preserves opaque blending on an RGBA native image");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SRCBLEND, SVGA3D_BLENDOP_SRCALPHASAT);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_DSTBLEND, SVGA3D_BLENDOP_ZERO);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 105, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(smallPixels[24*64+24].r == 0, "Source alpha saturation is zero for an opaque RGB view");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
         svga3_vlkn_surface_destroy(dev, 105);
         svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_BLENDENABLE, 0);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);

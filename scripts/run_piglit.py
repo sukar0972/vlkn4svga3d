@@ -28,6 +28,7 @@ CLEAN_ENV = (
     "LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE",
     "MESA_GL_VERSION_OVERRIDE", "MESA_GLSL_VERSION_OVERRIDE", "LD_PRELOAD",
     "LIBGL_ALWAYS_INDIRECT", "PIGLIT_PLATFORM", "PIGLIT_CONFIG",
+    "LIBGL_DRIVERS_PATH", "MESA_DRIVERS_PATH", "SVGA_VLKN_EXTENDED_STATE",
 )
 
 
@@ -96,6 +97,8 @@ def main():
     parser.add_argument("--ssh", help="Guest user@host; omit to run locally")
     parser.add_argument("--piglit", default="piglit", help="Piglit executable on the test machine")
     parser.add_argument("--display", default=":0")
+    parser.add_argument("--mesa-driver-path", help="Guest directory containing the opt-in vmwgfx_dri.so; hardware runs only")
+    parser.add_argument("--extended-state", action="store_true", help="Enable the patched Mesa/VLKN state protocol for hardware runs")
     parser.add_argument("--renderer", choices=("compare", "svga", "llvmpipe"), default="compare")
     parser.add_argument("--suite", choices=("smoke", "quick"), default="smoke")
     parser.add_argument("--include", action="append", help="Replace smoke selection with these regexes")
@@ -105,6 +108,10 @@ def main():
     parser.add_argument("--run-timeout", type=int, default=1800)
     parser.add_argument("--output", type=Path, help="New local artifact directory")
     args = parser.parse_args()
+    if args.extended_state and not args.mesa_driver_path:
+        parser.error("--extended-state requires --mesa-driver-path")
+    if args.mesa_driver_path and not args.mesa_driver_path.startswith("/"):
+        parser.error("--mesa-driver-path must be an absolute path on the test machine")
     if args.test_timeout < 1 or args.run_timeout < 1:
         parser.error("timeouts must be positive")
     if args.ssh and (args.ssh.startswith("-") or any(c.isspace() for c in args.ssh)):
@@ -169,6 +176,18 @@ def main():
             env += [f"DISPLAY={args.display}"]
             if renderer == "llvmpipe":
                 env += ["LIBGL_ALWAYS_SOFTWARE=1", "GALLIUM_DRIVER=llvmpipe"]
+            elif args.mesa_driver_path:
+                env += [f"LIBGL_DRIVERS_PATH={args.mesa_driver_path}"]
+                if args.extended_state:
+                    env += ["SVGA_VLKN_EXTENDED_STATE=1"]
+                driver = args.mesa_driver_path.rstrip("/") + "/vmwgfx_dri.so"
+                (out / "svga-mesa-driver-sha256.txt").write_text(capture(["sha256sum", driver]))
+                loading = subprocess.run(command(env + ["LD_DEBUG=files", "glxinfo", "-B"]),
+                                         capture_output=True, text=True, timeout=30)
+                (out / "svga-mesa-loader.log").write_text(loading.stderr)
+                if loading.returncode or not any(driver in line and "generating link map" in line
+                                                 for line in loading.stderr.splitlines()):
+                    raise RuntimeError("Custom Mesa module was not loaded; inspect svga-mesa-loader.log")
             identity = capture(env + ["glxinfo", "-B"])
             (out / f"{renderer}-glxinfo.txt").write_text(identity)
             renderer_lines = [line for line in identity.splitlines() if "OpenGL renderer string:" in line]

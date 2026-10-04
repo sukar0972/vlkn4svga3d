@@ -50,7 +50,34 @@
        ds->stencil[0].func  = svga_translate_compare_func(templ->stencil[0].func);
 --- a/src/gallium/drivers/svga/svga_state_rss.c
 +++ b/src/gallium/drivers/svga/svga_state_rss.c
-@@ -194,8 +194,16 @@
+@@ -105,10 +105,25 @@
+ 
+    queue.rs_count = 0;
+ 
++   if (debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) &&
++       (dirty & (SVGA_NEW_BLEND | SVGA_NEW_FRAME_BUFFER))) {
++      for (unsigned i = 0; i < 4; ++i) {
++         const struct pipe_surface *surface = svga->curr.framebuffer.cbufs[i];
++         unsigned value = 0x564c0000u | svga->curr.blend->rt[0].writemask;
++         if (surface && !util_format_has_alpha(surface->format)) value |= 0x100;
++         unsigned state = i ? SVGA3D_RS_COLORWRITEENABLE1 + i - 1 : SVGA3D_RS_COLORWRITEENABLE;
++         if (svga->state.hw_draw.rs[state] != value) {
++            svga_queue_rs(&queue, state, value);
++            svga->state.hw_draw.rs[state] = value;
++         }
++      }
++   }
++
+    if (dirty & (SVGA_NEW_BLEND | SVGA_NEW_BLEND_COLOR)) {
+       const struct svga_blend_state *curr = svga->curr.blend;
+ 
+-      EMIT_RS(svga, curr->rt[0].writemask, COLORWRITEENABLE);
++      if (!debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false))
++         EMIT_RS(svga, curr->rt[0].writemask, COLORWRITEENABLE);
+       EMIT_RS(svga, curr->rt[0].blend_enable, BLENDENABLE);
+ 
+       if (curr->rt[0].blend_enable) {
+@@ -194,8 +209,16 @@
           EMIT_RS(svga, curr->stencil[ccw].zfail, CCWSTENCILZFAIL);
           EMIT_RS(svga, curr->stencil[ccw].pass,  CCWSTENCILPASS);
  
@@ -69,7 +96,7 @@
        }
  
        EMIT_RS(svga, curr->zenable, ZENABLE);
-@@ -211,8 +219,15 @@
+@@ -211,8 +234,15 @@
        }
     }
  
