@@ -366,6 +366,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     enabledFeatures.depthBiasClamp = m_features.depthBiasClamp;
     enabledFeatures.fillModeNonSolid = m_features.fillModeNonSolid;
     enabledFeatures.wideLines = m_features.wideLines;
+    enabledFeatures.largePoints = m_features.largePoints;
     enabledFeatures.independentBlend = m_features.independentBlend;
 
     VkDeviceCreateInfo deviceCreateInfo = {};

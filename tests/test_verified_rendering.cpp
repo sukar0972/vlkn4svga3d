@@ -623,6 +623,33 @@ int main() {
         svga3_vlkn_surface_destroy(dev,106); svga3_vlkn_surface_destroy(dev,107);
         uint32_t redConst[4]; memcpy(redConst, outputColors[0], sizeof(redConst));
         svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, redConst);
+        const uint32_t pointVS[] = {0xFFFE0300,
+            81 | (5<<24), D3D9_DST(2,0,15), 0,0,0x3F000000,0x3F800000,
+            81 | (5<<24), D3D9_DST(2,1,15), 0x40400000,0x40400000,0x40400000,0x40400000,
+            1 | (2<<24), D3D9_DST(4,0,15), D3D9_SRC(2,0,0xE4),
+            1 | (2<<24), D3D9_DST(4,2,1), D3D9_SRC(2,1,0xE4), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev,CID,110,SVGA3D_SHADERTYPE_VS,pointVS,sizeof(pointVS)/4)==SVGA3_VLKN_SUCCESS,
+            "Define point-size shader with separate position and PSIZE outputs");
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_VS,110);
+        svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_COLOR,0xFF000000,1,0,nullptr,0);
+        TEST_CHECK(svga3_vlkn_context_begin_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION)==SVGA3_VLKN_SUCCESS,
+            "Begin query outside the point render pass");
+        SVGA3dPrimitiveRange pointRange{};
+        pointRange.primType=SVGA3D_PRIMITIVE_POINTLIST;pointRange.primitiveCount=1;
+        pointRange.indexArray.surfaceId=SVGA3D_INVALID_ID;
+        TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_POINTLIST,decls,2,&pointRange,1)==SVGA3_VLKN_SUCCESS,
+            "Render a three-pixel point");
+        TEST_CHECK(svga3_vlkn_context_end_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION)==SVGA3_VLKN_SUCCESS,
+            "End query outside the point render pass");
+        uint32_t samples=0;
+        TEST_CHECK(svga3_vlkn_context_wait_for_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION,&samples)==SVGA3_VLKN_SUCCESS && samples==9,
+            "Occlusion query counts the nine covered point samples");
+        svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
+        unsigned redPoints=0;
+        for (const auto& pixel : fb) redPoints += pixelMatches(pixel,255,0,0,255);
+        TEST_CHECK(redPoints==9 && pixelMatches(fb[32*RT_W+32],255,0,0,255),
+            "PSIZE changes coverage while leaving the point position intact");
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_VS,1);
         const SVGA3dRect negativeViewport = {uint32_t(-32),0,64,64};
         const SVGA3dRect oversizedScissor = {uint32_t(-5),uint32_t(-5),69,69};
         const SVGA3dRect fullClear = {0,0,64,64};

@@ -541,7 +541,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 if (dst.regType == D3DSPR_OUTPUT) {
                     explicitVsOutputRegs[dst.regNum] = true;
                 }
-                if (dst.regType == D3DSPR_RASTOUT) {
+                if (dst.regType == D3DSPR_RASTOUT && dst.regNum == 0) {
                     writesExplicitPosition = true;
                 }
             }
@@ -804,6 +804,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         /* Decorate gl_PerVertex struct */
         perVertexStructType = b.allocId();
         b.emitInst(b.annotations, SpvOpMemberDecorate, { perVertexStructType, 0, SpvDecorationBuiltIn, SpvBuiltInPosition });
+        b.emitInst(b.annotations, SpvOpMemberDecorate, { perVertexStructType, 1, SpvDecorationBuiltIn, SpvBuiltInPointSize });
         b.emitInst(b.annotations, SpvOpDecorate, { perVertexStructType, SpvDecorationBlock });
     } else {
         for (int c = 0; c < 4; ++c) {
@@ -925,8 +926,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, pair.second.varId, SpvStorageClassInput });
         }
 
-        /* gl_PerVertex struct { vec4 gl_Position; } */
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypeStruct, { perVertexStructType, typeV4Float });
+        /* gl_PerVertex struct { vec4 gl_Position; float gl_PointSize; } */
+        b.emitInst(b.typesConstantsGlobals, SpvOpTypeStruct, { perVertexStructType, typeV4Float, typeFloat });
         ptrOutputPerVertex = b.allocId();
         b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrOutputPerVertex, SpvStorageClassOutput, perVertexStructType });
         b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputPerVertex, vsGlPerVertex, SpvStorageClassOutput });
@@ -993,12 +994,14 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
 
     /* Output Registers Function locals */
     uint32_t outPosVar = b.allocId();
+    uint32_t outPointSizeVar = isVS ? b.allocId() : 0;
     uint32_t outDepthVar = writesDepth ? b.allocId() : 0;
     uint32_t outColorVar[4] = { b.allocId(), b.allocId(), b.allocId(), b.allocId() };
     uint32_t outTexCoordVar[8];
     for (int t = 0; t < 8; ++t) outTexCoordVar[t] = b.allocId();
 
     b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outPosVar, SpvStorageClassFunction, const0_v4 });
+    if (outPointSizeVar) b.emitInst(b.functionDefinitions, SpvOpVariable, {ptrFunctionV4Float, outPointSizeVar, SpvStorageClassFunction, const1_v4});
     if (outDepthVar) b.emitInst(b.functionDefinitions, SpvOpVariable, {ptrFunctionV4Float, outDepthVar, SpvStorageClassFunction, const0_v4});
     for (int c = 0; c < 4; ++c)
         b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outColorVar[c], SpvStorageClassFunction, const1_v4 });
@@ -1335,7 +1338,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         } else if (!isVS && effectiveRegType == D3DSPR_DEPTHOUT) {
             dstVar = outDepthVar;
         } else if (effectiveRegType == D3DSPR_RASTOUT) {
-            dstVar = outPosVar;
+            dstVar = dst.regNum == 0 ? outPosVar : (dst.regNum == 2 ? outPointSizeVar : 0);
         } else if (effectiveRegType == D3DSPR_ATTROUT || effectiveRegType == D3DSPR_COLOROUT) {
             dstVar = outColorVar[dst.regNum < 4 ? dst.regNum : 0];
         } else if (effectiveRegType == 6) { /* D3DSPR_TEXCRDOUT (SM 1/2) or D3DSPR_OUTPUT (SM 3) */
@@ -1345,6 +1348,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     if (it != outputRegToSemantic.end()) {
                         if (it->second.usage == 0 || it->second.usage == 9) { /* POSITION or POSITIONT */
                             dstVar = outPosVar;
+                        } else if (it->second.usage == 4) { /* PSIZE */
+                            dstVar = outPointSizeVar;
                         } else if (it->second.usage == 10) { /* COLOR */
                             dstVar = outColorVar[it->second.usageIndex < 4 ? it->second.usageIndex : 0];
                         } else if (it->second.usage == 5) { /* TEXCOORD */
@@ -2305,6 +2310,17 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         uint32_t posPtr = b.allocId();
         b.emitInst(b.functionDefinitions, SpvOpAccessChain, { ptrOutputV4Float, posPtr, vsGlPerVertex, intConsts[0] });
         b.emitInst(b.functionDefinitions, SpvOpStore, { posPtr, flippedPos });
+
+        /* Vulkan point pipelines require a defined PointSize even when the
+         * guest VS does not write PSIZE. Nonpositive sizes have undefined GL
+         * rasterization; choose one rather than emitting an invalid size. */
+        uint32_t pointValue = b.allocId(), pointX = b.allocId();
+        uint32_t positiveSize = b.allocId(), pointPtr = b.allocId();
+        b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, pointValue, outPointSizeVar});
+        b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, pointX, pointValue, 0});
+        b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeFloat, positiveSize, glslSetId, GLSLstd450FMax, pointX, const1_f});
+        b.emitInst(b.functionDefinitions, SpvOpAccessChain, {ptrOutputFloat, pointPtr, vsGlPerVertex, intConsts[1]});
+        b.emitInst(b.functionDefinitions, SpvOpStore, {pointPtr, positiveSize});
 
         /* Store front and back color interpolants. */
         for (int c = 0; c < 4; ++c) {

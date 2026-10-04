@@ -2381,7 +2381,13 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         bool stageBound = (m_stages[i].sid != SVGA3D_INVALID_ID && m_stages[i].sid != 0);
         VlknSurface *surf = stageBound ? m_surfaceMgr->getSurface(m_stages[i].sid) : nullptr;
-        if (surf && surf->imageView()) {
+        /* A stale texture binding can name the new draw attachment even
+         * when the guest shader does not sample it. Bind a harmless image
+         * for this undefined feedback case instead of an invalid layout. */
+        bool attachment = stageBound && m_depthStencilTarget.sid == m_stages[i].sid;
+        for (const auto& target : m_renderTargets)
+            attachment |= stageBound && target.sid == m_stages[i].sid;
+        if (surf && surf->imageView() && !attachment) {
             /* A surface whose mip chain was produced by rendering (the
              * guest's GenerateMipmap path) starts with a sampled view of
              * level 0 only; uploads and the autogen blit are the other
@@ -2871,6 +2877,7 @@ Svga3VlknStatus VlknContext::beginQuery(SVGA3dQueryType type) {
     if (m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
 
     if (m_queryPool != VK_NULL_HANDLE) {
+        endRenderPassIfActive();
         VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
         m_backend->dispatch().vkCmdResetQueryPool(cb, m_queryPool, 0, 1);
         m_backend->dispatch().vkCmdBeginQuery(cb, m_queryPool, 0, 0);
@@ -2885,6 +2892,7 @@ Svga3VlknStatus VlknContext::endQuery(SVGA3dQueryType type) {
     if (!m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
 
     if (m_queryPool != VK_NULL_HANDLE) {
+        endRenderPassIfActive();
         VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
         m_backend->dispatch().vkCmdEndQuery(cb, m_queryPool, 0);
         Svga3VlknStatus fst = m_backend->flushCommandBuffer();
