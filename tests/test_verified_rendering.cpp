@@ -623,6 +623,27 @@ int main() {
         svga3_vlkn_surface_destroy(dev,106); svga3_vlkn_surface_destroy(dev,107);
         uint32_t redConst[4]; memcpy(redConst, outputColors[0], sizeof(redConst));
         svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, redConst);
+        const uint32_t selfCopyPS[] = {0xFFFF0300,
+            31 | (2<<24), 0x90000000, D3D9_DST(10,0,15),
+            81 | (5<<24), D3D9_DST(2,0,15), 0x3F800000,0x3F800000,0x3F800000,0x3F800000,
+            66 | (3<<24), D3D9_DST(0,0,15), D3D9_SRC(2,1,0xE4), D3D9_SRC(10,0,0xE4),
+            3 | (3<<24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4), D3D9_SRC(0,0,0xE4), 0xFFFF};
+        svga3_vlkn_context_define_shader(dev,CID,111,SVGA3D_SHADERTYPE_PS,selfCopyPS,sizeof(selfCopyPS)/4);
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,111);
+        svga3_vlkn_context_set_texture(dev,CID,0,SID_RT);
+        const float centerCoords[4]={.5f,.5f,0,1};uint32_t coordsBits[4];memcpy(coordsBits,centerCoords,sizeof(coordsBits));
+        svga3_vlkn_context_set_shader_const(dev,CID,1,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,coordsBits);
+        svga3_vlkn_context_clear(dev,CID,SVGA3D_CLEAR_COLOR,0xFF112233,1,0,nullptr,0);
+        for (unsigned iteration=0;iteration<2;++iteration) {
+            TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_TRIANGLELIST,decls,2,&range,1)==SVGA3_VLKN_SUCCESS,
+                "Copy from the current attachment through a preserved sampled image");
+            svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
+            const auto& center=fb[32*RT_W+32];
+            TEST_CHECK(abs(int(center.r)-(iteration?17:238))<=1 && abs(int(center.g)-(iteration?34:221))<=1 && abs(int(center.b)-(iteration?51:204))<=1,
+                "Overlapping attachment copy reads the complete previous draw, including a refreshed snapshot");
+        }
+        svga3_vlkn_context_set_texture(dev,CID,0,SVGA3D_INVALID_ID);
+        svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,99);
         const uint32_t pointVS[] = {0xFFFE0300,
             81 | (5<<24), D3D9_DST(2,0,15), 0,0,0x3F000000,0x3F800000,
             81 | (5<<24), D3D9_DST(2,1,15), 0x40400000,0x40400000,0x40400000,0x40400000,

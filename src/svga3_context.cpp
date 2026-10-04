@@ -587,6 +587,7 @@ VlknContext::~VlknContext() {
     if (m_backend) {
         m_backend->flushCommandBuffer();
         clearDescriptorSetCache();
+        m_feedbackSnapshots.clear();
     }
 
     for (auto &pair : m_pipelineCache) {
@@ -2371,6 +2372,76 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         }
     }
 
+    // Legacy CopyPixels draws can sample the image they are updating. Copy
+    // the source first rather than using one image simultaneously as sampled
+    // input and attachment. This also preserves overlapping copies.
+    std::unordered_map<uint32_t, VlknSurface*> feedbackSources;
+    for (uint32_t stage = 0; stage < SVGA3_MAX_TEXTURE_STAGES; ++stage) {
+        const uint32_t sid = m_stages[stage].sid;
+        if (!sid || sid == SVGA3D_INVALID_ID) continue;
+        const bool sampled = pixelShader != m_pixelShaders.end()
+            ? pixelShader->second.samplerDimensions[stage] != 0
+            : stage == 0 && m_boundPS == SVGA3D_INVALID_ID;
+        if (!sampled) continue;
+        bool attachment = m_depthStencilTarget.sid == sid;
+        for (const auto& target : m_renderTargets) attachment |= target.sid == sid;
+        auto* source = attachment ? m_surfaceMgr->getSurface(sid) : nullptr;
+        if (source && source->image()) feedbackSources[sid] = source;
+    }
+    if (!feedbackSources.empty()) {
+        endRenderPassIfActive();
+        auto status = m_backend->flushCommandBuffer();
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+        clearDescriptorSetCache();
+        m_feedbackSnapshots.clear();
+        for (const auto& entry : feedbackSources) {
+            auto* source = entry.second;
+            std::vector<SVGA3dSize> sizes;
+            for (uint32_t face = 0; face < source->arrayLayers(); ++face)
+                for (uint32_t mip = 0; mip < source->mipLevels(); ++mip) {
+                    const auto* info = source->getMipInfo(mip);
+                    sizes.push_back({info->width, info->height, info->depth});
+                }
+            auto copy = std::make_unique<VlknSurface>(m_backend, entry.first,
+                source->flags(), source->svgaFormat(), sizes.data(), sizes.size(), source->multisampleCount());
+            const size_t bytes = copy->budgetedBytes();
+            if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(bytes))
+                return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+            status = copy->allocate();
+            if (status != SVGA3_VLKN_SUCCESS) {
+                m_backend->resourceBudgets().releaseSurfaceBytes(bytes);
+                return status;
+            }
+            auto snapshot = std::shared_ptr<VlknSurface>(copy.release(), [backend=m_backend](VlknSurface* surface) {
+                backend->resourceBudgets().releaseSurfaceBytes(surface->budgetedBytes());
+                delete surface;
+            });
+            if (source->isVolumeImage()) {
+                status = snapshot->ensureVolumeImage();
+                if (status != SVGA3_VLKN_SUCCESS) return status;
+            }
+            if (!snapshot->ensureViewMipLevels(source->viewMipLevels()))
+                return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+            VkCommandBuffer copyCommands = m_backend->getActiveCommandBuffer();
+            source->transitionLayout(copyCommands, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            snapshot->transitionLayout(copyCommands, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            for (uint32_t mip = 0; mip < source->mipLevels(); ++mip) {
+                const auto* info = source->getMipInfo(mip);
+                for (VkImageAspectFlags aspect : {VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_ASPECT_STENCIL_BIT}) {
+                    if (!(source->nativeAspectMask() & aspect)) continue;
+                    VkImageCopy region{};
+                    region.srcSubresource = {aspect, mip, 0, source->arrayLayers()};
+                    region.dstSubresource = region.srcSubresource;
+                    region.extent = {info->width, info->height, info->depth};
+                    m_backend->dispatch().vkCmdCopyImage(copyCommands, source->image(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        snapshot->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                }
+            }
+            snapshot->transitionLayout(copyCommands, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            m_feedbackSnapshots[entry.first] = std::move(snapshot);
+        }
+    }
+
     /* Descriptor sets are immutable once a recorded draw references them.
      * Cache one set per texture/sampler tuple so state changes never force a
      * queue-idle just to rewrite a shared set. */
@@ -2381,13 +2452,17 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         bool stageBound = (m_stages[i].sid != SVGA3D_INVALID_ID && m_stages[i].sid != 0);
         VlknSurface *surf = stageBound ? m_surfaceMgr->getSurface(m_stages[i].sid) : nullptr;
-        /* A stale texture binding can name the new draw attachment even
-         * when the guest shader does not sample it. Bind a harmless image
-         * for this undefined feedback case instead of an invalid layout. */
+        // Bind the preserved input for attachment copies; unused attachment
+        // bindings use the dummy image to avoid incompatible image layouts.
         bool attachment = stageBound && m_depthStencilTarget.sid == m_stages[i].sid;
         for (const auto& target : m_renderTargets)
             attachment |= stageBound && target.sid == m_stages[i].sid;
-        if (surf && surf->imageView() && !attachment) {
+        auto feedback = attachment ? m_feedbackSnapshots.find(m_stages[i].sid) : m_feedbackSnapshots.end();
+        if (attachment && feedbackSources.count(m_stages[i].sid) && feedback != m_feedbackSnapshots.end())
+            surf = feedback->second.get();
+        else if (attachment)
+            surf = nullptr;
+        if (surf && surf->imageView()) {
             /* A surface whose mip chain was produced by rendering (the
              * guest's GenerateMipmap path) starts with a sampled view of
              * level 0 only; uploads and the autogen blit are the other

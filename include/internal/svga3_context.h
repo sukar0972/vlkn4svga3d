@@ -310,6 +310,8 @@ private:
     RenderTargetBinding m_renderTargets[SVGA3_MAX_RENDER_TARGETS];
     RenderTargetBinding m_depthStencilTarget;
     TextureStageState m_stages[SVGA3_MAX_TEXTURE_STAGES];
+    // Draw snapshots stay alive until recorded descriptors have completed.
+    std::unordered_map<uint32_t, std::shared_ptr<VlknSurface>> m_feedbackSnapshots;
 
     VkViewport m_viewport;
     bool m_viewportExplicit = false;
