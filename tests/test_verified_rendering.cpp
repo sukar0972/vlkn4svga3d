@@ -483,6 +483,20 @@ int main() {
             TEST_CHECK(pixelMatches(smallPixels[24*64+24], outputColors[i][0]*255,
                 outputColors[i][1]*255, outputColors[i][2]*255, 255), "Every MRT writes its independent color after a cached read");
         }
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 2);
+        uint32_t whiteConstants[4]; memcpy(whiteConstants, whiteTint, sizeof(whiteConstants));
+        svga3_vlkn_context_set_shader_const(dev, CID, 2, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, whiteConstants);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 100, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],0,255,255,255), "Legacy global color mask applies to every target");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE2, 1);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 100, 0, nullptr, smallPixels.data(), 64*4);
+        TEST_CHECK(pixelMatches(smallPixels[24*64+24],255,255,255,255), "Explicit per-target color mask overrides the global mask");
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE, 15);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_COLORWRITEENABLE2, 15);
+        uint32_t blueConstants[4]; memcpy(blueConstants, outputColors[2], sizeof(blueConstants));
+        svga3_vlkn_context_set_shader_const(dev, CID, 2, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, blueConstants);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
         svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, nullptr, 0);
         svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
@@ -491,6 +505,24 @@ int main() {
         for (uint32_t i = 1; i < 4; ++i)
             svga3_vlkn_context_set_render_target(dev, CID, (SVGA3dRenderTargetType)(SVGA3D_RT_COLOR0+i), SVGA3D_INVALID_ID, 0, 0);
         for (uint32_t sid = 98; sid < 102; ++sid) svga3_vlkn_surface_destroy(dev, sid);
+
+        svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
+        const uint32_t flatPS[] = {0xFFFF0300, 1 | (2<<24), D3D9_DST(8,0,15), D3D9_SRC(2,0,0xE4), 0xFFFF};
+        svga3_vlkn_context_define_shader(dev, CID, 99, SVGA3D_SHADERTYPE_PS, flatPS, sizeof(flatPS)/4);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 99);
+        uint32_t redConst[4]; memcpy(redConst, outputColors[0], sizeof(redConst));
+        svga3_vlkn_context_set_shader_const(dev, CID, 0, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, redConst);
+        const SVGA3dRect negativeViewport = {uint32_t(-32),0,64,64};
+        const SVGA3dRect oversizedScissor = {uint32_t(-5),uint32_t(-5),69,69};
+        const SVGA3dRect fullClear = {0,0,64,64};
+        svga3_vlkn_context_set_viewport(dev, CID, &negativeViewport);
+        svga3_vlkn_context_set_scissor_rect(dev, CID, &oversizedScissor);
+        svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 1);
+        svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR, 0xFF000000, 1, 0, &fullClear, 1);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, SID_RT, 0, nullptr, fb.data(), RT_W*4);
+        TEST_CHECK(pixelMatches(fb[24*RT_W+8],255,0,0,255) && pixelMatches(fb[24*RT_W+24],0,0,0,255),
+            "Signed offscreen viewport keeps geometry while scissors clip to the framebuffer");
 
         /* Clean up Scene 1 */
         svga3_vlkn_context_destroy(dev, CID);

@@ -720,9 +720,6 @@ void VlknContext::initDefaultRenderStates() {
     m_renderStates[SVGA3D_RS_CLIPPING] = 1;
     m_renderStates[SVGA3D_RS_LIGHTINGENABLE] = 1;
     m_renderStates[SVGA3D_RS_AMBIENT] = 0;
-    m_renderStates[SVGA3D_RS_COLORWRITEENABLE1] = 0xF;
-    m_renderStates[SVGA3D_RS_COLORWRITEENABLE2] = 0xF;
-    m_renderStates[SVGA3D_RS_COLORWRITEENABLE3] = 0xF;
     m_renderStates[SVGA3D_RS_COLORWRITEENABLE] = 0xF; /* RGBA */
     m_renderStates[SVGA3D_RS_BLENDEQUATION] = SVGA3D_BLENDEQ_ADD;
     m_renderStates[SVGA3D_RS_SCISSORTESTENABLE] = 0;
@@ -883,8 +880,8 @@ Svga3VlknStatus VlknContext::setTextureStageState(uint32_t stage, SVGA3dTextureS
 
 Svga3VlknStatus VlknContext::setViewport(const SVGA3dRect *rect) {
     if (!rect) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    m_viewport.x = (float)rect->x;
-    m_viewport.y = (float)rect->y;
+    m_viewport.x = (float)(int32_t)rect->x;
+    m_viewport.y = (float)(int32_t)rect->y;
     m_viewport.width = (float)rect->w;
     m_viewport.height = (float)rect->h;
     m_viewport.minDepth = 0.0f;
@@ -1654,6 +1651,14 @@ void VlknContext::invalidateSurface(uint32_t sid) {
     }
 }
 
+static VkRect2D clipToFramebuffer(VkRect2D rect, uint32_t width, uint32_t height) {
+    const int64_t x0 = std::clamp<int64_t>(rect.offset.x, 0, width);
+    const int64_t y0 = std::clamp<int64_t>(rect.offset.y, 0, height);
+    const int64_t x1 = std::clamp<int64_t>(int64_t(rect.offset.x) + rect.extent.width, 0, width);
+    const int64_t y1 = std::clamp<int64_t>(int64_t(rect.offset.y) + rect.extent.height, 0, height);
+    return {{int32_t(x0), int32_t(y0)}, {uint32_t(std::max<int64_t>(0, x1-x0)), uint32_t(std::max<int64_t>(0, y1-y0))}};
+}
+
 Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
                                   uint32_t colorRGBA,
                                   float depth,
@@ -1713,7 +1718,8 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
             r.rect.extent.height = rects[i].h;
             r.baseArrayLayer = 0;
             r.layerCount = 1;
-            clearRects.push_back(r);
+            r.rect = clipToFramebuffer(r.rect, m_fbWidth, m_fbHeight);
+            if (r.rect.extent.width && r.rect.extent.height) clearRects.push_back(r);
         }
     } else {
         VkClearRect r = {};
@@ -1723,7 +1729,8 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         r.rect.extent.height = (uint32_t)m_viewport.height;
         r.baseArrayLayer = 0;
         r.layerCount = 1;
-        clearRects.push_back(r);
+        r.rect = clipToFramebuffer(r.rect, m_fbWidth, m_fbHeight);
+        if (r.rect.extent.width && r.rect.extent.height) clearRects.push_back(r);
     }
 
     if (attachCount > 0 && !clearRects.empty()) {
@@ -1799,8 +1806,11 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         }
     }
     key.colorWriteMask[0] = m_renderStates[SVGA3D_RS_COLORWRITEENABLE];
-    for (uint32_t i = 1; i < 4; ++i)
-        key.colorWriteMask[i] = m_renderStates[SVGA3D_RS_COLORWRITEENABLE1 + i - 1];
+    for (uint32_t i = 1; i < 4; ++i) {
+        const auto mask = m_renderStates.find(SVGA3D_RS_COLORWRITEENABLE1 + i - 1);
+        // Legacy Mesa emits one mask for the whole framebuffer.
+        key.colorWriteMask[i] = mask == m_renderStates.end() ? key.colorWriteMask[0] : mask->second;
+    }
     key.numVertexDecls = numDecls;
     key.renderPass = renderPass;
 
@@ -2657,6 +2667,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         activeScissor.extent.width = (uint32_t)m_viewport.width;
         activeScissor.extent.height = (uint32_t)m_viewport.height;
     }
+    activeScissor = clipToFramebuffer(activeScissor, m_fbWidth, m_fbHeight);
     m_backend->dispatch().vkCmdSetScissor(cb, 0, 1, &activeScissor);
 
     /* 4. Bind Vertex Buffers */
