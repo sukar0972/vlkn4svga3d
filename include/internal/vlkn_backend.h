@@ -79,6 +79,8 @@ public:
     /* Staging buffer operations */
     Svga3VlknStatus uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dstOffset, const void *srcData, VkDeviceSize size);
     Svga3VlknStatus downloadFromBuffer(void *dstData, VkBuffer srcBuffer, VkDeviceSize srcOffset, VkDeviceSize size);
+    void recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
+                               VkDeviceSize offset, VkDeviceSize size);
 
     /* Command buffer management */
     VkCommandBuffer getActiveCommandBuffer();

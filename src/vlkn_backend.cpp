@@ -696,6 +696,7 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
         region.dstOffset = 0;
         region.size = size;
         m_dispatch.vkCmdCopyBuffer(cb, srcBuffer, tempBuffer, 1, &region);
+        recordHostReadBarrier(cb, tempBuffer, 0, size);
         st = flushCommandBuffer();
         if (st != SVGA3_VLKN_SUCCESS) {
             destroyBuffer(tempBuffer, tempMemory);
@@ -733,11 +734,29 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
     region.size = size;
 
     m_dispatch.vkCmdCopyBuffer(cb, srcBuffer, m_stagingBuffer, 1, &region);
+    recordHostReadBarrier(cb, m_stagingBuffer, stagingOffset, size);
     Svga3VlknStatus st = flushCommandBuffer();
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
     memcpy(dstData, stagingMappedAt(stagingOffset), (size_t)size);
     return SVGA3_VLKN_SUCCESS;
+}
+
+void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
+                                       VkDeviceSize offset, VkDeviceSize size) {
+    // Queue completion supplies execution ordering; this dependency makes
+    // transfer writes available and visible to the subsequent CPU reads.
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = buffer;
+    barrier.offset = offset;
+    barrier.size = size;
+    m_dispatch.vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 
 VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
