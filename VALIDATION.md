@@ -11,20 +11,27 @@ PR #26 fixes four rendering errors exposed by Piglit:
 
 Wire values and guest layouts were checked against the [Mesa 22.3.6 source](https://archive.mesa3d.org/older-versions/22.x/mesa-22.3.6.tar.xz). Real-Vulkan pixel tests reproduced the missing blend constants, aliased back colors and packed readback failures before the fixes. New tests cover both windings, stencil operations, changing blend constants, color/alpha factors, pitched partial depth transfers and direct staging readback. All 14 host suites passed with lavapipe and validation, as did `make test` and all seven reporting tests.
 
-The replay completed 141 of the same 146 cases before the coordinator stopped. On October 4, both Proxmox `10.0.0.200` and VM119 `10.0.0.144` were unreachable; the local gateway remained reachable. The remaining five cases and matched benchmark are pending. PR #26 remains a draft.
+The full 146-case replay completed across October 3–4. A fresh llvmpipe reference passed the identical test list.
 
-| Outcome | Before, matched 141 cases | Accuracy fixes, 141 cases |
-| --- | ---: | ---: |
-| Pass | 63 | 82 |
-| Fail | 67 | 48 |
-| Skip | 5 | 5 |
-| Timeout | 6 | 6 |
+| Outcome | Previous SVGA3D | Accuracy fixes | Guest llvmpipe |
+| --- | ---: | ---: | ---: |
+| Pass | 64 | 85 | 146 |
+| Fail | 70 | 49 | 0 |
+| Skip | 5 | 5 | 0 |
+| Timeout | 7 | 7 | 0 |
+| Not run | 0 | 0 | 0 |
 
-Nineteen former failures now pass: thirteen enabled two-sided vertex color combinations, two front-facing shader checks, two packed depth/stencil readbacks, stencil drawpixels and two-sided stencil. All 63 previous passes in this subset still pass. The separate `gl-1.0-blend-func` test remains failing, but failed probes fell from 1,043 to 388. The unchecked cases are `texsubimage`, `texsubimage-unpack`, `texsubimage-depth-formats`, `fbo-copyteximage-simple` and packed depth/stencil `texsubimage`. These partial counts must not be compared as a completed 146-case result.
+These are top-level cases; llvmpipe also passed all 309 subtests. Twenty-one former failures now pass, and all 64 previous passes remain passing. Improvements include thirteen enabled two-sided vertex color combinations, both front-facing shader checks, stencil drawpixels, two-sided stencil, packed read/drawpixels, packed readpixels, depth-format texsubimage and packed depth/stencil texsubimage. The separate `gl-1.0-blend-func` test remains failing, but failed probes fell from 1,043 to 388.
 
-Each exact Piglit binary and argument list was replayed directly with GLX, the runner's clean environment and a 60-second timeout. A small graphics health probe followed each case unless a kernel GPU hang had already been detected. Four GPU hangs required recovery through the completed subset; two cube mip-level timeouts retained graphics health. GPU hangs remain unresolved, and separate invocations with recovery do not establish continuous-run stability. The preceding llvmpipe reference passed all 146 cases and 309 subtests; a fresh reference and benchmark have not yet run for these fixes.
+Each exact Piglit binary and argument list was replayed directly with GLX, the runner's clean environment and a 60-second timeout. A small graphics health probe followed each case unless a kernel GPU hang had already been detected. Five cases required GPU recovery: `fbo-alphatest-formats`, `fbo-blending-formats`, `fbo-colormask-formats`, `copyteximage 2d` and `texsubimage`. The two cube mip-level timeouts retained graphics health. GPU hangs and the remaining pixel failures are unresolved. Separate invocations with recovery do not establish continuous-run stability.
 
-The installed release adapter was `6df0d2d780520849238dcc39bba8fa04a4087aa41415b524debe34d5a474ed11`, built from runtime source `5b6f7f6e9de33169b87e48d9713e647aff2b35fc`. Evidence is preserved in `artifacts/piglit-accuracy-final/`, including raw per-case outputs, commands, health probes, renderer identities and recovery logs. Host logs are `artifacts/piglit-accuracy-harness.log`, `piglit-accuracy-mock.log` and `piglit-accuracy-python.log`. These artifacts are excluded from Git. Current VM health cannot be verified while the host is unreachable.
+The coordinator stopped after 141 results; an empty unfinished case directory was retained separately when resuming. The October 4 continuation initially could not reach the lab, then completed the remaining five cases after connectivity returned. Completed raw results were preserved without rerunning them. Execution epochs include coordinator resumptions as well as the five GPU recoveries.
+
+Matched glmark2 checks used an 800×600 window, `vblank_mode=0`, a 0.5-second warmup per scene and three runs with one-second scenes. The accuracy build scored 227/235/255 (median **235**). A new run of the previous release adapter under the current host conditions scored 238/248/193 (median **238**). The accuracy median is 1.3% lower, within the spread of these short samples; this does not establish a performance improvement or sustained-load equivalence. Both builds reported 27 validation successes and six unknown results; terrain lacked vertex texture fetch support. Both are substantially below the historical median of 556, so that earlier score is not a reliable matched baseline for this continuation. The cause of the overall lower scores was not isolated.
+
+The accuracy adapter was restored after the baseline benchmark. VM119 was left running with a passing graphics health probe; Minecraft remained closed.
+
+The installed release adapter was `6df0d2d780520849238dcc39bba8fa04a4087aa41415b524debe34d5a474ed11`, built from runtime source `5b6f7f6e9de33169b87e48d9713e647aff2b35fc`; subsequent changes only adjust documentation and a comment. Evidence is in `artifacts/piglit-accuracy-final/` (filterable report, raw per-case outputs, commands, health probes, renderer identities and recovery logs), `piglit-accuracy-llvmpipe/` (fresh reference), `piglit-accuracy-benchmark/` and `piglit-accuracy-baseline-benchmark/`. Host logs are `artifacts/piglit-accuracy-harness.log`, `piglit-accuracy-mock.log` and `piglit-accuracy-python.log`. These artifacts are excluded from Git.
 
 ## PR review and matched VM benchmarks — 2026-10-03
 
