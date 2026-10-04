@@ -34,7 +34,7 @@ The remaining raw failure is `spec@ext_packed_depth_stencil@depth_stencil textur
 
 An additional paired 29-case framebuffer selection has **13 hardware passes, 16 skips, and zero failures**, with **154 passing hardware subtests**. Software passes all 29 top-level cases, with 249 passing and four skipped subtests. Previously failing RGB12/RGB16 and RGB16F/RGB32F blending checks now pass. Unsupported extensions remain visible as skips.
 
-Independent guest controls pass asymmetric depth/stencil values through all four framebuffer orientations, an overlapping packed copy, and unchanged texture state after rejected storage. They pass on SVGA and on both native and matched-GL-2.1 llvmpipe. All 14 real-Vulkan host suites and mock/preload checks pass, including repeated sampled-attachment snapshots, a three-pixel point's nine covered pixels, and an exact nine-sample occlusion query. CI passes for the tested renderer commit.
+Independent guest controls pass asymmetric depth/stencil values through all four framebuffer orientations, an overlapping packed copy, and unchanged texture state after rejected storage. They pass on SVGA and on both native and matched-GL-2.1 llvmpipe. All 14 host harness suites (11 configured for lavapipe and three ICD-free suites) and mock/preload checks pass, including repeated sampled-attachment snapshots, a three-pixel point's nine covered pixels, and an exact nine-sample occlusion query. CI passes for the tested renderer commit.
 
 These results cover the selected legacy API and pixel cases. They do not establish modern OpenGL support, complete API conformance, or uninterrupted multi-hour application stability.
 

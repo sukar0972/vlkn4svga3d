@@ -2316,7 +2316,10 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                                  const SVGA3dPrimitiveRange *ranges,
                                  uint32_t numRanges)
 {
-    if (getenv("SVGA3_VLKN_TRACE_FIFO")) {
+    // Tracing is configured when the process starts; avoid walking the
+    // environment on every command/draw when tracing is disabled.
+    static const bool traceFifo = std::getenv("SVGA3_VLKN_TRACE_FIFO") != nullptr;
+    if (traceFifo) {
         fprintf(stderr, "[draw-state] cullMode=%u (1=NONE,2=FRONT,3=BACK)\n",
                 m_renderStates[SVGA3D_RS_CULLMODE]);
         fprintf(stderr, "[draw-state] viewport=(%g,%g %gx%g) scissor=(%d,%d %ux%u) rt0=%u\n",

@@ -458,7 +458,12 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     return SVGA3_VLKN_SUCCESS;
 }
 
-int VlknBackend::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+int VlknBackend::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties,
+                                VkMemoryPropertyFlags preferredProperties) {
+    if (preferredProperties) {
+        const int preferred = findMemoryType(typeFilter, properties | preferredProperties);
+        if (preferred >= 0) return preferred;
+    }
     for (uint32_t i = 0; i < m_memProps.memoryTypeCount; ++i) {
         if ((typeFilter & (1 << i)) &&
             (m_memProps.memoryTypes[i].propertyFlags & properties) == properties) {
@@ -506,7 +511,8 @@ Svga3VlknStatus VlknBackend::createBuffer(VkDeviceSize size,
                                          VkBufferUsageFlags usage,
                                          VkMemoryPropertyFlags properties,
                                          VkBuffer *outBuffer,
-                                         VkDeviceMemory *outMemory)
+                                         VkDeviceMemory *outMemory,
+                                         VkMemoryPropertyFlags preferredProperties)
 {
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -522,13 +528,16 @@ Svga3VlknStatus VlknBackend::createBuffer(VkDeviceSize size,
     VkMemoryRequirements memReqs;
     m_dispatch.vkGetBufferMemoryRequirements(m_device, *outBuffer, &memReqs);
 
-    int memType = findMemoryType(memReqs.memoryTypeBits, properties);
+    int memType = findMemoryType(memReqs.memoryTypeBits, properties, preferredProperties);
     if (memType < 0) {
         log_msg("[libqemu_svga3d] createBuffer: no memory type satisfies the requested properties\n");
         m_dispatch.vkDestroyBuffer(m_device, *outBuffer, nullptr);
         *outBuffer = VK_NULL_HANDLE;
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
+    if (preferredProperties)
+        log_msg("[libqemu_svga3d] Transfer memory type=%d properties=0x%x preferred=0x%x\n",
+                memType, m_memProps.memoryTypes[memType].propertyFlags, preferredProperties);
     Svga3VlknStatus st = allocateMemory(memReqs.size, (uint32_t)memType, outMemory);
     if (st != SVGA3_VLKN_SUCCESS) {
         m_dispatch.vkDestroyBuffer(m_device, *outBuffer, nullptr);
@@ -555,11 +564,15 @@ void VlknBackend::destroyBuffer(VkBuffer buffer, VkDeviceMemory memory) {
 
 Svga3VlknStatus VlknBackend::initStagingBuffer(size_t size) {
     m_stagingSize = size;
+    // This shared buffer also supplies CPU readbacks for every presented
+    // frame. Prefer cached memory, retaining coherent memory as a requirement
+    // and the existing allocation choice when no cached coherent type fits.
     Svga3VlknStatus st = createBuffer(size,
                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                       &m_stagingBuffer,
-                                      &m_stagingMemory);
+                                      &m_stagingMemory,
+                                      VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
     VkResult res = m_dispatch.vkMapMemory(m_device, m_stagingMemory, 0, size, 0, &m_stagingMapped);
@@ -683,6 +696,7 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
         region.dstOffset = 0;
         region.size = size;
         m_dispatch.vkCmdCopyBuffer(cb, srcBuffer, tempBuffer, 1, &region);
+        recordHostReadBarrier(cb, tempBuffer, 0, size);
         st = flushCommandBuffer();
         if (st != SVGA3_VLKN_SUCCESS) {
             destroyBuffer(tempBuffer, tempMemory);
@@ -720,11 +734,29 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
     region.size = size;
 
     m_dispatch.vkCmdCopyBuffer(cb, srcBuffer, m_stagingBuffer, 1, &region);
+    recordHostReadBarrier(cb, m_stagingBuffer, stagingOffset, size);
     Svga3VlknStatus st = flushCommandBuffer();
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
     memcpy(dstData, stagingMappedAt(stagingOffset), (size_t)size);
     return SVGA3_VLKN_SUCCESS;
+}
+
+void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
+                                       VkDeviceSize offset, VkDeviceSize size) {
+    // Queue completion supplies execution ordering; this dependency makes
+    // transfer writes available and visible to the subsequent CPU reads.
+    VkBufferMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = buffer;
+    barrier.offset = offset;
+    barrier.size = size;
+    m_dispatch.vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 
 VkCommandBuffer VlknBackend::getActiveCommandBuffer() {

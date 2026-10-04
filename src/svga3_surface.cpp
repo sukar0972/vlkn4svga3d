@@ -890,6 +890,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
     m_currentLayout = barrier.newLayout;
+    if (!upload) m_backend->recordHostReadBarrier(cb, buffer, 0, bytes);
     st = m_backend->flushCommandBuffer();
     if (st == SVGA3_VLKN_SUCCESS && !upload) {
         for (size_t i = 0; i < pixels; ++i) {
@@ -1370,6 +1371,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     );
 
     m_currentLayout = barrier.newLayout;
+    m_backend->recordHostReadBarrier(cb, m_backend->stagingBuffer(), stagingOffset, totalBytes);
     Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
     if (flushSt != SVGA3_VLKN_SUCCESS) {
         return flushSt;
@@ -1560,6 +1562,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     );
 
     m_currentLayout = barrier.newLayout;
+    m_backend->recordHostReadBarrier(cb, stagingBuf, 0, totalBytes);
     Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
     if (flushSt != SVGA3_VLKN_SUCCESS) {
         /* The copy never executed: drop the staging buffer. */

@@ -62,7 +62,8 @@ public:
     /* Memory allocation helpers */
     /* Returns the memory type index, or -1 if no type in typeFilter has all
      * requested properties. Never falls back to a type lacking the properties. */
-    int findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    int findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties,
+                       VkMemoryPropertyFlags preferredProperties = 0);
     Svga3VlknStatus allocateMemory(VkDeviceSize size, uint32_t memoryTypeIndex, VkDeviceMemory *outMemory);
     void freeMemory(VkDeviceMemory memory);
 
@@ -71,12 +72,15 @@ public:
                                  VkBufferUsageFlags usage,
                                  VkMemoryPropertyFlags properties,
                                  VkBuffer *outBuffer,
-                                 VkDeviceMemory *outMemory);
+                                 VkDeviceMemory *outMemory,
+                                 VkMemoryPropertyFlags preferredProperties = 0);
     void destroyBuffer(VkBuffer buffer, VkDeviceMemory memory);
 
     /* Staging buffer operations */
     Svga3VlknStatus uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dstOffset, const void *srcData, VkDeviceSize size);
     Svga3VlknStatus downloadFromBuffer(void *dstData, VkBuffer srcBuffer, VkDeviceSize srcOffset, VkDeviceSize size);
+    void recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
+                               VkDeviceSize offset, VkDeviceSize size);
 
     /* Command buffer management */
     VkCommandBuffer getActiveCommandBuffer();
