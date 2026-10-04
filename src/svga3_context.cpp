@@ -234,8 +234,8 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     m_vsConsts.floatConsts[2][2] = 1.0f;
     m_vsConsts.floatConsts[3][3] = 1.0f;
 
-    /* Create descriptor set layout for UBOs (bindings 0, 1) and samplers (bindings 2..9) */
-    VkDescriptorSetLayoutBinding descBindings[10] = {};
+    /* Create descriptor set layout for UBOs (bindings 0, 1) and samplers (bindings 2..17) */
+    VkDescriptorSetLayoutBinding descBindings[2 + SVGA3_MAX_TEXTURE_STAGES] = {};
     descBindings[0].binding = 0;
     descBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     descBindings[0].descriptorCount = 1;
@@ -246,7 +246,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     descBindings[1].descriptorCount = 1;
     descBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    for (int i = 0; i < 8; ++i) {
+    for (uint32_t i = 0; i < SVGA3_MAX_TEXTURE_STAGES; ++i) {
         descBindings[2 + i].binding = 2 + i;
         descBindings[2 + i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descBindings[2 + i].descriptorCount = 1;
@@ -255,7 +255,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
 
     VkDescriptorSetLayoutCreateInfo dslInfo = {};
     dslInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslInfo.bindingCount = 10;
+    dslInfo.bindingCount = 2 + SVGA3_MAX_TEXTURE_STAGES;
     dslInfo.pBindings = descBindings;
     m_backend->dispatch().vkCreateDescriptorSetLayout(m_backend->device(), &dslInfo, nullptr, &m_descriptorSetLayout);
 
@@ -515,7 +515,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 10, D3D9_DST(1, 0, 0xF), /* dcl_color v0 */
         (31) | (2 << 24), 0x80000000 | 5,  D3D9_DST(1, 1, 0xF), /* dcl_texcoord v1 */
-        (31) | (2 << 24), 0x80000000 | (2 << 28), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
+        (31) | (2 << 24), 0x80000000 | (2 << 27), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
         (66) | (3 << 24), D3D9_DST(0, 0, 0xF), D3D9_SRC(1, 1, 0xE4), D3D9_SRC(10, 0, 0xE4), /* texld r0, v1, s0 */
         (5)  | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(0, 0, 0xE4), D3D9_SRC(1, 0, 0xE4), /* mul oC0, r0, v0 */
         0x0000FFFF
@@ -530,7 +530,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     static const uint32_t defPsTexPureTokens[] = {
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 5,  D3D9_DST(1, 0, 0xF), /* dcl_texcoord v0 */
-        (31) | (2 << 24), 0x80000000 | (2 << 28), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
+        (31) | (2 << 24), 0x80000000 | (2 << 27), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
         (66) | (3 << 24), D3D9_DST(0, 0, 0xF), D3D9_SRC(1, 0, 0xE4), D3D9_SRC(10, 0, 0xE4), /* texld r0, v0, s0 */
         (1)  | (2 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(0, 0, 0xE4), /* mov oC0, r0 */
         0x0000FFFF
@@ -1133,13 +1133,13 @@ Svga3VlknStatus VlknContext::defineShader(uint32_t shid, SVGA3dShaderType type, 
         std::vector<uint32_t> spirv;
         std::string err;
         uint32_t inMask = 0;
-        Svga3VlknStatus st = svga3_translate_shader_d3d9(type, bytecode, numDwords, spirv, err, &inMask, 0, &shader.hasBytecodeKill);
+        Svga3VlknStatus st = svga3_translate_shader_d3d9(type, bytecode, numDwords, spirv, err, &inMask, 0, &shader.hasBytecodeKill, &shader.writesDepth);
         if (st != SVGA3_VLKN_SUCCESS) {
             log_msg("[libqemu_svga3d] shader translation failed cid=%u shid=%u type=%u: %s\n", m_cid, shid, type, err.c_str());
             return st;
         }
         shader.inputLocationMask = inMask;
-        shader.hasFragmentSideEffects = shader.hasBytecodeKill;
+        shader.hasFragmentSideEffects = shader.hasBytecodeKill || shader.writesDepth;
 
         VkShaderModuleCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -1781,7 +1781,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     key.boundPS = m_boundPS;
     key.depthSamplerMask = 0;
     if (m_boundPS != SVGA3D_INVALID_ID && m_surfaceMgr) {
-        for (uint32_t i = 0; i < SVGA3_MAX_TEXTURE_STAGES && i < 8; ++i) {
+        for (uint32_t i = 0; i < SVGA3_MAX_TEXTURE_STAGES; ++i) {
             if (m_stages[i].sid == SVGA3D_INVALID_ID || m_stages[i].sid == 0) continue;
             VlknSurface *stageSurf = m_surfaceMgr->getSurface(m_stages[i].sid);
             if (stageSurf && stageSurf->isDepthStencil()) {
@@ -1847,15 +1847,18 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         auto pit = m_pixelShaders.find(m_boundPS);
         if (pit != m_pixelShaders.end() && pit->second.module) {
             stages[1].module = pit->second.module;
-            if (key.depthSamplerMask != 0) {
-                auto variant = pit->second.depthVariants.find(key.depthSamplerMask);
+            const bool depthOnly = hasDepthAttachment &&
+                (m_renderTargets[0].sid == 0 || m_renderTargets[0].sid == SVGA3D_INVALID_ID);
+            const uint32_t variantKey = key.depthSamplerMask | (depthOnly ? 0x80000000u : 0);
+            if (variantKey != 0) {
+                auto variant = pit->second.depthVariants.find(variantKey);
                 if (variant == pit->second.depthVariants.end()) {
                     std::vector<uint32_t> spirv;
                     std::string err;
                     Svga3VlknStatus st = svga3_translate_shader_d3d9(
                         SVGA3D_SHADERTYPE_PS, pit->second.bytecode.data(),
                         (uint32_t)pit->second.bytecode.size(), spirv, err, nullptr,
-                        key.depthSamplerMask);
+                        key.depthSamplerMask, nullptr, nullptr, depthOnly);
                     VkShaderModule depthModule = VK_NULL_HANDLE;
                     if (st == SVGA3_VLKN_SUCCESS) {
                         VkShaderModuleCreateInfo info = {};
@@ -1879,8 +1882,8 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
                                 m_boundPS, key.depthSamplerMask, err.c_str());
                         depthModule = pit->second.module;
                     }
-                    pit->second.depthVariants[key.depthSamplerMask] = depthModule;
-                    variant = pit->second.depthVariants.find(key.depthSamplerMask);
+                    pit->second.depthVariants[variantKey] = depthModule;
+                    variant = pit->second.depthVariants.find(variantKey);
                 }
                 if (variant->second) {
                     stages[1].module = variant->second;
@@ -2277,7 +2280,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         psBufInfo.offset = 0;
         psBufInfo.range = sizeof(m_psConsts.floatConsts);
 
-        VkWriteDescriptorSet writes[10] = {};
+        VkWriteDescriptorSet writes[2 + SVGA3_MAX_TEXTURE_STAGES] = {};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = newSet;
         writes[0].dstBinding = 0;
@@ -2298,7 +2301,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             writes[2 + i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             writes[2 + i].pImageInfo = &imageInfos[i];
         }
-        m_backend->dispatch().vkUpdateDescriptorSets(m_backend->device(), 10, writes, 0, nullptr);
+        m_backend->dispatch().vkUpdateDescriptorSets(m_backend->device(), 2 + SVGA3_MAX_TEXTURE_STAGES, writes, 0, nullptr);
         m_descriptorSetCache.emplace(descriptorKey, newSet);
         m_descriptorSet = newSet;
     }

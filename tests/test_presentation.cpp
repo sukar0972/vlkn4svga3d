@@ -202,7 +202,7 @@ int main() {
     const uint32_t psBytecode[] = {
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 5, D3D9_DST(1, 1, 0xF), /* dcl_texcoord v1 */
-        (31) | (2 << 24), 0x80000000 | (2 << 28), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
+        (31) | (2 << 24), 0x80000000 | (2 << 27), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
         (66) | (3 << 24), D3D9_DST(0, 0, 0xF), D3D9_SRC(1, 1, 0xE4), D3D9_SRC(10, 0, 0xE4), /* texld r0, v1, s0 */
         (5)  | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(0, 0, 0xE4), D3D9_SRC(2, 0, 0xE4), /* mul oC0, r0, c0 */
         0x0000FFFF

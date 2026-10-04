@@ -105,7 +105,8 @@ enum SpvExecutionModel {
 };
 
 enum SpvExecutionMode {
-    SpvExecutionModeOriginUpperLeft = 7
+    SpvExecutionModeOriginUpperLeft = 7,
+    SpvExecutionModeDepthReplacing = 12
 };
 
 enum SpvStorageClass {
@@ -137,11 +138,13 @@ enum SpvBuiltIn {
     SpvBuiltInClipDistance = 3,
     SpvBuiltInCullDistance = 4,
     SpvBuiltInFragCoord = 15,
-    SpvBuiltInFrontFacing = 17
+    SpvBuiltInFrontFacing = 17,
+    SpvBuiltInFragDepth = 22
 };
 
 enum SpvDim {
     SpvDim2D = 1,
+    SpvDim3D = 2,
     SpvDimCube = 3
 };
 

@@ -769,7 +769,7 @@ const SurfaceMipLevel* VlknSurface::getMipInfo(uint32_t mipLevel) const {
  * guest word directly loses stencil and puts depth in the wrong bits. */
 Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
                                           const SVGA3dBox *box, void *guestData,
-                                          size_t guestStride) {
+                                          size_t guestStride, uint32_t face) {
     const auto &mip = m_mips[mipLevel];
     const SVGA3dBox area = box ? *box : SVGA3dBox{0, 0, 0, mip.width, mip.height, mip.depth};
     const size_t pixels = size_t(area.w) * area.h * area.d;
@@ -820,7 +820,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     VkBufferImageCopy regions[2] = {};
-    regions[0].imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, mipLevel, 0, 1};
+    regions[0].imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, mipLevel, face, 1};
     regions[0].imageOffset = {int32_t(area.x), int32_t(area.y), int32_t(area.z)};
     regions[0].imageExtent = {area.w, area.h, area.d};
     regions[1] = regions[0];
@@ -858,9 +858,9 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
                                       const SVGA3dBox *box,
                                       const void *guestData,
                                       size_t guestStride,
-                                      bool isLinear)
+                                      bool isLinear, uint32_t face)
 {
-    if (!guestData || mipLevel >= m_mipLevels) {
+    if (!guestData || (mipLevel >= m_mipLevels || face >= m_arrayLayers)) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
     invalidateReadback();
@@ -974,7 +974,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     if (mipLevel > 0) {
         ensureViewMipLevels(mipLevel + 1);
     }
-    if (isPackedDepth()) return dmaPackedDepth(true, mipLevel, box, const_cast<void*>(guestData), guestStride);
+    if (isPackedDepth()) return dmaPackedDepth(true, mipLevel, box, const_cast<void*>(guestData), guestStride, face);
 
     /* Validate the linear shadow-copy range BEFORE recording anything: a
      * failure here must not leave a half-recorded barrier in the open
@@ -1147,7 +1147,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = mipLevel;
-    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.baseArrayLayer = face;
     region.imageSubresource.layerCount = 1;
     region.imageOffset.x = (int32_t)bx;
     region.imageOffset.y = (int32_t)by;
@@ -1190,9 +1190,9 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
                                                 const SVGA3dBox *box,
                                                 const void **outMappedData,
                                                 size_t *outRowPitch,
-                                                std::unique_lock<std::mutex> &outLock)
+                                                std::unique_lock<std::mutex> &outLock, uint32_t face)
 {
-    if (!outMappedData || !outRowPitch || mipLevel >= m_mipLevels) {
+    if (!outMappedData || !outRowPitch || (mipLevel >= m_mipLevels || face >= m_arrayLayers)) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
     /* Buffer surfaces have no VkImage; the copy below would null-deref. */
@@ -1227,7 +1227,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     if (isPackedDepth()) {
         std::unique_lock<std::mutex> lock(m_backend->stagingMutex());
         m_packedDepthReadback.resize(totalBytes);
-        auto st = dmaPackedDepth(false, mipLevel, box, m_packedDepthReadback.data(), copyRowBytes);
+        auto st = dmaPackedDepth(false, mipLevel, box, m_packedDepthReadback.data(), copyRowBytes, face);
         if (st != SVGA3_VLKN_SUCCESS) return st;
         *outMappedData = m_packedDepthReadback.data();
         *outRowPitch = copyRowBytes;
@@ -1282,7 +1282,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = mipLevel;
-    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.baseArrayLayer = face;
     region.imageSubresource.layerCount = 1;
     region.imageOffset.x = (int32_t)bx;
     region.imageOffset.y = (int32_t)by;
@@ -1344,9 +1344,9 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
                                         const SVGA3dBox *box,
                                         void *outGuestData,
                                         size_t guestStride,
-                                        bool isLinear)
+                                        bool isLinear, uint32_t face)
 {
-    if (!outGuestData || mipLevel >= m_mipLevels) {
+    if (!outGuestData || (mipLevel >= m_mipLevels || face >= m_arrayLayers)) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
@@ -1409,13 +1409,13 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
-    if (isPackedDepth()) return dmaPackedDepth(false, mipLevel, box, outGuestData, guestStride);
+    if (isPackedDepth()) return dmaPackedDepth(false, mipLevel, box, outGuestData, guestStride, face);
 
     if (totalBytes <= m_backend->stagingSize() && m_backend->stagingBuffer() && m_backend->stagingMapped()) {
         const void *mapped = nullptr;
         size_t rowPitch = 0;
         std::unique_lock<std::mutex> lock;
-        Svga3VlknStatus st = dmaDownloadToStaging(mipLevel, box, &mapped, &rowPitch, lock);
+        Svga3VlknStatus st = dmaDownloadToStaging(mipLevel, box, &mapped, &rowPitch, lock, face);
         if (st != SVGA3_VLKN_SUCCESS) {
             return st;
         }
@@ -1435,7 +1435,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
         }
         bool fullMip = bx == 0 && by == 0 && bz == 0 &&
                        bw == mip.width && bh == mip.height && bd == 1;
-        if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip) {
+        if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip && face == 0) {
             storeReadback(bw, bh, rowPitch, mapped);
         }
         return SVGA3_VLKN_SUCCESS;
@@ -1482,7 +1482,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = m_isDepthStencil ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = mipLevel;
-    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.baseArrayLayer = face;
     region.imageSubresource.layerCount = 1;
     region.imageOffset.x = (int32_t)bx;
     region.imageOffset.y = (int32_t)by;
@@ -1549,7 +1549,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
 
     bool fullMip = bx == 0 && by == 0 && bz == 0 &&
                    bw == mip.width && bh == mip.height && bd == 1;
-    if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip) {
+    if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip && face == 0) {
         storeReadback(bw, bh, copyRowBytes, mapped);
     }
 
@@ -2000,7 +2000,7 @@ Svga3VlknStatus VlknSurfaceManager::surfaceDMA(const SVGA3dGuestImage &guest,
                         }
                     }
                 }
-                Svga3VlknStatus st = surf->dmaUpload(host.mipmap, &sBox, staging.data(), rowBytes, isLinearBuffer);
+                Svga3VlknStatus st = surf->dmaUpload(host.mipmap, &sBox, staging.data(), rowBytes, isLinearBuffer, host.face);
                 if (st != SVGA3_VLKN_SUCCESS) {
                     static uint32_t dma_upload_err_cnt = 0;
                     if (++dma_upload_err_cnt <= 10) {
@@ -2010,7 +2010,7 @@ Svga3VlknStatus VlknSurfaceManager::surfaceDMA(const SVGA3dGuestImage &guest,
                     return st;
                 }
             } else if (transfer == SVGA3D_READ_HOST_VRAM) {
-                Svga3VlknStatus st = surf->dmaDownload(host.mipmap, &sBox, staging.data(), rowBytes, isLinearBuffer);
+                Svga3VlknStatus st = surf->dmaDownload(host.mipmap, &sBox, staging.data(), rowBytes, isLinearBuffer, host.face);
                 if (st != SVGA3_VLKN_SUCCESS) {
                     static uint32_t dma_dl_err_cnt = 0;
                     if (++dma_dl_err_cnt <= 10) {
@@ -2042,8 +2042,8 @@ Svga3VlknStatus VlknSurfaceManager::surfaceDMA(const SVGA3dGuestImage &guest,
             if (endOffset > guestBufferSize) return SVGA3_VLKN_ERROR_INVALID_PARAM;
             auto *data = reinterpret_cast<const uint8_t*>(guestBuffer) + guestOffset;
             Svga3VlknStatus st = transfer == SVGA3D_WRITE_HOST_VRAM
-                ? surf->dmaUpload(host.mipmap, &sBox, data, guestStride, isLinearBuffer)
-                : surf->dmaDownload(host.mipmap, &sBox, const_cast<uint8_t*>(data), guestStride, isLinearBuffer);
+                ? surf->dmaUpload(host.mipmap, &sBox, data, guestStride, isLinearBuffer, host.face)
+                : surf->dmaDownload(host.mipmap, &sBox, const_cast<uint8_t*>(data), guestStride, isLinearBuffer, host.face);
             if (st != SVGA3_VLKN_SUCCESS) return st;
         } else {
             return SVGA3_VLKN_ERROR_INVALID_PARAM;

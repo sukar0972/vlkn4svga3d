@@ -96,7 +96,7 @@ public:
                               const SVGA3dBox *box,
                               const void *guestData,
                               size_t guestStride,
-                              bool isLinear);
+                              bool isLinear, uint32_t face = 0);
     Svga3VlknStatus dmaUpload(uint32_t mipLevel,
                               const SVGA3dBox *box,
                               const void *guestData,
@@ -108,7 +108,7 @@ public:
                                 const SVGA3dBox *box,
                                 void *outGuestData,
                                 size_t guestStride,
-                                bool isLinear);
+                                bool isLinear, uint32_t face = 0);
     Svga3VlknStatus dmaDownload(uint32_t mipLevel,
                                 const SVGA3dBox *box,
                                 void *outGuestData,
@@ -120,7 +120,7 @@ public:
                                         const SVGA3dBox *box,
                                         const void **outMappedData,
                                         size_t *outRowPitch,
-                                        std::unique_lock<std::mutex> &outLock);
+                                        std::unique_lock<std::mutex> &outLock, uint32_t face = 0);
 
     void invalidateReadback() { m_readbackValid = false; }
     bool hasReadback(uint32_t w, uint32_t h) const {
@@ -135,7 +135,7 @@ private:
         return m_svgaFormat == SVGA3D_Z_D24S8 || m_svgaFormat == SVGA3D_Z_D24S8_INT || m_svgaFormat == SVGA3D_Z_D24X8;
     }
     Svga3VlknStatus dmaPackedDepth(bool upload, uint32_t mipLevel, const SVGA3dBox *box,
-                                  void *guestData, size_t guestStride);
+                                  void *guestData, size_t guestStride, uint32_t face);
     std::vector<uint8_t> m_packedDepthReadback;
     VlknBackend *m_backend;
     uint32_t m_sid;

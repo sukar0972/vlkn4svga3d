@@ -172,12 +172,15 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                                             std::string &outError,
                                             uint32_t *outInputMask,
                                             uint32_t depthSamplerMask,
-                                            bool *outHasBytecodeKill)
+                                            bool *outHasBytecodeKill,
+                                            bool *outWritesDepth, bool depthOnly)
 {
     outSpirv.clear();
     outError.clear();
     if (outInputMask) *outInputMask = 0;
     if (outHasBytecodeKill) *outHasBytecodeKill = false;
+    if (outWritesDepth) *outWritesDepth = false;
+    bool writesDepth = false;
 
     /* Debug: dump D3D9 input alongside SPIR-V when SVGA3_VLKN_DUMP_SPIRV is set. */
     if (getenv("SVGA3_VLKN_DUMP_SPIRV")) {
@@ -383,6 +386,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             }
         }
 
+        if (!isVS && pc + 1 < numTokens) {
+            ParsedDest destination;
+            if (parseDest(tokens[pc + 1], destination) && destination.regType == D3DSPR_DEPTHOUT)
+                writesDepth = true;
+        }
         /* Check for unsupported instructions */
         switch (op) {
             case D3DSIO_NOP:
@@ -591,10 +599,13 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t const0_i = b.allocId();
     uint32_t constVPosBias_v4 = b.allocId();
 
+    if (outWritesDepth) *outWritesDepth = writesDepth;
+
     /* Pointer Types */
     uint32_t ptrFunctionV4Float = b.allocId();
     uint32_t ptrInputV4Float = b.allocId();
     uint32_t ptrOutputV4Float = b.allocId();
+    uint32_t ptrOutputFloat = b.allocId();
     uint32_t ptrInputBool = b.allocId();
     uint32_t ptrFunctionV4Bool = b.allocId();
     uint32_t ptrFunctionInt = b.allocId();
@@ -606,6 +617,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     };
     std::unordered_map<uint32_t, SemanticInfo> inputRegToSemantic;
     std::unordered_map<uint32_t, SemanticInfo> outputRegToSemantic;
+    uint32_t samplerDimensions[16];
+    std::fill(std::begin(samplerDimensions), std::end(samplerDimensions), 2);
     /* Only honor DCL instructions at true instruction boundaries, as recorded
      * during pass 1. Scanning raw tokens would misread parameter words or DEF
      * literals whose low 16 bits happen to equal D3DSIO_DCL. */
@@ -619,7 +632,14 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         uint32_t usageIndex = (semToken >> 16) & 0x0F;
         uint32_t regNum = regToken & 0x7FF;
         uint32_t regType = ((regToken >> 28) & 0x7) | (((regToken >> 8) & 0x18));
-        if (regType == D3DSPR_INPUT || regType == D3DSPR_TEXTURE) {
+        if (regType == D3DSPR_SAMPLER) {
+            const uint32_t dimension = (semToken >> 27) & 0xF;
+            if (regNum >= 16 || (dimension != 2 && dimension != 3 && dimension != 4)) {
+                outError = "Invalid sampler declaration";
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            }
+            samplerDimensions[regNum] = dimension;
+        } else if (regType == D3DSPR_INPUT || regType == D3DSPR_TEXTURE) {
             inputRegToSemantic[regNum] = { usage, usageIndex };
         } else if (regType == 6) { /* D3DSPR_OUTPUT in SM 3.0 */
             outputRegToSemantic[regNum] = { usage, usageIndex };
@@ -658,6 +678,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t psInColor[4] = { 0 };
     uint32_t psInTexCoords[8] = { 0 };
     uint32_t psOutColor = 0;
+    uint32_t psOutDepth = 0;
     /* MISCTYPE sources: vPos -> BuiltIn FragCoord, vFace -> FrontFacing. */
     uint32_t psInFragCoord = 0;
     uint32_t psInFrontFacing = 0;
@@ -667,9 +688,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t const_u[8] = { 0 };
 
     /* Samplers. depthSamplerMask bit N means stage N is a depth texture. */
-    uint32_t samplerVars[8] = { 0 };
-    uint32_t typeSampledImage2D = 0;
-    uint32_t typeSampledDepth2D = 0;
+    uint32_t samplerVars[16] = { 0 };
+    uint32_t samplerTypes[16] = {};
 
     /* Uniform Buffer for constants c[256] */
     uint32_t uboBlockVar = b.allocId();
@@ -719,8 +739,14 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             psInTexCoords[t] = b.allocId();
             entryInterface.push_back(psInTexCoords[t]);
         }
-        psOutColor = b.allocId();
-        entryInterface.push_back(psOutColor);
+        if (!depthOnly) {
+            psOutColor = b.allocId();
+            entryInterface.push_back(psOutColor);
+        }
+        if (writesDepth) {
+            psOutDepth = b.allocId();
+            entryInterface.push_back(psOutDepth);
+        }
         if (miscUsed[0]) {
             psInFragCoord = b.allocId();
             entryInterface.push_back(psInFragCoord);
@@ -730,7 +756,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             entryInterface.push_back(psInFrontFacing);
         }
 
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 16; ++i) {
             samplerVars[i] = b.allocId();
         }
 
@@ -752,6 +778,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     /* ExecutionMode for Fragment: OriginUpperLeft */
     if (!isVS) {
         b.emitInst(b.executionModes, SpvOpExecutionMode, { mainFuncId, SpvExecutionModeOriginUpperLeft });
+        if (writesDepth) b.emitInst(b.executionModes, SpvOpExecutionMode, {mainFuncId, SpvExecutionModeDepthReplacing});
     }
 
     /* Annotations */
@@ -779,7 +806,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.annotations, SpvOpDecorate, { psInTexCoords[t], SpvDecorationLocation, (uint32_t)(2 + t) });
         }
-        b.emitInst(b.annotations, SpvOpDecorate, { psOutColor, SpvDecorationLocation, 0 });
+        if (psOutColor) b.emitInst(b.annotations, SpvOpDecorate, { psOutColor, SpvDecorationLocation, 0 });
+        if (psOutDepth) b.emitInst(b.annotations, SpvOpDecorate, {psOutDepth, SpvDecorationBuiltIn, SpvBuiltInFragDepth});
         if (psInFragCoord) {
             b.emitInst(b.annotations, SpvOpDecorate, { psInFragCoord, SpvDecorationBuiltIn, SpvBuiltInFragCoord });
         }
@@ -787,7 +815,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             b.emitInst(b.annotations, SpvOpDecorate, { psInFrontFacing, SpvDecorationBuiltIn, SpvBuiltInFrontFacing });
         }
 
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 16; ++i) {
             b.emitInst(b.annotations, SpvOpDecorate, { samplerVars[i], SpvDecorationDescriptorSet, 0 });
             b.emitInst(b.annotations, SpvOpDecorate, { samplerVars[i], SpvDecorationBinding, (uint32_t)(2 + i) });
         }
@@ -820,6 +848,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrFunctionV4Float, SpvStorageClassFunction, typeV4Float });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrInputV4Float, SpvStorageClassInput, typeV4Float });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrOutputV4Float, SpvStorageClassOutput, typeV4Float });
+    b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, {ptrOutputFloat, SpvStorageClassOutput, typeFloat});
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrInputBool, SpvStorageClassInput, typeBool });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrFunctionV4Bool, SpvStorageClassFunction, typeV4Bool });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrFunctionInt, SpvStorageClassFunction, typeInt });
@@ -908,7 +937,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         for (int t = 0; t < 8; ++t) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, psInTexCoords[t], SpvStorageClassInput });
         }
-        b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, psOutColor, SpvStorageClassOutput });
+        if (psOutColor) b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrOutputV4Float, psOutColor, SpvStorageClassOutput });
+        if (psOutDepth) b.emitInst(b.typesConstantsGlobals, SpvOpVariable, {ptrOutputFloat, psOutDepth, SpvStorageClassOutput});
         if (psInFragCoord) {
             b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrInputV4Float, psInFragCoord, SpvStorageClassInput });
         }
@@ -919,23 +949,25 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         /* Sampler Types: OpTypeImage, OpTypeSampledImage.
          * Depth images must be declared with Depth=1. Sampling a depth image
          * through an Unknown/color image type is illegal and faults the driver. */
-        uint32_t typeImage2D = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypeImage, { typeImage2D, typeFloat, SpvDim2D, 0, 0, 0, 1, 0 });
-        typeSampledImage2D = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypeSampledImage, { typeSampledImage2D, typeImage2D });
-        uint32_t ptrColorSampler = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrColorSampler, SpvStorageClassUniformConstant, typeSampledImage2D });
-
-        uint32_t typeDepthImage = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypeImage, { typeDepthImage, typeFloat, SpvDim2D, 1, 0, 0, 1, 0 });
-        typeSampledDepth2D = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypeSampledImage, { typeSampledDepth2D, typeDepthImage });
-        uint32_t ptrDepthSampler = b.allocId();
-        b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer, { ptrDepthSampler, SpvStorageClassUniformConstant, typeSampledDepth2D });
-
-        for (int i = 0; i < 8; ++i) {
-            uint32_t ptrType = (depthSamplerMask & (1u << i)) ? ptrDepthSampler : ptrColorSampler;
-            b.emitInst(b.typesConstantsGlobals, SpvOpVariable, { ptrType, samplerVars[i], SpvStorageClassUniformConstant });
+        std::map<std::pair<uint32_t, bool>, std::pair<uint32_t, uint32_t>> sampleTypes;
+        for (uint32_t i = 0; i < 16; ++i) {
+            const bool depth = (depthSamplerMask & (1u << i)) != 0;
+            const auto key = std::make_pair(samplerDimensions[i], depth);
+            auto found = sampleTypes.find(key);
+            if (found == sampleTypes.end()) {
+                const uint32_t imageType = b.allocId(), sampledType = b.allocId(), pointerType = b.allocId();
+                const uint32_t dimension = samplerDimensions[i] == 3 ? SpvDimCube :
+                    (samplerDimensions[i] == 4 ? SpvDim3D : SpvDim2D);
+                b.emitInst(b.typesConstantsGlobals, SpvOpTypeImage,
+                    {imageType, typeFloat, dimension, depth ? 1u : 0u, 0, 0, 1, 0});
+                b.emitInst(b.typesConstantsGlobals, SpvOpTypeSampledImage, {sampledType, imageType});
+                b.emitInst(b.typesConstantsGlobals, SpvOpTypePointer,
+                    {pointerType, SpvStorageClassUniformConstant, sampledType});
+                found = sampleTypes.emplace(key, std::make_pair(sampledType, pointerType)).first;
+            }
+            samplerTypes[i] = found->second.first;
+            b.emitInst(b.typesConstantsGlobals, SpvOpVariable,
+                {found->second.second, samplerVars[i], SpvStorageClassUniformConstant});
         }
     }
 
@@ -953,11 +985,13 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
 
     /* Output Registers Function locals */
     uint32_t outPosVar = b.allocId();
+    uint32_t outDepthVar = writesDepth ? b.allocId() : 0;
     uint32_t outColorVar[4] = { b.allocId(), b.allocId(), b.allocId(), b.allocId() };
     uint32_t outTexCoordVar[8];
     for (int t = 0; t < 8; ++t) outTexCoordVar[t] = b.allocId();
 
     b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outPosVar, SpvStorageClassFunction, const0_v4 });
+    if (outDepthVar) b.emitInst(b.functionDefinitions, SpvOpVariable, {ptrFunctionV4Float, outDepthVar, SpvStorageClassFunction, const0_v4});
     for (int c = 0; c < 4; ++c)
         b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, outColorVar[c], SpvStorageClassFunction, const1_v4 });
     for (int t = 0; t < 8; ++t) {
@@ -1290,6 +1324,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 return;
             }
             dstVar = rVars[dst.regNum];
+        } else if (!isVS && effectiveRegType == D3DSPR_DEPTHOUT) {
+            dstVar = outDepthVar;
         } else if (effectiveRegType == D3DSPR_RASTOUT) {
             dstVar = outPosVar;
         } else if (effectiveRegType == D3DSPR_ATTROUT || effectiveRegType == D3DSPR_COLOROUT) {
@@ -2133,34 +2169,51 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     if (instLen >= 2) {
                         ParsedSrc s1;
                         parseSrc(tokens[pc + 3], s1);
-                        samplerIdx = (s1.regNum < 8) ? s1.regNum : 0;
+                        samplerIdx = (s1.regNum < 16) ? s1.regNum : 0;
                     } else {
                         samplerIdx = (dst.regNum < 8) ? dst.regNum : 0;
                     }
                 }
-                uint32_t uv = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpVectorShuffle, { typeV2Float, uv, coord, coord, 0, 1 });
-
-                uint32_t sampledImage = b.allocId();
-                bool depthStage = (depthSamplerMask & (1u << samplerIdx)) != 0;
-                b.emitInst(b.functionDefinitions, SpvOpLoad,
-                           { depthStage ? typeSampledDepth2D : typeSampledImage2D, sampledImage, samplerVars[samplerIdx] });
-
-                uint32_t sampled = b.allocId();
-                if (depthStage) {
-                    /* Non-comparison sampling returns a vector even for a
-                     * depth image. Extract red before replicating D3D depth. */
-                    uint32_t depthSample = b.allocId();
-                    b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod,
-                               { typeV4Float, depthSample, sampledImage, uv });
-                    uint32_t drefResult = b.allocId();
-                    b.emitInst(b.functionDefinitions, SpvOpCompositeExtract,
-                               { typeFloat, drefResult, depthSample, 0 });
-                    b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct,
-                               { typeV4Float, sampled, drefResult, drefResult, drefResult, const1_f });
-                } else {
-                    b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod, { typeV4Float, sampled, sampledImage, uv });
+                const uint32_t controls = (tokens[pc] >> 16) & 0xFF;
+                if (controls > 2) {
+                    outError = "Invalid TEX sampling controls";
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
                 }
+                uint32_t coordW = 0;
+                if (controls) {
+                    coordW = b.allocId();
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, coordW, coord, 3});
+                }
+                if (controls == 1) {
+                    const uint32_t denominator = b.allocId(), projected = b.allocId();
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct,
+                        {typeV4Float, denominator, coordW, coordW, coordW, coordW});
+                    b.emitInst(b.functionDefinitions, SpvOpFDiv, {typeV4Float, projected, coord, denominator});
+                    coord = projected;
+                }
+                const uint32_t uv = b.allocId();
+                if (samplerDimensions[samplerIdx] == 2)
+                    b.emitInst(b.functionDefinitions, SpvOpVectorShuffle, {typeV2Float, uv, coord, coord, 0, 1});
+                else
+                    b.emitInst(b.functionDefinitions, SpvOpVectorShuffle, {typeV3Float, uv, coord, coord, 0, 1, 2});
+                const uint32_t sampledImage = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpLoad, {samplerTypes[samplerIdx], sampledImage, samplerVars[samplerIdx]});
+                auto sample = [&](uint32_t result) {
+                    if (controls == 2)
+                        b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod,
+                            {typeV4Float, result, sampledImage, uv, 1, coordW}); /* Image Operands: Bias */
+                    else
+                        b.emitInst(b.functionDefinitions, SpvOpImageSampleImplicitLod,
+                            {typeV4Float, result, sampledImage, uv});
+                };
+                uint32_t sampled = b.allocId();
+                if (depthSamplerMask & (1u << samplerIdx)) {
+                    const uint32_t depthSample = b.allocId(), depth = b.allocId();
+                    sample(depthSample);
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, depth, depthSample, 0});
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct,
+                        {typeV4Float, sampled, depth, depth, depth, const1_f});
+                } else sample(sampled);
                 emitStoreDest(dst, sampled);
                 break;
             }
@@ -2326,7 +2379,13 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpKill, {});
         b.emitInst(b.functionDefinitions, SpvOpLabel, { mergeLabel });
 
-        b.emitInst(b.functionDefinitions, SpvOpStore, { psOutColor, colVal });
+        if (psOutColor) b.emitInst(b.functionDefinitions, SpvOpStore, { psOutColor, colVal });
+        if (psOutDepth) {
+            const uint32_t depthVector = b.allocId(), depth = b.allocId();
+            b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, depthVector, outDepthVar});
+            b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, depth, depthVector, 0});
+            b.emitInst(b.functionDefinitions, SpvOpStore, {psOutDepth, depth});
+        }
     }
 
     b.emitInst(b.functionDefinitions, SpvOpReturn, {});

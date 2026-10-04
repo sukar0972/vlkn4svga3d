@@ -157,7 +157,7 @@ int main() {
     const uint32_t ps1Bytecode[] = {
         0xFFFF0300, /* ps_3_0 */
         (31) | (2 << 24), 0x80000000 | 5, D3D9_DST(1, 1, 0xF), /* dcl_texcoord v1 */
-        (31) | (2 << 24), 0x80000000 | (2 << 28), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
+        (31) | (2 << 24), 0x80000000 | (2 << 27), D3D9_DST(10, 0, 0xF), /* dcl_2d s0 */
         (66) | (3 << 24), D3D9_DST(0, 0, 0xF), D3D9_SRC(1, 1, 0xE4), D3D9_SRC(10, 0, 0xE4), /* texld r0, v1, s0 */
         (5)  | (3 << 24), D3D9_DST(8, 0, 0xF), D3D9_SRC(0, 0, 0xE4), D3D9_SRC(2, 0, 0xE4), /* mul oC0, r0, c0 */
         0x0000FFFF
@@ -365,6 +365,83 @@ int main() {
             svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
             svga3_vlkn_surface_destroy(dev, 91);
         }
+        /* Shader samplers 8..15 are independent of the eight interpolators. */
+        std::vector<uint32_t> lastStageShader(std::begin(ps1Bytecode), std::end(ps1Bytecode));
+        lastStageShader[6] = D3D9_DST(10, 15, 0xF);
+        lastStageShader[10] = D3D9_SRC(10, 15, 0xE4);
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 92, SVGA3D_SHADERTYPE_PS,
+            lastStageShader.data(), lastStageShader.size()) == SVGA3_VLKN_SUCCESS, "Define sampler 15 shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 92);
+        TEST_CHECK(svga3_vlkn_context_set_texture(dev, CID, 15, SID_TEX) == SVGA3_VLKN_SUCCESS,
+            "Bind independent texture stage 15");
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4);
+        TEST_CHECK(pixelMatches(fb[24 * RT_W + 24], 255, 255, 255, 255) &&
+            pixelMatches(fb[40 * RT_W + 24], 0, 255, 0, 255), "Sampler 15 reads its own image");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 1);
+        auto sampleConstant = [&](uint32_t dimension, uint32_t controls, uint32_t sid,
+                                  const float *coords, const Pixel &expected) -> bool {
+            const uint32_t bytecode[] = {
+                0xFFFF0300, 31 | (2 << 24), 0x80000000u | (dimension << 27), D3D9_DST(10, 0, 15),
+                66 | (3 << 24) | (controls << 16), D3D9_DST(0, 0, 15), D3D9_SRC(2, 1, 0xE4), D3D9_SRC(10, 0, 0xE4),
+                1 | (2 << 24), D3D9_DST(8, 0, 15), D3D9_SRC(0, 0, 0xE4), 0xFFFF};
+            if (svga3_vlkn_context_define_shader(dev, CID, 93, SVGA3D_SHADERTYPE_PS, bytecode,
+                sizeof(bytecode)/4) != SVGA3_VLKN_SUCCESS) return false;
+            svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 93);
+            uint32_t constants[4]; memcpy(constants, coords, sizeof(constants));
+            svga3_vlkn_context_set_shader_const(dev, CID, 1, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, constants);
+            svga3_vlkn_context_set_texture(dev, CID, 0, sid);
+            if (svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
+                != SVGA3_VLKN_SUCCESS) return false;
+            if (svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W*4)
+                != SVGA3_VLKN_SUCCESS) return false;
+            return pixelMatches(fb[32 * RT_W + 32], expected.r, expected.g, expected.b, expected.a);
+        };
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MINFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MAGFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        const float projectedCoords[4] = {.8f, .8f, 0, 2};
+        TEST_CHECK(sampleConstant(2, 1, SID_TEX, projectedCoords, {255,255,255,255}),
+            "Projected TEX divides coordinates by w");
+        const uint32_t volumeData[2] = {0xFFFF0000, 0xFF00FF00};
+        const SVGA3dSize volumeSize = {1,1,2};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 94, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8,
+            &volumeSize, 1) == SVGA3_VLKN_SUCCESS, "Define 3D texture");
+        svga3_vlkn_surface_dma_upload(dev, 94, 0, nullptr, volumeData, 4);
+        const float volumeCoords[4] = {.5f,.5f,.75f,1};
+        TEST_CHECK(sampleConstant(4, 0, 94, volumeCoords, {0,255,0,255}), "Volume TEX samples the selected z slice");
+        const SVGA3dSize cubeSizes[6] = {{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1},{1,1,1}};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 95, SVGA3D_SURFACE_HINT_TEXTURE | SVGA3D_SURFACE_CUBEMAP,
+            SVGA3D_A8R8G8B8, cubeSizes, 6) == SVGA3_VLKN_SUCCESS, "Define cube texture");
+        auto *cube = dev->surfaceMgr->getSurface(95);
+        for (uint32_t face = 0; face < 6; ++face)
+            TEST_CHECK(cube->dmaUpload(0, nullptr, &volumeData[face%2], 4, false, face) == SVGA3_VLKN_SUCCESS,
+                "Upload independent cube face");
+        const float positiveX[4] = {1,0,0,1}, negativeX[4] = {-1,0,0,1};
+        TEST_CHECK(sampleConstant(3, 0, 95, positiveX, {0,0,255,255}), "Cube TEX samples positive X face");
+        TEST_CHECK(sampleConstant(3, 0, 95, negativeX, {0,255,0,255}), "Cube TEX samples negative X face");
+        uint32_t cubeReadback = 0;
+        TEST_CHECK(cube->dmaDownload(0, nullptr, &cubeReadback, 4, false, 1) == SVGA3_VLKN_SUCCESS &&
+            cubeReadback == volumeData[1], "Cube face readback retains the selected layer");
+        const SVGA3dSize mipSizes[3] = {{64,64,1},{32,32,1},{16,16,1}};
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 96, SVGA3D_SURFACE_HINT_TEXTURE, SVGA3D_A8R8G8B8,
+            mipSizes, 3) == SVGA3_VLKN_SUCCESS, "Define bias texture");
+        const uint32_t mipColors[3] = {0xFFFF0000,0xFF00FF00,0xFF0000FF};
+        for (uint32_t level = 0; level < 3; ++level) {
+            std::vector<uint32_t> mipData(mipSizes[level].width * mipSizes[level].height, mipColors[level]);
+            svga3_vlkn_surface_dma_upload(dev, 96, level, nullptr, mipData.data(), mipSizes[level].width * 4);
+        }
+        std::vector<uint32_t> biasShader(std::begin(ps1Bytecode), std::end(ps1Bytecode));
+        biasShader[7] |= 2 << 16; /* texldb; FLOAT2 vertex coordinate supplies w=1. */
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 97, SVGA3D_SHADERTYPE_PS,
+            biasShader.data(), biasShader.size()) == SVGA3_VLKN_SUCCESS, "Define biased TEX shader");
+        svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MIPFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture(dev, CID, 0, 96);
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 97);
+        svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
+        svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4);
+        TEST_CHECK(pixelMatches(fb[24 * RT_W + 24], 0,0,255,255), "TEX bias selects mip 2 instead of implicit mip 1");
+        svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
+        for (uint32_t sid = 94; sid <= 96; ++sid) svga3_vlkn_surface_destroy(dev, sid);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);
         svga3_vlkn_surface_destroy(dev, 90);
 
@@ -502,6 +579,27 @@ int main() {
         savePPM("artifacts/scene2_depth_reference.ppm", refFb2.data(), RT_W, RT_H);
         saveDiffPPM("artifacts/scene2_depth_diff.ppm", fb.data(), refFb2.data(), RT_W, RT_H);
 
+        /* Fragment depth overrides interpolated z, including depth-only draws. */
+        const uint32_t depthShader[] = {0xFFFF0300,
+            1 | (2 << 24), D3D9_DST(8, 0, 15), D3D9_SRC(2, 0, 0xE4),
+            1 | (2 << 24), D3D9_DST(9, 0, 1), D3D9_SRC(2, 1, 0), 0xFFFF};
+        TEST_CHECK(svga3_vlkn_context_define_shader(dev, CID, 98, SVGA3D_SHADERTYPE_PS,
+            depthShader, sizeof(depthShader)/4) == SVGA3_VLKN_SUCCESS, "Define fragment depth shader");
+        svga3_vlkn_context_set_shader(dev, CID, SVGA3D_SHADERTYPE_PS, 98);
+        const float replacedDepth[4] = {.7f,0,0,0};
+        memcpy(cVal, replacedDepth, sizeof(cVal));
+        svga3_vlkn_context_set_shader_const(dev, CID, 1, SVGA3D_SHADERTYPE_PS, SVGA3D_CONST_TYPE_FLOAT, cVal);
+        for (bool depthOnly : {false,true}) {
+            if (depthOnly) svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
+            svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_DEPTH, 0, 1.f, 0, nullptr, 0);
+            TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &r1, 1)
+                == SVGA3_VLKN_SUCCESS, "Draw with fragment depth output");
+            std::vector<uint32_t> depthPixels(RT_W * RT_H);
+            TEST_CHECK(svga3_vlkn_surface_dma_download(dev, SID_DS, 0, nullptr, depthPixels.data(), RT_W * 4)
+                == SVGA3_VLKN_SUCCESS, "Read replaced fragment depth");
+            TEST_CHECK(std::abs(double(depthPixels[32 * RT_W + 32] >> 8) / 16777215. - .7) < .000001,
+                "Fragment depth 0.7 replaces geometry depth 0.2 with and without a color target");
+        }
         /* Clean up Scene 2 */
         svga3_vlkn_context_destroy(dev, CID);
         svga3_vlkn_surface_destroy(dev, SID_RT);

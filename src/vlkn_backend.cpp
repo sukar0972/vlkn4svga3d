@@ -24,7 +24,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vlkn_debug_callback(
     if (backend) {
         backend->addValidationMessage(isError, msg);
     }
-    fprintf(stderr, "[Vulkan Validation %s] %s\n", isError ? "ERROR" : "WARN", msg.c_str());
+    log_msg("[Vulkan Validation %s] %s\n", isError ? "ERROR" : "WARN", msg.c_str());
     return VK_FALSE;
 }
 
@@ -412,7 +412,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     VkDescriptorPoolSize poolSizes[] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 8192 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 * 8 }
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 * 16 }
     };
     VkDescriptorPoolCreateInfo descPoolInfo = {};
     descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

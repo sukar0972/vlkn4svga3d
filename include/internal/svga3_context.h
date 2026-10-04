@@ -21,7 +21,7 @@ namespace svga3_vlkn {
 
 /* Max stages and render targets supported by SVGA3D */
 constexpr uint32_t SVGA3_MAX_RENDER_TARGETS = 4;
-constexpr uint32_t SVGA3_MAX_TEXTURE_STAGES = 8;
+constexpr uint32_t SVGA3_MAX_TEXTURE_STAGES = 16;
 constexpr uint32_t SVGA3_MAX_VERTEX_DECLS   = 32;
 /* Security caps for guest-controlled draw parameters. */
 constexpr uint32_t SVGA3_MAX_PRIMITIVES_PER_DRAW = 1u << 24; /* 16M primitives */
@@ -59,6 +59,7 @@ struct Svga3Shader {
     uint32_t inputLocationMask;
     bool hasFragmentSideEffects = true;
     bool hasBytecodeKill = false;
+    bool writesDepth = false;
     /* Pixel shaders are recompiled per depth-sampler mask. Bit N means stage N
      * was a depth texture when that variant was built. */
     std::unordered_map<uint32_t, VkShaderModule> depthVariants;
