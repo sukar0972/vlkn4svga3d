@@ -22,7 +22,44 @@ static void VKAPI_CALL countBarriers(VkCommandBuffer, VkPipelineStageFlags, VkPi
 static void VKAPI_CALL countImageCopies(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLayout, uint32_t, const VkImageCopy *) { ++imageCopies; }
 static void VKAPI_CALL countBufferCopies(VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, const VkBufferCopy *) { ++bufferCopies; }
 static void VKAPI_CALL captureIndex(VkCommandBuffer, VkBuffer, VkDeviceSize, VkIndexType type) { boundIndexType = type; }
+static PFN_vkDestroyImage savedDestroyImage;
+static VkImage watchedImage;
+static unsigned watchedDestroys, waitCalls, failWaitAt;
+static VkResult VKAPI_CALL failQueueWait(VkQueue) { return ++waitCalls==failWaitAt ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_SUCCESS; }
+static VkResult VKAPI_CALL failDeviceWait(VkDevice) { return VK_ERROR_OUT_OF_HOST_MEMORY; }
+static void VKAPI_CALL watchDestroyImage(VkDevice device,VkImage image,const VkAllocationCallbacks *alloc) {
+    if (image==watchedImage) ++watchedDestroys;
+    savedDestroyImage(device,image,alloc);
+}
+static int checkDeferredImages() {
+    Svga3VlknConfig cfg{}; cfg.forceMockBackend=true;
+    auto *dev=svga3_vlkn_device_create(&cfg); CHECK(dev);
+    auto &dispatch=dev->backend->dispatch();
+    savedDestroyImage=dispatch.vkDestroyImage; dispatch.vkDestroyImage=watchDestroyImage;
+    auto savedWait=dispatch.vkQueueWaitIdle; auto savedIdle=dispatch.vkDeviceWaitIdle;
+    SVGA3dSize size{4,4,1};
+    for (bool volume : {false,true}) {
+        CHECK(dev->surfaceMgr->defineSurface(1,0,SVGA3D_A8R8G8B8,&size,1)==SVGA3_VLKN_SUCCESS);
+        CHECK(dev->backend->flushCommandBuffer()==SVGA3_VLKN_SUCCESS);
+        auto *surface=dev->surfaceMgr->getSurface(1);
+        watchedImage=surface->image(); watchedDestroys=waitCalls=0; failWaitAt=volume?2:1;
+        surface->transitionLayout(dev->backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        dispatch.vkQueueWaitIdle=failQueueWait;
+        if (volume) CHECK(surface->ensureVolumeImage()!=SVGA3_VLKN_SUCCESS);
+        else CHECK(dev->surfaceMgr->destroySurface(1)==SVGA3_VLKN_SUCCESS);
+        CHECK(watchedDestroys==0);
+        dispatch.vkDeviceWaitIdle=failDeviceWait;
+        CHECK(dev->backend->waitIdle()!=SVGA3_VLKN_SUCCESS && watchedDestroys==0);
+        dispatch.vkDeviceWaitIdle=savedIdle; dispatch.vkQueueWaitIdle=savedWait;
+        CHECK(dev->backend->waitIdle()==SVGA3_VLKN_SUCCESS && watchedDestroys==1);
+        if (volume) CHECK(dev->surfaceMgr->destroySurface(1)==SVGA3_VLKN_SUCCESS);
+    }
+    dispatch.vkDestroyImage=savedDestroyImage;
+    svga3_vlkn_device_destroy(dev);
+    return 0;
+}
 int main() {
+    CHECK(checkDeferredImages()==0);
     Svga3VlknConfig cfg{}; cfg.forceMockBackend = true;
     auto *dev = svga3_vlkn_device_create(&cfg); CHECK(dev);
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);

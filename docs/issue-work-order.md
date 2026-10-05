@@ -39,8 +39,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#133](https://github.com/sukar0972/vlkn4svga3d/issues/133) — Medium: waitForQuery accepts unended query and leaves m_queryActive stuck
 - [x] [#134](https://github.com/sukar0972/vlkn4svga3d/issues/134) — Medium: Mock GetQueryPoolResults ignores readiness (hides query FSM bugs)
 - [x] [#155](https://github.com/sukar0972/vlkn4svga3d/issues/155) — Medium: Query pool create failure fabricates occlusion results
-- [ ] [#96](https://github.com/sukar0972/vlkn4svga3d/issues/96) — Medium: Destroy VkImage after failed/ignored flush
-- [ ] [#106](https://github.com/sukar0972/vlkn4svga3d/issues/106) — Medium: Failed flush at fence wedges FIFO forever
+- [x] [#96](https://github.com/sukar0972/vlkn4svga3d/issues/96) — Medium: Destroy VkImage after failed/ignored flush
+- [x] [#106](https://github.com/sukar0972/vlkn4svga3d/issues/106) — Medium: Failed flush at fence wedges FIFO forever
 - [ ] [#113](https://github.com/sukar0972/vlkn4svga3d/issues/113) — High: Host / device-lost recovery incomplete (umbrella)
 
 ## Capability, surface-format and feature honesty
@@ -114,3 +114,9 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 Sampler compatibility: MIRRORONCE currently uses CLAMP_TO_EDGE because the device
 does not enable mirror-clamp support. Anisotropic filters retain linear sampling
 when anisotropy is unavailable or sampler creation falls back.
+
+Failure handling: surface images, views and buffers are deferred when a flush fails.
+Confirmed device idle or a successful later submission retires them. Failed shutdown
+idle retains Vulkan allocations until reset or process exit. The preload disables
+3D after a fence flush failure and drains fences and 2D updates; this does not
+establish the live-host recovery acceptance of #113.

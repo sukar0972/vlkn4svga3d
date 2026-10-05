@@ -182,6 +182,7 @@ static FILE *log_file = NULL;
 
 /* Production SVGA3=VLKN Vulkan Device State */
 static Svga3VlknDevice *g_vlknDev = nullptr;
+static bool g_renderer_lost = false;
 static void *g_vmsvga_state = nullptr;
 static void *g_guest_ram_base = nullptr;
 static size_t g_guest_ram_size = 0;
@@ -516,6 +517,7 @@ static void ensure_vlkn_device(void *s) {
     cfg.forceMockBackend = false;
     cfg.enableValidationLayers = preload_validation_requested();
 
+    g_renderer_lost = false;
     g_vlknDev = svga3_vlkn_device_create(&cfg);
     if (!g_vlknDev) {
         log_msg("[libqemu_svga3d] WARNING: svga3_vlkn_device_create failed; fallback to CPU!\n");
@@ -680,11 +682,13 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
             if (fence_count <= 10 || (fence_count % 50) == 0) {
                 log_msg("[libqemu_svga3d] SVGA_CMD_FENCE #%u: fence_id=%u\n", fence_count, P(1));
             }
-            if (g_vlknDev) {
-                /* Complete all preceding GPU work before acknowledging the
-                 * guest fence, including commands for offscreen targets. */
-                if (svga3_vlkn::svga3_vlkn_present_client_surfaces(g_vlknDev, "fence") != SVGA3_VLKN_SUCCESS)
-                    goto done;
+            if (g_vlknDev && !g_renderer_lost) {
+                /* A failed renderer is disabled for this device lifetime.
+                 * Guest fences then acknowledge dropped work so 2D can drain. */
+                if (svga3_vlkn::svga3_vlkn_present_client_surfaces(g_vlknDev, "fence") != SVGA3_VLKN_SUCCESS) {
+                    g_renderer_lost = true;
+                    log_msg("[libqemu_svga3d] Renderer disabled after fence flush failure; retaining 2D FIFO service\n");
+                }
             }
             if (min >= 28) fifo[SVGA_FIFO_FENCE] = P(1);
         } else if (cmd == SVGA_CMD_ESCAPE) {
@@ -775,8 +779,12 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
             /* Handled / consumed */
         } else if ((cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) ||
                    cmd == SVGA_CMD_DEFINE_GMR2 || cmd == SVGA_CMD_REMAP_GMR2) {
-            ensure_vlkn_device(s);
-            if (g_vlknDev && !(g_screen_deactivated && cmd == SVGA_3D_CMD_BLIT_SURFACE_TO_SCREEN)) {
+            if (!g_renderer_lost) ensure_vlkn_device(s);
+            if (g_renderer_lost) {
+                static uint64_t dropped = 0;
+                if (++dropped == 1 || (dropped & (dropped-1)) == 0)
+                    log_msg("[libqemu_svga3d] Dropping framed 3D command after renderer failure (total=%llu)\n", (unsigned long long)dropped);
+            } else if (g_vlknDev && !(g_screen_deactivated && cmd == SVGA_3D_CMD_BLIT_SURFACE_TO_SCREEN)) {
                 size_t packetBytes = words * 4;
                 size_t bytesConsumed = 0;
                 static uint32_t total_3d = 0;

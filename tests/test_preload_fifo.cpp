@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <vector>
 
+static unsigned failingSubmits;
+static VkResult VKAPI_CALL failFenceSubmit(VkQueue,uint32_t,const VkSubmitInfo *,VkFence) { ++failingSubmits; return VK_ERROR_OUT_OF_HOST_MEMORY; }
 static bool appendDuringRead = false;
 static bool sawAcknowledgement = false;
 static uint64_t fakeRead(void *opaque, uint64_t, unsigned) {
@@ -274,8 +276,22 @@ int main() {
     const auto &fb = g_vlknDev->guestMem->getFramebuffer();
     paddedScreenOk &= fb.width==8 && fb.height==10 && fb.pitch==64 &&
         fb.scanoutOffset==4096 && fifo[SVGA_FIFO_FENCE]==45;
+    auto &dispatch=g_vlknDev->backend->dispatch(); auto savedSubmit=dispatch.vkQueueSubmit;
+    g_vlknDev->backend->getActiveCommandBuffer(); dispatch.vkQueueSubmit=failFenceSubmit;
+    reset(4096); append(SVGA_CMD_FENCE); append(46);
+    append(SVGA_3D_CMD_CONTEXT_DEFINE); append(sizeof(SVGA3dCmdDefineContext)); append(999);
+    append(SVGA_CMD_UPDATE); append(0); append(0); append(2); append(2);
+    append(SVGA_CMD_FENCE); append(47);
+    unsigned priorUpdates=displayUpdates;
+    my_vmsvga_fifo_run(state);
+    bool lossOk=g_renderer_lost && failingSubmits==1 && fifo[SVGA_FIFO_FENCE]==47 && fifo[SVGA_FIFO_STOP]==fifo[SVGA_FIFO_NEXT] &&
+        !g_vlknDev->contextMgr->getContext(999) && displayUpdates>priorUpdates;
+    if (!lossOk) printf("loss details flag=%d submits=%u fence=%u stop=%u next=%u ctx=%p updates=%u prior=%u\n",g_renderer_lost,failingSubmits,fifo[SVGA_FIFO_FENCE],fifo[SVGA_FIFO_STOP],fifo[SVGA_FIFO_NEXT],(void*)g_vlknDev->contextMgr->getContext(999),displayUpdates,priorUpdates);
+    my_vmsvga_fifo_run(state); lossOk &= failingSubmits==1;
+    printf("failed fence disables 3D, drains fences and retains 2D: %s\n",lossOk?"PASS":"FAIL"); ok &= lossOk;
+    dispatch.vkQueueSubmit=savedSubmit;
     svga3_vlkn_device_destroy(g_vlknDev);
-    g_vlknDev = nullptr;
+    g_vlknDev = nullptr; g_renderer_lost=false;
   }
   printf("screen-object pitch and dimensions override legacy mode: %s\n",paddedScreenOk?"PASS":"FAIL");
   ok &= paddedScreenOk;

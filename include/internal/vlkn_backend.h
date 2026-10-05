@@ -104,6 +104,8 @@ public:
     uint64_t recordingSerial() const { return m_recordingSerial; }
     void retireBuffer(VkBuffer buffer, VkDeviceMemory memory, void *mapped, uint64_t serial, size_t budgetBytes);
     void cleanupRetiredBuffers(bool forceAll = false);
+    void retireImage(VkImage image, VkDeviceMemory memory, std::vector<VkImageView> views);
+    void cleanupRetiredImages();
 
     /* Render pass execution with state tracking and safety guard */
     bool isRenderPassActive() const { return m_renderPassActive; }
@@ -210,6 +212,13 @@ private:
         size_t budgetBytes;
     };
     std::vector<RetiredBuffer> m_retiredBuffers;
+    struct RetiredImage {
+        VkImage image;
+        VkDeviceMemory memory;
+        std::vector<VkImageView> views;
+        uint64_t serial;
+    };
+    std::vector<RetiredImage> m_retiredImages;
 
     VkDescriptorPool m_descriptorPool;
 
