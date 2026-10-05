@@ -104,7 +104,8 @@ VkSamplerAddressMode svga3_texture_address_to_vk(SVGA3dTextureAddress addr) {
         case SVGA3D_TEX_ADDRESS_MIRROR:     return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         case SVGA3D_TEX_ADDRESS_CLAMP:      return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         case SVGA3D_TEX_ADDRESS_BORDER:     return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        case SVGA3D_TEX_ADDRESS_MIRRORONCE: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+        /* Mirror-clamp is not enabled on this device; use the documented edge fallback. */
+        case SVGA3D_TEX_ADDRESS_MIRRORONCE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         case SVGA3D_TEX_ADDRESS_EDGE:       return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         default:                            return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     }
@@ -911,6 +912,10 @@ Svga3VlknStatus VlknContext::setTextureStageState(uint32_t stage, SVGA3dTextureS
             s.mipFilter = value;
             s.samplerDirty = true;
             break;
+        case SVGA3D_TS_TEXTURE_MIPMAP_LEVEL:
+            s.minMipLevel = value;
+            s.samplerDirty = true;
+            break;
         case SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL:
             s.maxAnisotropy = value;
             s.samplerDirty = true;
@@ -1383,9 +1388,9 @@ VkSampler VlknContext::getOrCreateSampler(uint32_t stage) {
     VlknSurface *surf = m_surfaceMgr ? m_surfaceMgr->getSurface(s.sid) : nullptr;
     uint32_t lodBits;
     memcpy(&lodBits, &s.mipLodBias, sizeof(lodBits));
-    const std::array<uint32_t, 10> key{{s.addressU, s.addressV, s.addressW,
+    const std::array<uint32_t, 11> key{{s.addressU, s.addressV, s.addressW,
         s.minFilter, s.magFilter, s.mipFilter, s.maxAnisotropy, lodBits,
-        surf ? surf->mipLevels() : 0, s.borderColor}};
+        surf ? surf->mipLevels() : 0, s.borderColor, s.minMipLevel}};
     auto cached = m_samplerCache.find(key);
     if (cached != m_samplerCache.end()) {
         s.sampler = cached->second;
@@ -1397,9 +1402,9 @@ VkSampler VlknContext::getOrCreateSampler(uint32_t stage) {
 
     VkSamplerCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    info.magFilter = (s.magFilter == SVGA3D_TEX_FILTER_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-    info.minFilter = (s.minFilter == SVGA3D_TEX_FILTER_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-    info.mipmapMode = (s.mipFilter == SVGA3D_TEX_FILTER_LINEAR) ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    info.magFilter = (s.magFilter >= SVGA3D_TEX_FILTER_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    info.minFilter = (s.minFilter >= SVGA3D_TEX_FILTER_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    info.mipmapMode = (s.mipFilter >= SVGA3D_TEX_FILTER_LINEAR) ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     info.addressModeU = ::svga3_texture_address_to_vk((SVGA3dTextureAddress)s.addressU);
     info.addressModeV = ::svga3_texture_address_to_vk((SVGA3dTextureAddress)s.addressV);
     info.addressModeW = ::svga3_texture_address_to_vk((SVGA3dTextureAddress)s.addressW);
@@ -1418,23 +1423,32 @@ VkSampler VlknContext::getOrCreateSampler(uint32_t stage) {
         info.pNext = &border;
     }
     info.mipLodBias = s.mipLodBias;
-    info.anisotropyEnable = (s.maxAnisotropy > 1) ? VK_TRUE : VK_FALSE;
-    info.maxAnisotropy = (float)std::max(1u, s.maxAnisotropy);
-    info.minLod = 0.0f;
+    info.anisotropyEnable = m_backend->features().samplerAnisotropy &&
+        s.minFilter == SVGA3D_TEX_FILTER_ANISOTROPIC && s.maxAnisotropy > 1;
+    info.maxAnisotropy = std::clamp(float(s.maxAnisotropy),1.0f,
+        std::max(1.0f,m_backend->properties().limits.maxSamplerAnisotropy));
+    info.minLod = float(std::min(s.minMipLevel, surf ? surf->mipLevels()-1 : 16u));
     /* Clamp maxLod to the image's own level count when mipmapping is in
      * use; the sampled view's current level count is timing-dependent
      * (it expands as levels are produced) and must not pin LOD to 0. */
     if (s.mipFilter == SVGA3D_TEX_FILTER_NONE || (surf && surf->mipLevels() <= 1)) {
-        info.maxLod = 0.0f;
+        info.maxLod = info.minLod;
     } else if (surf && surf->mipLevels() > 1) {
         info.maxLod = (float)(surf->mipLevels() - 1);
     } else {
         info.maxLod = 16.0f;
     }
 
-    m_backend->dispatch().vkCreateSampler(m_backend->device(), &info, nullptr, &s.sampler);
+    auto result = m_backend->dispatch().vkCreateSampler(m_backend->device(), &info, nullptr, &s.sampler);
+    if (result != VK_SUCCESS && info.anisotropyEnable) {
+        s.sampler = VK_NULL_HANDLE;
+        info.anisotropyEnable = VK_FALSE;
+        info.maxAnisotropy = 1.0f;
+        result = m_backend->dispatch().vkCreateSampler(m_backend->device(), &info, nullptr, &s.sampler);
+    }
+    if (result != VK_SUCCESS) s.sampler = VK_NULL_HANDLE;
     if (s.sampler) m_samplerCache.emplace(key, s.sampler);
-    s.samplerDirty = false;
+    s.samplerDirty = !s.sampler;
     return s.sampler;
 }
 
@@ -2610,7 +2624,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
              * level 0 only; uploads and the autogen blit are the other
              * expansion triggers and neither fires for that path. Expand
              * the view here so mip-filtered sampling can reach the chain. */
-            if (m_stages[i].mipFilter != SVGA3D_TEX_FILTER_NONE) {
+            if (m_stages[i].mipFilter != SVGA3D_TEX_FILTER_NONE || m_stages[i].minMipLevel) {
                 if (!surf->ensureViewMipLevels(surf->mipLevels())) {
                     /* The helper logged the failure and the surface kept
                      * its previous view, so this stage samples the levels

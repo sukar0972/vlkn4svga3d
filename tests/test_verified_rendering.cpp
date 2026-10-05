@@ -421,6 +421,14 @@ int main() {
         };
         svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MINFILTER, SVGA3D_TEX_FILTER_NEAREST);
         svga3_vlkn_context_set_texture_stage_state(dev, CID, 0, SVGA3D_TS_MAGFILTER, SVGA3D_TEX_FILTER_NEAREST);
+        const float middleCoords[4] = {.5f,.5f,0,1};
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_MINFILTER,SVGA3D_TEX_FILTER_ANISOTROPIC);
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_MAGFILTER,SVGA3D_TEX_FILTER_ANISOTROPIC);
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,16);
+        TEST_CHECK(sampleConstant(2,0,SID_TEX,middleCoords,{128,128,128,255}), "Anisotropic filtering interpolates adjacent texels");
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_MINFILTER,SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_MAGFILTER,SVGA3D_TEX_FILTER_NEAREST);
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,1);
         const float projectedCoords[4] = {.8f, .8f, 0, 2};
         TEST_CHECK(sampleConstant(2, 1, SID_TEX, projectedCoords, {255,255,255,255}),
             "Projected TEX divides coordinates by w");
@@ -471,6 +479,11 @@ int main() {
         svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
         svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4);
         TEST_CHECK(pixelMatches(fb[24 * RT_W + 24], 0,0,255,255), "TEX bias selects mip 2 instead of implicit mip 1");
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_MIPFILTER,SVGA3D_TEX_FILTER_NONE);
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_TEXTURE_MIPMAP_LEVEL,2);
+        TEST_CHECK(sampleConstant(2,0,96,middleCoords,{255,0,0,255}), "MAXMIPLEVEL selects mip 2 even without mip filtering");
+        svga3_vlkn_context_set_texture_stage_state(dev,CID,0,SVGA3D_TS_TEXTURE_MIPMAP_LEVEL,0);
+        TEST_CHECK(sampleConstant(2,0,96,middleCoords,{0,0,255,255}), "Zero MAXMIPLEVEL restores base-level sampling");
         svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
         for (uint32_t sid = 94; sid <= 96; ++sid) svga3_vlkn_surface_destroy(dev, sid);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SID_RT, 0, 0);

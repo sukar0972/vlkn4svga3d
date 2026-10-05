@@ -6,6 +6,15 @@
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static unsigned barriers, imageCopies, bufferCopies;
+static PFN_vkCreateSampler savedSampler;
+static VkSamplerCreateInfo samplerInfo;
+static unsigned samplerAttempts;
+static bool rejectAniso, rejectAllSamplers;
+static VkResult VKAPI_CALL captureSampler(VkDevice device,const VkSamplerCreateInfo *info,const VkAllocationCallbacks *alloc,VkSampler *out) {
+    samplerInfo=*info; ++samplerAttempts;
+    if (rejectAllSamplers || (rejectAniso && info->anisotropyEnable)) { *out=VK_NULL_HANDLE; return VK_ERROR_OUT_OF_HOST_MEMORY; }
+    return savedSampler(device,info,alloc,out);
+}
 static VkImageAspectFlags clearAspect;
 static void VKAPI_CALL captureClear(VkCommandBuffer, uint32_t count, const VkClearAttachment *attachments, uint32_t, const VkClearRect *) { clearAspect = count ? attachments[count-1].aspectMask : 0; }
 static VkIndexType boundIndexType = VK_INDEX_TYPE_UINT32;
@@ -92,6 +101,29 @@ int main() {
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     range.indexArray.stride = 0;
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS && boundIndexType == VK_INDEX_TYPE_UINT16);
+    savedSampler=dispatch.vkCreateSampler; dispatch.vkCreateSampler=captureSampler;
+    CHECK(ctx->setTexture(0,3)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_MINFILTER,SVGA3D_TEX_FILTER_ANISOTROPIC)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_MAGFILTER,SVGA3D_TEX_FILTER_ANISOTROPIC)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,UINT32_MAX)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS);
+    CHECK(samplerInfo.minFilter==VK_FILTER_LINEAR && samplerInfo.magFilter==VK_FILTER_LINEAR && samplerInfo.anisotropyEnable && samplerInfo.maxAnisotropy==16);
+    features.samplerAnisotropy=VK_FALSE;
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,123)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS && !samplerInfo.anisotropyEnable);
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_TEXTURE_ANISOTROPY,&maxTargets) && maxTargets==1);
+    features=savedFeatures; rejectAniso=true;
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,124)==SVGA3_VLKN_SUCCESS);
+    samplerAttempts=0;
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS && samplerAttempts==2 && !samplerInfo.anisotropyEnable);
+    rejectAllSamplers=true;
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_TEXTURE_ANISOTROPIC_LEVEL,125)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)!=SVGA3_VLKN_SUCCESS);
+    rejectAniso=rejectAllSamplers=false; samplerAttempts=0;
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS && samplerAttempts==1);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_ADDRESSU,SVGA3D_TEX_ADDRESS_MIRRORONCE)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS && samplerInfo.addressModeU==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+    dispatch.vkCreateSampler=savedSampler;
     auto savedClear = dispatch.vkCmdClearAttachments;
     dispatch.vkCmdClearAttachments = captureClear;
     for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24S8}) {
