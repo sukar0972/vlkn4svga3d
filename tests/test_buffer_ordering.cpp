@@ -101,6 +101,20 @@ int main() {
   printf("draw status=%d\n",
          svga3_vlkn_context_draw(d, 1, SVGA3D_PRIMITIVE_TRIANGLELIST, &decl, 1,
                                  &r, 1));
+  // Repeating byte-identical shader definitions must preserve queued draws.
+  // The existing readback below verifies those draws still use the old vertices.
+  d->backend->enablePerformanceCounters(true);
+  d->backend->resetPerformanceCounters();
+  const auto queuedSerial = d->backend->recordingSerial();
+  const auto completedSerial = d->backend->completedSubmissionSerial();
+  if (svga3_vlkn_context_define_shader(d, 1, 1, SVGA3D_SHADERTYPE_VS, vs, sizeof(vs)/4) != SVGA3_VLKN_SUCCESS ||
+      svga3_vlkn_context_define_shader(d, 1, 1, SVGA3D_SHADERTYPE_PS, ps, sizeof(ps)/4) != SVGA3_VLKN_SUCCESS ||
+      d->backend->recordingSerial() != queuedSerial ||
+      d->backend->completedSubmissionSerial() != completedSerial ||
+      d->backend->performanceCounters()->identicalShaderDefinitions != 2 ||
+      d->backend->performanceCounters()->queueSubmissions != 0) return 1;
+  d->backend->enablePerformanceCounters(false);
+  printf("identical shader definitions preserve queued draw: PASS\n");
   for (auto &v : verts)
     v[0] += 1;
   svga3_vlkn_surface_dma_upload(d, 2, 0, &box, verts, sizeof(verts));

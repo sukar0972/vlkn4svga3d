@@ -268,3 +268,10 @@ preload-lab: $(LIB_QEMU_SVGA3D)
 
 $(BIN_DIR)/test_preload_fence: tests/test_preload_fence.cpp src/qemu_svga3d_preload.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+$(BIN_DIR)/benchmark_presentation: tools/benchmark_presentation.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+.PHONY: benchmark-presentation
+benchmark-presentation: $(BIN_DIR)/benchmark_presentation
+	./$(BIN_DIR)/benchmark_presentation $(BENCHMARK_ITERATIONS)

@@ -1052,6 +1052,17 @@ Svga3VlknStatus VlknContext::defineShader(uint32_t shid, SVGA3dShaderType type, 
         log_msg("[libqemu_svga3d] defineShader error: shader table full (%zu)\n", table.size());
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
+    // Identical redefinitions retain the translated module, depth variants,
+    // and dependent pipelines. Byte-for-byte equality avoids hash collisions.
+    // Failed depth variants borrow the base module: retain redefinition's retry
+    // behavior rather than permanently caching a transient allocation failure.
+    if (it != table.end() && it->second.bytecode.size() == numDwords &&
+        std::equal(it->second.bytecode.begin(), it->second.bytecode.end(), bytecode) &&
+        std::none_of(it->second.depthVariants.begin(), it->second.depthVariants.end(),
+                     [&](const auto &entry) { return entry.second == it->second.module; })) {
+        if (auto *c = m_backend->performanceCounters()) ++c->identicalShaderDefinitions;
+        return SVGA3_VLKN_SUCCESS;
+    }
     if (it != table.end()) {
         /* Only flush if cached pipelines actually reference this shader.
          * A redefine with no dependent pipelines needs no queue drain;

@@ -49,6 +49,16 @@ namespace svga3_vlkn {
  * (uploadToBuffer / downloadFromBuffer) — that would deadlock. The
  * production hook (svga3_device.cpp) only ends render passes, which take the
  * context manager's recursive mutex and record no transfers. */
+struct PerformanceCounters {
+    uint64_t presentationCalls = 0;
+    uint64_t readbackBytes = 0;
+    uint64_t framebufferCopyBytes = 0;
+    uint64_t framebufferCopyCalls = 0;
+    uint64_t queueSubmissions = 0;
+    uint64_t queueWaitNanoseconds = 0;
+    uint64_t identicalShaderDefinitions = 0;
+};
+
 class VlknBackend {
 public:
     VlknBackend();
@@ -81,6 +91,11 @@ public:
     Svga3VlknStatus downloadFromBuffer(void *dstData, VkBuffer srcBuffer, VkDeviceSize srcOffset, VkDeviceSize size);
     void recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
                                VkDeviceSize offset, VkDeviceSize size);
+
+    // Opt-in measurements; callers serialize access through the device lock.
+    PerformanceCounters *performanceCounters() { return m_measurePerformance ? &m_performanceCounters : nullptr; }
+    void enablePerformanceCounters(bool enabled) { m_measurePerformance = enabled; }
+    void resetPerformanceCounters() { m_performanceCounters = {}; }
 
     /* Command buffer management */
     VkCommandBuffer getActiveCommandBuffer();
@@ -159,6 +174,8 @@ public:
     void setPreFlushHook(std::function<void()> hook) { m_preFlushHook = std::move(hook); }
 
 private:
+    bool m_measurePerformance = false;
+    PerformanceCounters m_performanceCounters{};
     Svga3VlknStatus initInstance(const Svga3VlknConfig *config);
     Svga3VlknStatus selectPhysicalDevice(const Svga3VlknConfig *config);
     Svga3VlknStatus initDevice(const Svga3VlknConfig *config);

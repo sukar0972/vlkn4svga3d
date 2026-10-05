@@ -41,6 +41,49 @@ Individual targets:
 
 **`test-qemu` does not boot an actual QEMU guest.** Passing it is not proof of working Linux, Windows, or QNX graphics. Test names and success banners inherited from development should not be read as completeness claims.
 
+## Performance changes and correctness contracts
+
+The goal is higher end-to-end throughput with unchanged guest-visible accuracy.
+Tests should assert pixel values, command ordering, memory visibility at completion,
+error behavior, and preservation of untouched regions. They should not require a
+particular number of copies, queue submissions, GPU waits, or notification calls.
+Microbenchmarks and profiles explain costs; glmark2 measures the complete path.
+An isolated microbenchmark improvement does not establish an FPS improvement.
+
+The presentation harness observes its registered CPU framebuffer after an explicit
+`svga3_vlkn_device_wait_idle` completion point, once per submitted FIFO stream.
+It checks that the union of valid display notifications covers the presented
+regions, allowing splitting, reordering, and coalescing. Over-notification may
+request repainting unchanged pixels; those framebuffer pixels must still be
+preserved exactly. Negative controls reject missing coverage and out-of-bounds
+notifications. Two overlapping PRESENT commands in one stream verify that the
+later write wins and all surrounding pixels remain unchanged.
+
+This test structure does not implement asynchronous presentation or GPU scanout.
+The current wait-idle API drains the Vulkan backend; a future presentation queue
+must also be drained at the observation boundary before reusing the framebuffer
+or callback state. A GPU-backed display adapter will need its own integration
+coverage. Guest fence ordering and CPU readback visibility must remain correct
+without adding artificial waits to the guest path to make tests pass. Keep the
+buffer-ordering regressions, exact copy comparisons, and Piglit expectations;
+change an implementation-specific assertion only with equivalent behavioral
+coverage. Unsupported skips and unknown validation results are not accuracy
+passes, and known upstream expectation mismatches remain recorded separately.
+
+The optional real-Vulkan presentation benchmark covers full 800×600 frames,
+64×64 updates, overlapping clips, fully offscreen updates, and identical shader
+redefinitions. It verifies every framebuffer pixel after completion and reports
+JSON lines with time, transfer bytes, CPU copy calls, submissions, and queue wait
+time. Run `make benchmark-presentation BENCHMARK_ITERATIONS=200`; set
+`BENCHMARK_VALIDATE=1` for a validation run. Alternate baseline and candidate
+executables on the same device for comparisons. These timings are not glmark2
+scores or predictions of guest FPS. Performance counters are disabled by default;
+`SVGA3_VLKN_PERF_COUNTERS` enables them at backend startup and logs totals on
+shutdown. Queue timing covers the submission queue wait, not every device idle.
+
+See [the presentation efficiency report](presentation-efficiency-20261005.md)
+for the audit, measurement conditions, and accuracy results.
+
 ## Piglit guest OpenGL tests
 
 [Piglit](https://piglit.freedesktop.org/) adds external OpenGL correctness tests through the guest's Mesa SVGA driver and the QEMU renderer. Install it **inside the Debian guest** with an existing Xorg session:
