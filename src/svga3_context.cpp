@@ -451,7 +451,10 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     qpInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     qpInfo.queryType = VK_QUERY_TYPE_OCCLUSION;
     qpInfo.queryCount = 16;
-    m_backend->dispatch().vkCreateQueryPool(m_backend->device(), &qpInfo, nullptr, &m_queryPool);
+    if (m_backend->dispatch().vkCreateQueryPool(m_backend->device(), &qpInfo, nullptr, &m_queryPool) != VK_SUCCESS) {
+        m_queryPool = VK_NULL_HANDLE;
+        m_queryFailure = SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
 
     /* Create dummy vertex buffer initialized to (1.0, 1.0, 1.0, 1.0) for missing vertex attributes */
     m_backend->createBuffer(
@@ -2965,6 +2968,8 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
 Svga3VlknStatus VlknContext::beginQuery(SVGA3dQueryType type) {
     if (type >= SVGA3D_QUERYTYPE_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     if (m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (!m_queryPool) return m_queryFailure;
+    m_queryFailure = SVGA3_VLKN_SUCCESS;
 
     if (m_queryPool != VK_NULL_HANDLE) {
         endRenderPassIfActive();
@@ -2979,6 +2984,7 @@ Svga3VlknStatus VlknContext::beginQuery(SVGA3dQueryType type) {
 
 Svga3VlknStatus VlknContext::endQuery(SVGA3dQueryType type) {
     if (type >= SVGA3D_QUERYTYPE_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (!m_queryPool) return m_queryFailure;
     if (!m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
 
     if (m_queryPool != VK_NULL_HANDLE) {
@@ -2986,7 +2992,12 @@ Svga3VlknStatus VlknContext::endQuery(SVGA3dQueryType type) {
         VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
         m_backend->dispatch().vkCmdEndQuery(cb, m_queryPool, 0);
         Svga3VlknStatus fst = m_backend->flushCommandBuffer();
-        if (fst != SVGA3_VLKN_SUCCESS) return fst;
+        if (fst != SVGA3_VLKN_SUCCESS) {
+            m_queryActive = false;
+            m_queryEnded = false;
+            m_queryFailure = fst;
+            return fst;
+        }
     }
     m_queryActive = false;
     m_queryEnded = true;
@@ -2995,7 +3006,8 @@ Svga3VlknStatus VlknContext::endQuery(SVGA3dQueryType type) {
 
 Svga3VlknStatus VlknContext::waitForQuery(SVGA3dQueryType type, uint32_t *outResult) {
     if (type >= SVGA3D_QUERYTYPE_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    if (!m_queryEnded && !m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (m_queryFailure != SVGA3_VLKN_SUCCESS) return m_queryFailure;
+    if (!m_queryPool || !m_queryEnded || m_queryActive) return SVGA3_VLKN_ERROR_INVALID_PARAM;
 
     const Svga3VlknStatus completed = m_backend->waitIdle();
     if (completed != SVGA3_VLKN_SUCCESS) return completed;
@@ -3015,14 +3027,13 @@ Svga3VlknStatus VlknContext::waitForQuery(SVGA3dQueryType type, uint32_t *outRes
         } else {
             return SVGA3_VLKN_ERROR_DEVICE_LOST;
         }
-    } else {
-        m_lastQueryResult = (uint32_t)(m_vertexCount > 0 ? (m_drawCount * 1920) : 0);
     }
 
     if (outResult) {
         *outResult = m_lastQueryResult;
     }
     m_queryEnded = false;
+    m_queryActive = false;
     return SVGA3_VLKN_SUCCESS;
 }
 

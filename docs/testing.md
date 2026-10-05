@@ -41,6 +41,16 @@ Individual targets:
 
 **`test-qemu` does not boot an actual QEMU guest.** Passing it is not proof of working Linux, Windows, or QNX graphics. Test names and success banners inherited from development should not be read as completeness claims.
 
+## Query failure policy
+
+Queries require a successfully created Vulkan query pool. BEGIN, END and WAIT
+fail when the pool is unavailable; sample counts are never invented. WAIT requires
+an ended query. A failed END leaves the query inactive and failed until the next
+BEGIN resets the slot. END publishes PENDING, successful WAIT publishes SUCCEEDED,
+and failed END/WAIT publishes FAILED when a guest result pointer is provided.
+Invalid guest result pointers return an error. `test_query_state`, included in
+`make test`, covers this policy and mock Vulkan readiness/stride handling.
+
 ## Continuous integration
 
 Every push and pull request runs the oracle/mock, preload FIFO/fence, DX,

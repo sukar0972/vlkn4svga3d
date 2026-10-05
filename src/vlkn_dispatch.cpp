@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cstring>
 #include <stdio.h>
 #include <unistd.h>
 #include <vector>
@@ -880,25 +881,29 @@ static void VKAPI_CALL mock_vkCmdResetQueryPool(VkCommandBuffer commandBuffer, V
 }
 
 static VkResult VKAPI_CALL mock_vkGetQueryPoolResults(VkDevice device, VkQueryPool queryPool, uint32_t firstQuery, uint32_t queryCount, size_t dataSize, void* pData, VkDeviceSize stride, VkQueryResultFlags flags) {
-    (void)device; (void)stride;
+    (void)device;
     MockQueryPool_T *qp = (MockQueryPool_T*)(uintptr_t)queryPool;
-    if (!qp || !pData) return VK_ERROR_INITIALIZATION_FAILED;
-    bool is64 = (flags & VK_QUERY_RESULT_64_BIT) != 0;
-
-    for (uint32_t i = 0; i < queryCount && (firstQuery + i) < qp->count; ++i) {
+    if (!qp || !pData || firstQuery > qp->count || queryCount > qp->count - firstQuery)
+        return VK_ERROR_INITIALIZATION_FAILED;
+    size_t valueSize = flags & VK_QUERY_RESULT_64_BIT ? 8 : 4;
+    bool availability = flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT;
+    size_t slotSize = valueSize * (availability ? 2 : 1);
+    if (queryCount && (dataSize < slotSize ||
+        (queryCount > 1 && (stride < slotSize || stride > (dataSize - slotSize) / (queryCount - 1)))))
+        return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult result = VK_SUCCESS;
+    auto storeValue = [&](uint8_t *dst, uint64_t value) {
+        if (valueSize == 8) std::memcpy(dst, &value, 8);
+        else { uint32_t small = uint32_t(value); std::memcpy(dst, &small, 4); }
+    };
+    for (uint32_t i = 0; i < queryCount; ++i) {
         uint32_t idx = firstQuery + i;
-        uint64_t val = qp->results[idx];
-        if (is64) {
-            if (dataSize >= sizeof(uint64_t) * (i + 1)) {
-                reinterpret_cast<uint64_t*>(pData)[i] = val;
-            }
-        } else {
-            if (dataSize >= sizeof(uint32_t) * (i + 1)) {
-                reinterpret_cast<uint32_t*>(pData)[i] = (uint32_t)val;
-            }
-        }
+        auto *slot = static_cast<uint8_t *>(pData) + i * stride;
+        if (qp->ready[idx] || (flags & VK_QUERY_RESULT_PARTIAL_BIT)) storeValue(slot, qp->results[idx]);
+        else result = VK_NOT_READY; // WAIT cannot fabricate readiness in this synchronous mock.
+        if (availability) storeValue(slot + valueSize, qp->ready[idx] ? 1 : 0);
     }
-    return VK_SUCCESS;
+    return result;
 }
 
 static VkResult VKAPI_CALL mock_vkQueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* pSubmits, VkFence fence) {

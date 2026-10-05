@@ -393,6 +393,7 @@ private:
     VkQueryPool m_queryPool;
     bool m_queryActive;
     bool m_queryEnded;
+    Svga3VlknStatus m_queryFailure = SVGA3_VLKN_SUCCESS;
     uint32_t m_lastQueryResult;
 
     /* Execution stats */

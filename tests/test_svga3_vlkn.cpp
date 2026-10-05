@@ -867,12 +867,14 @@ static void TestFifoExecution(Svga3VlknDevice *dev) {
     bq.cid = 200; bq.type = SVGA3D_QUERYTYPE_OCCLUSION;
     appendCmd(SVGA_3D_CMD_BEGIN_QUERY, &bq, sizeof(bq));
 
-    SVGA3dCmdEndQuery eq;
+    SVGA3dCmdEndQuery eq{};
     eq.cid = 200; eq.type = SVGA3D_QUERYTYPE_OCCLUSION;
+    eq.guestResult.gmrId = SVGA_GMR_NULL;
     appendCmd(SVGA_3D_CMD_END_QUERY, &eq, sizeof(eq));
 
-    SVGA3dCmdWaitForQuery wq;
+    SVGA3dCmdWaitForQuery wq{};
     wq.cid = 200; wq.type = SVGA3D_QUERYTYPE_OCCLUSION;
+    wq.guestResult.gmrId = SVGA_GMR_NULL;
     wq.guestResult.offset = 0;
     appendCmd(SVGA_3D_CMD_WAIT_FOR_QUERY, &wq, sizeof(wq));
 
