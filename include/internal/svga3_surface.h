@@ -57,9 +57,20 @@ public:
     VkImage image() const { return m_image; }
     VkImageView imageView() const { return m_imageView; }
     VkImageView getRenderTargetView(uint32_t mip, uint32_t face);
-    VkImageLayout currentLayout() const { return m_currentLayout; }
+    VkImageLayout currentLayout() const {
+        if (m_subresourceLayouts.empty()) return m_currentLayout;
+        for (auto layout:m_subresourceLayouts) if (layout!=m_subresourceLayouts[0]) return VK_IMAGE_LAYOUT_UNDEFINED;
+        return m_subresourceLayouts[0];
+    }
+    VkImageLayout subresourceLayout(uint32_t mip, uint32_t face) const {
+        return m_subresourceLayouts.empty() ? m_currentLayout : m_subresourceLayouts[face*m_mipLevels+mip];
+    }
+    void setSubresourceLayout(uint32_t mip, uint32_t face, VkImageLayout layout) {
+        if (m_subresourceLayouts.empty()) m_subresourceLayouts.resize(m_mipLevels*m_arrayLayers,m_currentLayout);
+        m_subresourceLayouts[face*m_mipLevels+mip]=layout;
+    }
     void transitionLayout(VkCommandBuffer cb, VkImageLayout layout);
-    void setLayout(VkImageLayout layout) { m_currentLayout = layout; }
+    void setLayout(VkImageLayout layout) { m_currentLayout = layout; m_subresourceLayouts.clear(); }
 
     VkBuffer buffer() const { return m_buffer; }
     VkDeviceMemory bufferMemory() const { return m_bufferMemory; }
@@ -164,6 +175,7 @@ private:
     std::vector<VkImageView> m_previousSampledViews;
     uint32_t m_viewMipLevels;
     VkImageLayout m_currentLayout;
+    std::vector<VkImageLayout> m_subresourceLayouts;
 
     VkBuffer m_buffer;
     VkDeviceMemory m_bufferMemory;
