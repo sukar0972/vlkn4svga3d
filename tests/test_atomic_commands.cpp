@@ -205,13 +205,16 @@ int main() {
     CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_AUTOGENMIPMAPS,&signedCap) && signedCap==0);
     auto savedClear = dispatch.vkCmdClearAttachments;
     dispatch.vkCmdClearAttachments = captureClear;
-    for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24S8}) {
+    for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24X8,SVGA3D_Z_D24S8}) {
         CHECK(dev->surfaceMgr->defineSurface(6,SVGA3D_SURFACE_HINT_DEPTHSTENCIL,format,&imageSize,1) == SVGA3_VLKN_SUCCESS);
         CHECK(ctx->setRenderTarget(SVGA3D_RT_DEPTH,6,0,0) == SVGA3_VLKN_SUCCESS);
         clearAspect = 0;
         CHECK(ctx->clear(static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_DEPTH|SVGA3D_CLEAR_STENCIL),0,1,3,nullptr,0) == SVGA3_VLKN_SUCCESS);
-        CHECK(clearAspect == (format == SVGA3D_Z_D16 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT));
+        CHECK(clearAspect == (format != SVGA3D_Z_D24S8 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT));
     }
+    CHECK(dev->surfaceMgr->defineSurface(699,0,SVGA3D_Z_D15S1,&imageSize,1)==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT);
+    CHECK(dev->surfaceMgr->defineSurface(699,0,SVGA3D_Z_DF24,&imageSize,1)==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT);
+    CHECK(!svga3_vlkn::svga3_format_has_stencil(SVGA3D_Z_D15S1));
     dev->contextMgr->endAllRenderPasses();
     SVGA3dSize cubeMips[12];
     for (unsigned i=0;i<12;++i) cubeMips[i]={i%2 ? 2u : 4u,i%2 ? 2u : 4u,1};

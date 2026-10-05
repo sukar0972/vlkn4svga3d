@@ -91,6 +91,12 @@ static void flushLegacy(void *) { ++legacyFlushes; }
 static void screenWrite(void *, uint64_t, uint64_t, unsigned) {}
 
 int main() {
+  bool depthCaps=false,df24Disabled=false;
+  for (size_t i=0;i<devCapsCount;++i) {
+    if (g_DevCaps[i].id==SVGA3D_DEVCAP_SURFACEFMT_Z_D16) depthCaps=advertised_devcap(g_DevCaps[i])!=0;
+    if (g_DevCaps[i].id==SVGA3D_DEVCAP_SURFACEFMT_Z_DF24) df24Disabled=advertised_devcap(g_DevCaps[i])==0;
+  }
+  if (!depthCaps || !df24Disabled) return 1;
   std::vector<uint64_t> storage(0x20000 / 8);
   auto *state = reinterpret_cast<char *>(storage.data());
   std::vector<uint32_t> ring(32768);

@@ -102,7 +102,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_MAX_CONTEXT_IDS, 64, true },
     { SVGA3D_DEVCAP_MAX_SURFACE_IDS, svga3_vlkn::SVGA3_MAX_SURFACES, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Z_DF16, 0x10, true },
-    { SVGA3D_DEVCAP_SURFACEFMT_Z_DF24, 0x10, true },
+    { SVGA3D_DEVCAP_SURFACEFMT_Z_DF24, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT, 0x10, true },
     { SVGA3D_DEVCAP_SURFACEFMT_BC4_UNORM, 0, false },
     { SVGA3D_DEVCAP_SURFACEFMT_BC5_UNORM, 0, false }
@@ -261,11 +261,12 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
     case SVGA3D_DEVCAP_SURFACEFMT_DXT5:
                 val = SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE;
                 break;
+            case SVGA3D_DEVCAP_SURFACEFMT_Z_DF24:
+                val=0; break;
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D16:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_DF16:
-            case SVGA3D_DEVCAP_SURFACEFMT_Z_DF24:
             case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT:
                 val = SVGA3DFORMAT_OP_ZSTENCIL
                     | SVGA3DFORMAT_OP_ZSTENCIL_WITH_ARBITRARY_COLOR_DEPTH

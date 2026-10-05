@@ -98,7 +98,6 @@ size_t svga3_format_bytes_per_pixel(SVGA3dSurfaceFormat format) {
 bool svga3_format_has_stencil(SVGA3dSurfaceFormat format) {
     switch (format) {
         case SVGA3D_Z_D24S8:
-        case SVGA3D_Z_D15S1:
         case SVGA3D_Z_D24S8_INT:
             return true;
         default:
