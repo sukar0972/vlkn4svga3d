@@ -78,6 +78,8 @@ struct PipelineKey {
     uint32_t topology;
     uint32_t pretransformed;
     uint32_t fillMode;
+    uint32_t depthClamp;
+    uint32_t lineWidthBits;
     uint32_t cullMode;
     uint32_t depthTestEnable;
     uint32_t depthWriteEnable;

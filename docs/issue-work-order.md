@@ -89,8 +89,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#103](https://github.com/sukar0972/vlkn4svga3d/issues/103) — Medium-High: Anisotropic filter maps to NEAREST
 - [ ] [#102](https://github.com/sukar0972/vlkn4svga3d/issues/102) — Medium-High: sRGB sampled/written without gamma
 - [x] [#143](https://github.com/sukar0972/vlkn4svga3d/issues/143) — Medium: MRT blend attachments diverge without independentBlend gate
-- [ ] [#144](https://github.com/sukar0972/vlkn4svga3d/issues/144) — Medium: SVGA3D_RS_CLIPPING ignored (depthClampEnable never set)
-- [ ] [#145](https://github.com/sukar0972/vlkn4svga3d/issues/145) — Medium: SVGA3D_RS_LINEWIDTH ignored (always 1.0)
+- [x] [#144](https://github.com/sukar0972/vlkn4svga3d/issues/144) — Medium: SVGA3D_RS_CLIPPING ignored (depthClampEnable never set)
+- [x] [#145](https://github.com/sukar0972/vlkn4svga3d/issues/145) — Medium: SVGA3D_RS_LINEWIDTH ignored (always 1.0)
 - [x] [#146](https://github.com/sukar0972/vlkn4svga3d/issues/146) — Medium: SVGA3D_TS_TEXTURE_MIPMAP_LEVEL silently dropped
 - [ ] [#156](https://github.com/sukar0972/vlkn4svga3d/issues/156) — Medium: FF texture transforms stored but never applied
 - [ ] [#99](https://github.com/sukar0972/vlkn4svga3d/issues/99) — Low/Medium: Fixed-function lights/clip planes stored, never applied

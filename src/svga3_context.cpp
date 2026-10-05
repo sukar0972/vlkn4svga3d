@@ -750,6 +750,7 @@ void VlknContext::initDefaultRenderStates() {
     m_renderStates[SVGA3D_RS_CCWSTENCILPASS] = SVGA3D_STENCILOP_KEEP;
     m_renderStates[SVGA3D_RS_TEXTUREFACTOR] = 0xFFFFFFFF;
     m_renderStates[SVGA3D_RS_CLIPPING] = 1;
+    m_renderStates[SVGA3D_RS_LINEWIDTH] = 0x3f800000;
     m_renderStates[SVGA3D_RS_LIGHTINGENABLE] = 1;
     m_renderStates[SVGA3D_RS_AMBIENT] = 0;
     m_renderStates[SVGA3D_RS_COLORWRITEENABLE] = 0xF; /* RGBA */
@@ -783,6 +784,15 @@ Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_
     if (state == SVGA3D_RS_FILLMODE && !m_backend->features().fillModeNonSolid) {
         SVGA3dFillMode fill{}; fill.uintValue = value;
         if (fill.s.mode != SVGA3D_FILLMODE_FILL) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+    if (state == SVGA3D_RS_CLIPPING && !value && !m_backend->features().depthClamp)
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (state == SVGA3D_RS_LINEWIDTH) {
+        float width; memcpy(&width,&value,sizeof(width));
+        if (!std::isfinite(width) || width <= 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        auto &limits=m_backend->properties().limits;
+        width=m_backend->features().wideLines ? std::clamp(width,limits.lineWidthRange[0],limits.lineWidthRange[1]) : 1.0f;
+        memcpy(&value,&width,sizeof(value));
     }
     m_renderStates[(uint32_t)state] = value;
     return SVGA3_VLKN_SUCCESS;
@@ -1860,6 +1870,8 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
 
     bool hasDepthAttachment = (m_depthStencilTarget.sid != SVGA3D_INVALID_ID && m_depthStencilTarget.sid != 0);
     key.cullMode = m_renderStates[SVGA3D_RS_CULLMODE];
+    key.depthClamp = !m_renderStates[SVGA3D_RS_CLIPPING] && m_backend->features().depthClamp;
+    key.lineWidthBits = m_renderStates[SVGA3D_RS_LINEWIDTH];
     key.depthTestEnable = hasDepthAttachment ? m_renderStates[SVGA3D_RS_ZENABLE] : 0;
     key.depthWriteEnable = hasDepthAttachment ? m_renderStates[SVGA3D_RS_ZWRITEENABLE] : 0;
     key.depthFunc = m_renderStates[SVGA3D_RS_ZFUNC];
@@ -2217,7 +2229,8 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             rastInfo.cullMode = VK_CULL_MODE_NONE;
             break;
     }
-    rastInfo.lineWidth = 1.0f;
+    memcpy(&rastInfo.lineWidth,&key.lineWidthBits,sizeof(float));
+    rastInfo.depthClampEnable = key.depthClamp;
     pipeInfo.pRasterizationState = &rastInfo;
 
     /* Multisample */
