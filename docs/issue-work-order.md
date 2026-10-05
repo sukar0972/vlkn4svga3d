@@ -48,7 +48,7 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#98](https://github.com/sukar0972/vlkn4svga3d/issues/98) — Medium: Unknown SVGA format silent B8G8R8A8 fallback
 - [x] [#93](https://github.com/sukar0972/vlkn4svga3d/issues/93) — High: YUV (etc.) advertised, mapped to BGRA + wrong bpp
 - [x] [#92](https://github.com/sukar0972/vlkn4svga3d/issues/92) — High: MSAA/A2C/supersample caps advertised, pipelines always 1×
-- [ ] [#153](https://github.com/sukar0972/vlkn4svga3d/issues/153) — Medium: Depth-stencil format honesty (has_stencil vs Vk vs aspect)
+- [x] [#153](https://github.com/sukar0972/vlkn4svga3d/issues/153) — Medium: Depth-stencil format honesty (has_stencil vs Vk vs aspect)
 - [x] [#152](https://github.com/sukar0972/vlkn4svga3d/issues/152) — Medium: clear() applies STENCIL aspect without format check
 - [x] [#121](https://github.com/sukar0972/vlkn4svga3d/issues/121) — Medium: Signed bump/normal formats mapped as UNORM (advertised)
 - [x] [#120](https://github.com/sukar0972/vlkn4svga3d/issues/120) — Medium-High: GENERATE_MIPMAPS blits without format blit support (AUTOGEN advertised)

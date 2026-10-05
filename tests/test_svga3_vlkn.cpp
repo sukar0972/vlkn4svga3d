@@ -156,7 +156,7 @@ static void TestDeviceLifecycleAndCaps() {
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
             const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
-            const bool disabled = dc.id == SVGA3D_DEVCAP_MAX_LIGHTS || dc.id == SVGA3D_DEVCAP_MAX_CLIP_PLANES || dc.id == SVGA3D_DEVCAP_AUTOGENMIPMAPS || dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_CxV8U8 || dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
+            const bool disabled = dc.id == SVGA3D_DEVCAP_SURFACEFMT_Z_DF24 || dc.id == SVGA3D_DEVCAP_MAX_LIGHTS || dc.id == SVGA3D_DEVCAP_MAX_CLIP_PLANES || dc.id == SVGA3D_DEVCAP_AUTOGENMIPMAPS || dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_CxV8U8 || dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
                 dc.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES || dc.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING ||
                 dc.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES || dc.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE ||
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||

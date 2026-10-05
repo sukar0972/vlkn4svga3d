@@ -341,8 +341,8 @@ int main() {
             {SVGA3D_BUMPU8V8, 0x7f80, 2, {0,255,0,255}},
             {SVGA3D_Q8W8V8U8, 0x7f807f80, 4, {0,255,0,255}},
             {SVGA3D_V16U16, 0x7fff8000, 4, {0,255,0,255}},
-            {SVGA3D_Z_DF24, 0xFFFFFF00, 4, {255, 255, 255, 255}},
-            {SVGA3D_Z_DF24, 0x80000000, 4, {128, 128, 128, 255}}
+            {SVGA3D_Z_D24X8, 0xFFFFFF00, 4, {255, 255, 255, 255}},
+            {SVGA3D_Z_D24X8, 0x80000000, 4, {128, 128, 128, 255}}
         };
         const float whiteTint[4] = {1, 1, 1, 1};
         memcpy(tintVal, whiteTint, sizeof(tintVal));
@@ -362,7 +362,7 @@ int main() {
             TEST_CHECK(svga3_vlkn_surface_dma_upload(dev, 91, 0, nullptr, data.data(), probe.bytes * 2)
                 == SVGA3_VLKN_SUCCESS, "Upload packed/component texture");
             svga3_vlkn_context_set_texture(dev, CID, 0, 91);
-            svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,probe.format==SVGA3D_Z_DF24 ? 102 : 1);
+            svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,probe.format==SVGA3D_Z_D24X8 ? 102 : 1);
             TEST_CHECK(svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1)
                 == SVGA3_VLKN_SUCCESS, "Sample packed/component texture");
             TEST_CHECK(svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W * 4)
@@ -379,7 +379,7 @@ int main() {
         svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_PS,1);
         // Depth clears used to generate shadow mipmaps must sample in every component.
         svga3_vlkn_surface_define(dev, 91, SVGA3D_SURFACE_HINT_DEPTHSTENCIL | SVGA3D_SURFACE_HINT_TEXTURE,
-            SVGA3D_Z_DF24, &texSize, 1);
+            SVGA3D_Z_D24X8, &texSize, 1);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_COLOR0, SVGA3D_INVALID_ID, 0, 0);
         svga3_vlkn_context_set_render_target(dev, CID, SVGA3D_RT_DEPTH, 91, 0, 0);
         svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_DEPTH, 0, 0.1f, 0, nullptr, 0);
@@ -388,7 +388,7 @@ int main() {
         svga3_vlkn_context_set_texture(dev, CID, 0, 91);
         svga3_vlkn_context_draw(dev, CID, SVGA3D_PRIMITIVE_TRIANGLELIST, decls, 2, &range, 1);
         svga3_vlkn_surface_dma_download(dev, 90, 0, nullptr, fb.data(), RT_W*4);
-        TEST_CHECK(pixelMatches(fb[32*RT_W+32],26,26,26,255), "Cleared DF24 depth samples in RGB components");
+        TEST_CHECK(pixelMatches(fb[32*RT_W+32],26,26,26,255), "Cleared D24X8 depth samples in RGB components");
         svga3_vlkn_context_set_texture(dev, CID, 0, SID_TEX);
         svga3_vlkn_surface_destroy(dev,91);
         /* Shader samplers 8..15 are independent of the eight interpolators. */
@@ -888,11 +888,12 @@ int main() {
             "Depth-stencil blit uses a legal nearest filter");
         svga3_vlkn_surface_dma_download(dev, 98, 0, nullptr, packedReadback, 8);
         TEST_CHECK(memcmp(packedReadback,packedDepth,sizeof(packedDepth)) == 0, "Surface blit retains depth and stencil bits");
-        svga3_vlkn_surface_define(dev, 99, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_DF24, &packedSize, 1);
-        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_SUCCESS, "Copy packed depth into DF24");
+        svga3_vlkn_surface_define(dev, 99, SVGA3D_SURFACE_HINT_DEPTHSTENCIL, SVGA3D_Z_D24X8, &packedSize, 1);
+        TEST_CHECK(dev->surfaceMgr->copy(97,99,&packedCopy,1) == SVGA3_VLKN_ERROR_INVALID_PARAM,"Reject copy between different native depth formats");
+        TEST_CHECK(svga3_vlkn_surface_dma_upload(dev,99,0,nullptr,packedDepth,8)==SVGA3_VLKN_SUCCESS,"Upload packed D24X8 depth without stencil");
         svga3_vlkn_surface_dma_download(dev, 99, 0, nullptr, packedReadback, 8);
         for (uint32_t i = 0; i < 4; ++i)
-            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "DF24 copy preserves the 24-bit depth value");
+            TEST_CHECK(packedReadback[i] == (packedDepth[i] & 0xFFFFFF00u), "D24X8 copy preserves the 24-bit depth value");
         svga3_vlkn_surface_destroy(dev,99);
         for (uint32_t sid : {97u,98u}) svga3_vlkn_surface_destroy(dev,sid);
 
