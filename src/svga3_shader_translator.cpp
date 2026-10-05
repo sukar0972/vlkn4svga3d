@@ -133,7 +133,7 @@ struct ShaderDefConstI {
 };
 
 static bool parseDest(uint32_t token, ParsedDest &dst) {
-    if ((token & 0x80000000) == 0) return false;
+    if ((token & 0x80000000) == 0 || (token & (1u << 13))) return false;
     dst.regNum = token & 0x7FF;
     dst.regType = ((token >> 28) & 0x7) | ((token >> 8) & 0x18);
     dst.writeMask = (token >> 16) & 0x0F;
@@ -215,7 +215,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t magic = versionToken >> 16;
     uint32_t major = (versionToken >> 8) & 0xFF;
     uint32_t minor = versionToken & 0xFF;
-    (void)major; (void)minor;
+    (void)minor;
+    if (major < 2 || major > 3) {
+        outError = "Only shader models 2 and 3 are supported";
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
+    }
 
     bool isVS = (shaderType == SVGA3D_SHADERTYPE_VS);
     if (isVS) {
@@ -271,6 +275,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             continue;
         }
 
+        if ((instToken & (1u << 28)) && op != D3DSIO_MOV) {
+            outError = "Predication is supported only for MOV";
+            return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
+        }
         uint32_t instLen = (instToken >> 24) & 0x0F;
         if (op == D3DSIO_DEF) {
             if (pc + 5 >= numTokens) {
@@ -326,10 +334,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 requiredParams = 0; break;
             case D3DSIO_TEXKILL: case D3DSIO_IF: requiredParams = 1; break;
             case D3DSIO_MOV: case D3DSIO_RCP: case D3DSIO_RSQ: case D3DSIO_ABS:
-            case D3DSIO_FRC: case D3DSIO_EXP: case D3DSIO_SINCOS:
+            case D3DSIO_FRC: case D3DSIO_EXP:
             case D3DSIO_LOOP: case D3DSIO_IFC:
             case D3DSIO_DCL:
                 requiredParams = 2; break;
+            case D3DSIO_SINCOS: requiredParams = major == 2 ? 4 : 2; break;
             case D3DSIO_ADD: case D3DSIO_SUB: case D3DSIO_MUL: case D3DSIO_DP3:
             case D3DSIO_DP4: case D3DSIO_MIN: case D3DSIO_MAX: case D3DSIO_M4x4:
             case D3DSIO_SLT: case D3DSIO_SGE: case D3DSIO_SETP:
@@ -369,7 +378,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     }
                     continue;
                 }
-                if (i > 1 && (tokens[pc + i] & (1u << 13))) {
+                if (tokens[pc + i] & (1u << 13)) {
                     outError = "Relative register addressing is not supported";
                     return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
                 }
@@ -985,9 +994,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t labelEntry = b.allocId();
     b.emitInst(b.functionDefinitions, SpvOpLabel, { labelEntry });
 
-    /* Temporary Register Allocation: r0..r15 as Function local vec4 pointers */
-    uint32_t rVars[16];
-    for (int i = 0; i < 16; ++i) {
+    /* Temporary Register Allocation: r0..r31 as Function local vec4 pointers */
+    uint32_t rVars[32];
+    for (int i = 0; i < 32; ++i) {
         rVars[i] = b.allocId();
         b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, rVars[i], SpvStorageClassFunction, const0_v4 });
     }
@@ -1091,8 +1100,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         uint32_t baseVal = 0;
 
         if (src.regType == D3DSPR_TEMP) {
-            if (src.regNum >= 16) {
-                outError = "Temporary register index out of range (r0-r15 supported)";
+            if (src.regNum >= 32) {
+                outError = "Temporary register index out of range (r0-r31 supported)";
                 transError = true;
                 transErrorCode = SVGA3_VLKN_ERROR_INVALID_PARAM;
                 return const0_v4;
@@ -1328,8 +1337,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                                    explicitVsOutputRegs.find(dst.regNum) == explicitVsOutputRegs.end());
         uint32_t effectiveRegType = (isDclOutput || isImplicitVsOutput) ? 6 : dst.regType;
         if (effectiveRegType == D3DSPR_TEMP) {
-            if (dst.regNum >= 16) {
-                outError = "Temporary register index out of range (r0-r15 supported)";
+            if (dst.regNum >= 32) {
+                outError = "Temporary register index out of range (r0-r31 supported)";
                 transError = true;
                 transErrorCode = SVGA3_VLKN_ERROR_INVALID_PARAM;
                 return;
@@ -1528,10 +1537,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             case D3DSIO_RSQ:
             case D3DSIO_ABS:
             case D3DSIO_EXP:
-            case D3DSIO_SINCOS:
             case D3DSIO_LOOP:
             case D3DSIO_IFC:
             case D3DSIO_FRC: naturalCount = 2; break;
+            case D3DSIO_SINCOS: naturalCount = major == 2 ? 4 : 2; break;
             case D3DSIO_ADD:
             case D3DSIO_SUB:
             case D3DSIO_MUL:
@@ -2024,8 +2033,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t x0 = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeFloat, x0, v0, 0 });
+                uint32_t absolute = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeFloat, absolute, glslSetId, GLSLstd450FAbs, x0});
                 uint32_t rsq = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeFloat, rsq, glslSetId, GLSLstd450InverseSqrt, x0 });
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeFloat, rsq, glslSetId, GLSLstd450InverseSqrt, absolute });
                 uint32_t res = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct, { typeV4Float, res, rsq, rsq, rsq, rsq });
                 emitStoreDest(dst, res);
@@ -2132,8 +2143,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 uint32_t x1 = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeFloat, x0, v0, 0 });
                 b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeFloat, x1, v1, 0 });
+                uint32_t absolute = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeFloat, absolute, glslSetId, GLSLstd450FAbs, x0});
                 uint32_t pw = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeFloat, pw, glslSetId, GLSLstd450Pow, x0, x1 });
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeFloat, pw, glslSetId, GLSLstd450Pow, absolute, x1 });
                 uint32_t res = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct, { typeV4Float, res, pw, pw, pw, pw });
                 emitStoreDest(dst, res);

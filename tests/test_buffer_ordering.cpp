@@ -35,6 +35,20 @@ static bool robust_index_regression() {
   ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
   ok &= pixels[5] == 0xffffffff;
+  // D3D9 RSQ/POW take abs(base), including negative bases with fractional powers.
+  for (uint32_t op : {7u,32u}) {
+    std::vector<uint32_t> shader{0xffff0300,op | ((op==7?2u:3u)<<24),DST(0,31),SRC(2,0)};
+    if (op==32) shader.push_back(SRC(2,1));
+    shader.insert(shader.end(),{1u|(2u<<24),DST(8,0),SRC(0,31),0xffffu});
+    ok &= svga3_vlkn_context_define_shader(d,1,7,SVGA3D_SHADERTYPE_PS,shader.data(),shader.size()) == SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,7) == SVGA3_VLKN_SUCCESS;
+    float base[4]{op==7?-4.0f:-0.25f,0,0,0}, power[4]{0.5f,0,0,0};
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<uint32_t*>(base)) == SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,1,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<uint32_t*>(power)) == SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
+    ok &= pixels[5] == 0x80808080;
+  }
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();

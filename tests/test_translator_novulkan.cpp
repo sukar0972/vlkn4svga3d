@@ -364,6 +364,45 @@ static int module_builtin_count(const std::vector<uint32_t>& spirv, uint32_t bui
 int main() {
     std::cout << "ICD-free D3D9->SPIR-V translator tests (issue #9)..." << std::endl;
 
+    // Shader model and operand contracts fail before emitting SPIR-V.
+    for (uint32_t version : {0xffff0101u,0xffff0104u,0xfffe0101u,0xffff0400u}) {
+        const uint32_t shader[]{version,0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_translate_shader_d3d9(version >> 16 == 0xfffe ? SVGA3D_SHADERTYPE_VS : SVGA3D_SHADERTYPE_PS,
+            shader,2,spirv,error) == SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER, "Reject unsupported shader model");
+    }
+    for (uint32_t predicatedOp : {2u,3u,5u,4u,7u,32u}) {
+        unsigned natural = predicatedOp == 4 ? 4 : predicatedOp == 7 ? 2 : 3;
+        std::vector<uint32_t> shader{0xffff0300, predicatedOp | ((natural+1)<<24) | (1u<<28),
+            D3D9_DST(0,0,15),D3D9_SRC(19,0,0)};
+        for (unsigned i=1;i<natural;++i) shader.push_back(D3D9_SRC(2,0,0xe4));
+        shader.push_back(0xffff);
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,shader.data(),shader.size(),spirv,error) == SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER,
+            "Reject unsupported ALU predication");
+    }
+    {
+        const uint32_t shader[]{0xffff0300,1|(2<<24),D3D9_DST(0,0,15)|(1u<<13),D3D9_SRC(2,0,0xe4),0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,shader,5,spirv,error) != SVGA3_VLKN_SUCCESS,
+            "Reject relative destinations");
+    }
+    for (uint32_t index : {16u,31u,32u}) {
+        const uint32_t shader[]{0xffff0300,1|(2<<24),D3D9_DST(0,index,15),D3D9_SRC(2,0,0xe4),
+            1|(2<<24),D3D9_DST(8,0,15),D3D9_SRC(0,index,0xe4),0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        auto status = svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,shader,8,spirv,error);
+        TEST_CHECK((status == SVGA3_VLKN_SUCCESS) == (index < 32), "Temporary register range matches 32-register cap");
+        if (index<32) TEST_CHECK_SPIRV(spirv,"temps32","Upper temporary registers pass spirv-val");
+    }
+    {
+        const uint32_t shader[]{0xffff0200,37|(4<<24),D3D9_DST(8,0,3),D3D9_SRC(2,0,0),D3D9_SRC(2,1,0xe4),D3D9_SRC(2,2,0xe4),0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,shader,7,spirv,error) == SVGA3_VLKN_SUCCESS,
+            "SM2 SINCOS accepts its three source operands");
+        TEST_CHECK_SPIRV(spirv,"sincos2","SM2 SINCOS passes spirv-val");
+    }
+
     // Test 1: Mesa-style DCL-declared OUTPUT with TEMP-encoded MOV dst
     {
         const uint32_t vs[] = {
