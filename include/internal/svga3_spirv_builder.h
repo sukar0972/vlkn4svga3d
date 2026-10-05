@@ -63,6 +63,7 @@ enum SpvOp {
     SpvOpFSub = 131,
     SpvOpFMul = 133,
     SpvOpFDiv = 136,
+    SpvOpBitcast = 124,
     SpvOpConvertSToF = 109,
     SpvOpDot = 148,
     SpvOpSelect = 169,

@@ -318,7 +318,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 outError = "Malformed D3DSIO_DEFI dest parameter";
                 return SVGA3_VLKN_ERROR_INVALID_PARAM;
             }
-            if (dst.regType != D3DSPR_CONSTINT || dst.regNum >= 32 ||
+            if (dst.regType != D3DSPR_CONSTINT || dst.regNum >= 16 ||
                 (major >= 2 && instLen != 5)) {
                 outError = "Invalid D3DSIO_DEFI destination or operand count";
                 return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -600,6 +600,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     uint32_t typeV3Float = b.allocId();
     uint32_t typeV4Float = b.allocId();
     uint32_t typeInt = b.allocId();
+    uint32_t typeV4Int = b.allocId();
     uint32_t typeUInt = b.allocId();
 
     /* Common Constants */
@@ -880,6 +881,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     b.emitInst(b.typesConstantsGlobals, SpvOpTypeVector, { typeV3Float, typeFloat, 3 });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypeVector, { typeV4Float, typeFloat, 4 });
     b.emitInst(b.typesConstantsGlobals, SpvOpTypeInt, { typeInt, 32, 1 });
+    b.emitInst(b.typesConstantsGlobals, SpvOpTypeVector, {typeV4Int,typeInt,4});
     b.emitInst(b.typesConstantsGlobals, SpvOpTypeInt, { typeUInt, 32, 0 });
 
     /* Pointer Types */
@@ -934,7 +936,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
 
     /* UBO Type: vec4 c[256] */
     uint32_t const256_u = b.allocId();
-    b.emitInst(b.typesConstantsGlobals, SpvOpConstant, { typeUInt, const256_u, 256 });
+    b.emitInst(b.typesConstantsGlobals, SpvOpConstant, { typeUInt, const256_u, kShaderConstantVectors });
     uint32_t array256V4Float = b.allocId();
     b.emitInst(b.typesConstantsGlobals, SpvOpTypeArray, { array256V4Float, typeV4Float, const256_u });
     b.emitInst(b.annotations, SpvOpDecorate, { array256V4Float, SpvDecorationArrayStride, 16 });
@@ -1077,7 +1079,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         bool elseSeen = false;
         uint32_t ctrVar = 0;        /* loops: aL counter variable */
         uint32_t idxVar = 0;        /* loops: iteration index variable */
-        int32_t count = 0, start = 0, step = 0; /* loops: from DEFI */
+        uint32_t countId=0, startId=0, stepId=0;
     };
     std::vector<CtrlFrame> ctrlStack;
 
@@ -1107,6 +1109,24 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
     };
 
     /* Helper: load source register into vec4 value with swizzle and modifier */
+    auto emitIntegerConstant=[&](uint32_t reg,bool boolean=false) -> uint32_t {
+        if (reg>=16) { outError="Integer/bool constant index out of range"; transError=true; reg=0; }
+        if (!boolean) {
+            auto def=defIntConstants.find(reg);
+            if (def!=defIntConstants.end()) {
+                uint32_t result=b.allocId();
+                b.emitInst(b.typesConstantsGlobals,SpvOpConstantComposite,{typeV4Int,result,
+                    intConst(def->second.values[0]),intConst(def->second.values[1]),intConst(def->second.values[2]),intConst(def->second.values[3])});
+                return result;
+            }
+        }
+        uint32_t pointer=b.allocId(),value=b.allocId(),result=b.allocId();
+        b.emitInst(b.functionDefinitions,SpvOpAccessChain,{ptrUniformV4Float,pointer,uboBlockVar,intConsts[0],intConst((boolean?kShaderBoolOffset:kShaderIntOffset)+reg)});
+        b.emitInst(b.functionDefinitions,SpvOpLoad,{typeV4Float,value,pointer});
+        b.emitInst(b.functionDefinitions,SpvOpBitcast,{typeV4Int,result,value});
+        return result;
+    };
+
     auto emitLoadSrc = [&](const ParsedSrc &src) -> uint32_t {
         /* Only None / Negate / Abs / AbsNeg source modifiers are implemented. */
         if (src.srcMod != 0 && src.srcMod != 1 && src.srcMod != 11 && src.srcMod != 12) {
@@ -1271,31 +1291,17 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             uint32_t idxVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpLoad, { typeInt, idxVal, loopFrame->idxVar });
             uint32_t remVal = b.allocId();
-            b.emitInst(b.functionDefinitions, SpvOpISub, { typeInt, remVal, intConst(loopFrame->count), idxVal });
+            b.emitInst(b.functionDefinitions, SpvOpISub, { typeInt, remVal, loopFrame->countId, idxVal });
             uint32_t ctrF = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpConvertSToF, { typeFloat, ctrF, ctrVal });
             uint32_t remF = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpConvertSToF, { typeFloat, remF, remVal });
             baseVal = b.allocId();
             b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct, { typeV4Float, baseVal, ctrF, remF, const0_f, const0_f });
-        } else if (src.regType == D3DSPR_CONSTINT) {
-            /* Integer constant read as float (DEFI-defined values). */
-            auto it = defIntConstants.find(src.regNum);
-            if (it == defIntConstants.end()) {
-                outError = "Read of undefined integer constant register";
-                transError = true;
-                transErrorCode = SVGA3_VLKN_ERROR_INVALID_PARAM;
-                return const0_v4;
-            }
-            uint32_t cf[4];
-            for (int c = 0; c < 4; ++c) {
-                cf[c] = b.allocId();
-                union { float f; uint32_t u; } cv;
-                cv.f = (float)it->second.values[c];
-                b.emitInst(b.typesConstantsGlobals, SpvOpConstant, { typeFloat, cf[c], cv.u });
-            }
-            baseVal = b.allocId();
-            b.emitInst(b.typesConstantsGlobals, SpvOpConstantComposite, { typeV4Float, baseVal, cf[0], cf[1], cf[2], cf[3] });
+        } else if (src.regType==D3DSPR_CONSTINT || src.regType==D3DSPR_CONSTBOOL) {
+            uint32_t integer=emitIntegerConstant(src.regNum,src.regType==D3DSPR_CONSTBOOL);
+            baseVal=b.allocId();
+            b.emitInst(b.functionDefinitions,SpvOpConvertSToF,{typeV4Float,baseVal,integer});
         } else {
             /* ADDR-as-source is handled by the TEXTURE branch above; anything
              * reaching here (bool constants, sampler-as-source, output
@@ -1690,11 +1696,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     outError = "LOOP operand is not an integer-constant register";
                     return SVGA3_VLKN_ERROR_INVALID_PARAM;
                 }
-                auto defiIt = defIntConstants.find(iSrc.regNum);
-                if (defiIt == defIntConstants.end()) {
-                    outError = "LOOP references an undefined integer constant";
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
-                }
+                if (iSrc.regNum>=16) { outError="LOOP integer constant index out of range"; return SVGA3_VLKN_ERROR_INVALID_PARAM; }
                 uint32_t depth = 0;
                 for (const auto &f : ctrlStack) {
                     if (f.isLoop) ++depth;
@@ -1705,20 +1707,22 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 }
                 CtrlFrame fr;
                 fr.isLoop = true;
-                fr.count = defiIt->second.values[0];
-                fr.start = defiIt->second.values[1];
-                fr.step = defiIt->second.values[2];
-                if (fr.count > 0 && fr.step == 0) {
-                    outError = "LOOP with a zero step and nonzero count never terminates";
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                auto defiIt=defIntConstants.find(iSrc.regNum);
+                if (defiIt!=defIntConstants.end() && defiIt->second.values[0]>0 && defiIt->second.values[2]==0) {
+                    outError="LOOP has zero step"; return SVGA3_VLKN_ERROR_INVALID_PARAM;
                 }
+                uint32_t parameters=emitIntegerConstant(iSrc.regNum);
+                fr.countId=b.allocId(); fr.startId=b.allocId(); fr.stepId=b.allocId();
+                b.emitInst(b.functionDefinitions,SpvOpCompositeExtract,{typeInt,fr.countId,parameters,0});
+                b.emitInst(b.functionDefinitions,SpvOpCompositeExtract,{typeInt,fr.startId,parameters,1});
+                b.emitInst(b.functionDefinitions,SpvOpCompositeExtract,{typeInt,fr.stepId,parameters,2});
                 fr.ctrVar = loopCtrVars[depth];
                 fr.idxVar = loopIdxVars[depth];
                 fr.headerLabel = b.allocId();
                 fr.mergeLabel = b.allocId();
                 fr.continueLabel = b.allocId();
                 uint32_t bodyLabel = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpStore, { fr.ctrVar, intConst(fr.start) });
+                b.emitInst(b.functionDefinitions, SpvOpStore, { fr.ctrVar, fr.startId });
                 b.emitInst(b.functionDefinitions, SpvOpStore, { fr.idxVar, const0_i });
                 b.emitInst(b.functionDefinitions, SpvOpBranch, { fr.headerLabel });
                 b.emitInst(b.functionDefinitions, SpvOpLabel, { fr.headerLabel });
@@ -1729,7 +1733,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 uint32_t idxVal = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpLoad, { typeInt, idxVal, fr.idxVar });
                 uint32_t cond = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpSLessThan, { typeBool, cond, idxVal, intConst(fr.count) });
+                b.emitInst(b.functionDefinitions, SpvOpSLessThan, { typeBool, cond, idxVal, fr.countId });
                 b.emitInst(b.functionDefinitions, SpvOpLoopMerge, { fr.mergeLabel, fr.continueLabel, 0 });
                 b.emitInst(b.functionDefinitions, SpvOpBranchConditional, { cond, bodyLabel, fr.mergeLabel });
                 b.emitInst(b.functionDefinitions, SpvOpLabel, { bodyLabel });
@@ -1748,7 +1752,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 uint32_t ctrVal = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpLoad, { typeInt, ctrVal, fr.ctrVar });
                 uint32_t ctrNext = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpIAdd, { typeInt, ctrNext, ctrVal, intConst(fr.step) });
+                b.emitInst(b.functionDefinitions, SpvOpIAdd, { typeInt, ctrNext, ctrVal, fr.stepId });
                 b.emitInst(b.functionDefinitions, SpvOpStore, { fr.ctrVar, ctrNext });
                 uint32_t idxVal = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpLoad, { typeInt, idxVal, fr.idxVar });
@@ -1831,14 +1835,21 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             case D3DSIO_IF: {
                 ParsedSrc s0;
                 parseSrc(tokens[pc + 1], s0);
-                if (s0.regType != D3DSPR_PREDICATE || s0.regNum >= 4) {
-                    outError = "IF on a non-predicate register is not supported";
-                    return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
+                uint32_t cond=b.allocId();
+                if (s0.regType==D3DSPR_CONSTBOOL && s0.regNum<16) {
+                    uint32_t values=emitIntegerConstant(s0.regNum,true),value=b.allocId();
+                    b.emitInst(b.functionDefinitions,SpvOpCompositeExtract,{typeInt,value,values,s0.swizzle[0]});
+                    b.emitInst(b.functionDefinitions,SpvOpINotEqual,{typeBool,cond,value,const0_i});
+                    if (s0.srcMod==13) {
+                        uint32_t inverse=b.allocId(); b.emitInst(b.functionDefinitions,SpvOpLogicalNot,{typeBool,inverse,cond}); cond=inverse;
+                    } else if (s0.srcMod) { outError="Unsupported boolean modifier"; return SVGA3_VLKN_ERROR_INVALID_PARAM; }
+                } else if (s0.regType==D3DSPR_PREDICATE && s0.regNum<4) {
+                    uint32_t predVec=b.allocId();
+                    b.emitInst(b.functionDefinitions,SpvOpLoad,{typeV4Bool,predVec,predVars[s0.regNum]});
+                    b.emitInst(b.functionDefinitions,SpvOpCompositeExtract,{typeBool,cond,predVec,s0.swizzle[0]});
+                } else {
+                    outError="IF requires a predicate or boolean constant"; return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
                 }
-                uint32_t predVec = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpLoad, { typeV4Bool, predVec, predVars[s0.regNum] });
-                uint32_t cond = b.allocId();
-                b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeBool, cond, predVec, s0.swizzle[0] });
                 CtrlFrame fr;
                 fr.isLoop = false;
                 fr.mergeLabel = b.allocId();

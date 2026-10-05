@@ -76,7 +76,7 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#124](https://github.com/sukar0972/vlkn4svga3d/issues/124) — Medium: Indexed draw uses stride for VkIndexType, ignores indexWidth
 - [x] [#128](https://github.com/sukar0972/vlkn4svga3d/issues/128) — Medium: RSQ and POW skip abs required by D3D9
 - [x] [#126](https://github.com/sukar0972/vlkn4svga3d/issues/126) — Medium: SM2 SINCOS (3-source) rejected; only SM3 form accepted
-- [ ] [#110](https://github.com/sukar0972/vlkn4svga3d/issues/110) — Low: Int/bool shader consts stored never uploaded
+- [x] [#110](https://github.com/sukar0972/vlkn4svga3d/issues/110) — Low: Int/bool shader consts stored never uploaded
 - [x] [#88](https://github.com/sukar0972/vlkn4svga3d/issues/88) — Low: D3D9 opcode allowlist gaps
 
 ## Render-state and fixed-function correctness
