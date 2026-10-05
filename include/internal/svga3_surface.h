@@ -130,13 +130,6 @@ public:
                                         size_t *outRowPitch,
                                         std::unique_lock<std::mutex> &outLock, uint32_t face = 0);
 
-    void invalidateReadback() { m_readbackValid = false; }
-    bool hasReadback(uint32_t w, uint32_t h) const {
-        return m_readbackValid && m_readbackW == w && m_readbackH == h && !m_readback.empty();
-    }
-    const uint8_t *readbackData() const { return m_readback.data(); }
-    size_t readbackPitch() const { return m_readbackPitch; }
-    void storeReadback(uint32_t w, uint32_t h, size_t pitch, const void *src);
 
 private:
     bool isPackedDepth() const {
@@ -178,11 +171,6 @@ private:
     size_t m_bufferSize;
     uint64_t m_lastBoundDrawSerial = 0;
 
-    bool m_readbackValid;
-    uint32_t m_readbackW;
-    uint32_t m_readbackH;
-    size_t m_readbackPitch;
-    std::vector<uint8_t> m_readback;
 
     /* Set when the constructor rejects guest parameters; allocate() then
      * fails closed instead of creating a malformed surface. */

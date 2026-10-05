@@ -1860,12 +1860,10 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
 
     m_clearCount++;
     for (auto &rt : m_renderTargets) {
-        if (auto *surface = m_surfaceMgr->getSurface(rt.sid)) {
-            surface->invalidateReadback();
+        if (m_surfaceMgr->getSurface(rt.sid)) {
             markWindowDrawn(rt.sid);
         }
     }
-    if (auto *surface = m_surfaceMgr->getSurface(m_depthStencilTarget.sid)) surface->invalidateReadback();
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -2831,23 +2829,11 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         const char *value = std::getenv("SVGA3D_TRACE_DRAWS");
         return value && value[0] != '\0' && value[0] != '0';
     }();
-    bool isHand = false;
-    if (traceDraws) {
-        for (uint32_t i = 0; i < numRanges; ++i) {
-            if (ranges[i].primitiveCount == 12) {
-                isHand = true;
-                break;
-            }
-        }
-    }
-    static uint32_t handLogCount = 0;
-    bool shouldLogHand = isHand && (handLogCount < 20 || (handLogCount % 300) == 0);
-    if (isHand) handLogCount++;
-
-    if (traceDraws && (shouldLogHand || m_drawCount <= 5 || (m_drawCount % 500) == 0 || m_boundVS == 7 || m_stages[0].sid == 73)) {
+    bool shouldLogDraw = traceDraws && (m_drawCount<20 || (m_drawCount%300)==0);
+    if (shouldLogDraw) {
         bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
-        log_msg("[libqemu_svga3d] ctx::draw #%u (cid=%u, isHand=%d): boundVS=%u, boundPS=%u, useFfTex=%d, stage0.sid=%u, rtSid=%u, cull=%u, vp=(%.1f,%.1f %.1fx%.1f)\n",
-                m_drawCount + 1, m_cid, (int)isHand, m_boundVS, m_boundPS, (int)useFfTex, m_stages[0].sid, m_renderTargets[0].sid, m_renderStates[SVGA3D_RS_CULLMODE],
+        log_msg("[libqemu_svga3d] ctx::draw #%u (cid=%u): boundVS=%u, boundPS=%u, useFfTex=%d, stage0.sid=%u, rtSid=%u, cull=%u, vp=(%.1f,%.1f %.1fx%.1f)\n",
+                m_drawCount + 1, m_cid, m_boundVS, m_boundPS, (int)useFfTex, m_stages[0].sid, m_renderTargets[0].sid, m_renderStates[SVGA3D_RS_CULLMODE],
                 m_viewport.x, m_viewport.y, m_viewport.width, m_viewport.height);
         float activeMvp[4][4];
         if (m_boundVS == SVGA3D_INVALID_ID) {
@@ -3006,7 +2992,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             providedInputMask |= (1u << loc);
         }
     }
-    if (shouldLogHand) {
+    if (shouldLogDraw) {
         log_msg("   inputMasks: required=0x%x, provided=0x%x, missing=0x%x\n",
                 requiredInputMask, providedInputMask, requiredInputMask & ~providedInputMask);
     }
@@ -3058,12 +3044,10 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
 
     m_drawCount += numRanges;
     for (auto &rt : m_renderTargets) {
-        if (auto *surface = m_surfaceMgr->getSurface(rt.sid)) {
-            surface->invalidateReadback();
+        if (m_surfaceMgr->getSurface(rt.sid)) {
             markWindowDrawn(rt.sid);
         }
     }
-    if (auto *surface = m_surfaceMgr->getSurface(m_depthStencilTarget.sid)) surface->invalidateReadback();
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -3229,19 +3213,9 @@ void VlknContextManager::endAllRenderPassesExcept(uint32_t cid) {
     }
 }
 
-std::vector<std::pair<uint32_t, uint32_t>> VlknContextManager::collectPendingWindowPresents() {
-    std::vector<std::pair<uint32_t, uint32_t>> list;
+void VlknContextManager::clearPendingWindowPresents() {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    for (auto &pair : m_contexts) {
-        if (pair.first != 246 && pair.second && pair.second->hasDrawnToWindow()) {
-            uint32_t sid = pair.second->lastDrawnWindowSid();
-            if (sid != 0 && sid != SVGA3D_INVALID_ID) {
-                list.push_back({pair.first, sid});
-            }
-            pair.second->resetDrawnToWindow();
-        }
-    }
-    return list;
+    for (auto &pair:m_contexts) if (pair.second) pair.second->resetDrawnToWindow();
 }
 
 void VlknContextManager::invalidateSurface(uint32_t sid) {

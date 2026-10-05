@@ -21,7 +21,7 @@ Svga3VlknStatus svga3_vlkn_present_client_surfaces(Svga3VlknDevice *dev, const c
      * Scanout follows the guest's explicit presentation commands. */
     if (dev->contextMgr) {
         dev->contextMgr->endAllRenderPasses();
-        dev->contextMgr->collectPendingWindowPresents();
+        dev->contextMgr->clearPendingWindowPresents();
     }
     return dev->backend->flushCommandBuffer();
 }
@@ -143,7 +143,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
 
             static uint32_t dma_count = 0;
             dma_count++;
-            if (dma_count <= 5 || (dma_count % 500) == 0 || pCmd->host.sid == 73) {
+            if (traceFifo && (dma_count <= 5 || (dma_count % 500) == 0)) {
                 log_msg("[libqemu_svga3d] SURFACE_DMA #%u: guest=(gmrId=%u, offset=%u, pitch=%u) host.sid=%u transfer=%u numBoxes=%u\n",
                         dma_count, pCmd->guest.ptr.gmrId, pCmd->guest.ptr.offset, pCmd->guest.pitch,
                         pCmd->host.sid, pCmd->transfer, numBoxes);
@@ -219,11 +219,9 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             VlknContext *ctx = dev->contextMgr->getContext(pCmd->cid);
             if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
 
-            static uint32_t srt_count_246 = 0;
-            static uint32_t srt_count_app = 0;
-            bool is_246 = (pCmd->cid == 246);
-            uint32_t cur_srt = is_246 ? ++srt_count_246 : ++srt_count_app;
-            if (cur_srt <= 5 || (cur_srt % 500) == 0) {
+            static uint32_t srt_count = 0;
+            uint32_t cur_srt = ++srt_count;
+            if (traceFifo && (cur_srt <= 5 || (cur_srt % 500) == 0)) {
                 log_msg("[libqemu_svga3d] SETRENDERTARGET (cid=%u #%u): type=%u, target.sid=%u, face=%u, mip=%u\n",
                         pCmd->cid, cur_srt, pCmd->type, pCmd->target.sid, pCmd->target.face, pCmd->target.mipmap);
             }
@@ -404,11 +402,9 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             );
             if (st == SVGA3_VLKN_SUCCESS) {
                 dev->stats.renderPassesExecuted++;
-                static uint32_t clr_count_246 = 0;
-                static uint32_t clr_count_app = 0;
-                bool is_246 = (pCmd->cid == 246);
-                uint32_t cur_clr = is_246 ? ++clr_count_246 : ++clr_count_app;
-                if (cur_clr <= 5 || (cur_clr % 500) == 0) {
+                static uint32_t clr_count = 0;
+            uint32_t cur_clr = ++clr_count;
+                if (traceFifo && (cur_clr <= 5 || (cur_clr % 500) == 0)) {
                     log_msg("[libqemu_svga3d] CLEAR (cid=%u #%u): flags=0x%x, color=0x%08x, depth=%f, numRects=%u\n",
                             pCmd->cid, cur_clr, pCmd->clearFlag, pCmd->color, pCmd->depth, numRects);
                     for (uint32_t r = 0; r < numRects && r < 4; ++r) {
@@ -477,11 +473,9 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 primType = (SVGA3dPrimitiveType)ranges[0].primType;
             }
 
-            static uint32_t draw_count_246 = 0;
-            static uint32_t draw_count_app = 0;
-            bool is_246 = (pCmd->cid == 246);
-            uint32_t cur_draw = is_246 ? ++draw_count_246 : ++draw_count_app;
-            if (cur_draw <= 5 || (cur_draw % 500) == 0) {
+            static uint32_t draw_count = 0;
+            uint32_t cur_draw = ++draw_count;
+            if (traceFifo && (cur_draw <= 5 || (cur_draw % 500) == 0)) {
                 log_msg("[libqemu_svga3d] DRAW_PRIMITIVES (cid=%u #%u): primType=%u, numVertexDecls=%u, numRanges=%u\n",
                         pCmd->cid, cur_draw, (uint32_t)primType, pCmd->numVertexDecls, pCmd->numRanges);
                 for (uint32_t i = 0; i < pCmd->numVertexDecls; ++i) {

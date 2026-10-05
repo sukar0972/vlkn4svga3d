@@ -103,12 +103,12 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [ ] [#109](https://github.com/sukar0972/vlkn4svga3d/issues/109) — Low: Surface-to-screen blit crops instead of scales
 - [ ] [#108](https://github.com/sukar0972/vlkn4svga3d/issues/108) — Low: Stretch blit drops face/mip; same-image overlap; no MSAA resolve
 - [ ] [#86](https://github.com/sukar0972/vlkn4svga3d/issues/86) — Medium: Partial DMA still barriers all mip levels / array layers
-- [ ] [#85](https://github.com/sukar0972/vlkn4svga3d/issues/85) — Medium: Present CPU readback cache is write-only dead API
-- [ ] [#141](https://github.com/sukar0972/vlkn4svga3d/issues/141) — Medium: Guest-specific magic IDs (cid 246 / sid 73 / hand) hardcoded in core
-- [ ] [#154](https://github.com/sukar0972/vlkn4svga3d/issues/154) — Medium: Preload binary-patch policy not keyed to allowlist entries
-- [ ] [#136](https://github.com/sukar0972/vlkn4svga3d/issues/136) — Medium: Preload advertises HWVERSION 0x00020001 as WS65_B1 (actually WS8_B1)
-- [ ] [#112](https://github.com/sukar0972/vlkn4svga3d/issues/112) — Low: Wrong capability bit comments; dead collectPendingWindowPresents; SCREEN_TO_GMRFB no-op
-- [ ] [#111](https://github.com/sukar0972/vlkn4svga3d/issues/111) — Low: README documents removed SVGA3_VLKN_LEGACY_CLIENT_PRESENT
+- [x] [#85](https://github.com/sukar0972/vlkn4svga3d/issues/85) — Medium: Present CPU readback cache is write-only dead API
+- [x] [#141](https://github.com/sukar0972/vlkn4svga3d/issues/141) — Medium: Guest-specific magic IDs (cid 246 / sid 73 / hand) hardcoded in core
+- [x] [#154](https://github.com/sukar0972/vlkn4svga3d/issues/154) — Medium: Preload binary-patch policy not keyed to allowlist entries
+- [x] [#136](https://github.com/sukar0972/vlkn4svga3d/issues/136) — Medium: Preload advertises HWVERSION 0x00020001 as WS65_B1 (actually WS8_B1)
+- [x] [#112](https://github.com/sukar0972/vlkn4svga3d/issues/112) — Low: Wrong capability bit comments; dead collectPendingWindowPresents; SCREEN_TO_GMRFB no-op
+- [x] [#111](https://github.com/sukar0972/vlkn4svga3d/issues/111) — Low: README documents removed SVGA3_VLKN_LEGACY_CLIENT_PRESENT
 
 
 Sampler compatibility: MIRRORONCE currently uses CLAMP_TO_EDGE because the device
@@ -133,3 +133,11 @@ require host sampling support. Mixed signed/luminance and reconstructed-normal
 formats remain unsupported. Automatic mipmap capability is disabled; explicit
 GENERATE_MIPMAPS works only for uncompressed color formats with the required
 host blit and filter features.
+
+Adapter policy: preload advertises WS65_B1 (0x00020000) for its extended
+GMR2/screen-object interface; the in-process adapter retains WS6_B1 for its
+legacy FIFO capability set. SCREEN_TO_GMRFB remains explicitly unsupported in
+the preload, with rate-limited diagnostics. The binary-patch adapter supports
+exactly one build/layout; adding a second entry is a compile-time error until
+all address, object-offset and instruction-probe tables become per-build. IO
+function pointers and the sync-call target are checked before any patch.

@@ -1813,11 +1813,14 @@ static void TestPendingWindowPresentsOnlyWhenDirty() {
     TEST_CHECK(ctx != nullptr, "Find context for present tracking");
     if (ctx) ctx->markWindowDrawn(9200);
 
-    auto first = dev->contextMgr->collectPendingWindowPresents();
-    TEST_CHECK(first.size() == 1 && first[0].first == 9200 && first[0].second == 9200,
-               "Collect a newly drawn window surface once");
-    auto second = dev->contextMgr->collectPendingWindowPresents();
-    TEST_CHECK(second.empty(), "Do not re-present an unchanged window surface");
+    TEST_CHECK(ctx && ctx->hasDrawnToWindow(),"Window draw marks pending state");
+    TEST_CHECK(svga3_vlkn_context_create(dev,246)==SVGA3_VLKN_SUCCESS,"Create formerly excluded context");
+    auto *other=dev->contextMgr->getContext(246);
+    if (other) other->markWindowDrawn(9200);
+    dev->contextMgr->clearPendingWindowPresents();
+    TEST_CHECK(ctx && !ctx->hasDrawnToWindow() && other && !other->hasDrawnToWindow(),"Explicit pending-state clear treats all contexts alike");
+    dev->contextMgr->clearPendingWindowPresents();
+    TEST_CHECK(ctx && !ctx->hasDrawnToWindow(),"Repeated pending-state clear is harmless");
 
     svga3_vlkn_device_destroy(dev);
 }

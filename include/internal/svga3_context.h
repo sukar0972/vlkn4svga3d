@@ -444,7 +444,7 @@ public:
     uint32_t capacity() const { return m_capacity; }
     void endAllRenderPasses();
     void endAllRenderPassesExcept(uint32_t cid);
-    std::vector<std::pair<uint32_t, uint32_t>> collectPendingWindowPresents();
+    void clearPendingWindowPresents();
     void invalidateSurface(uint32_t sid);
 
 private:
