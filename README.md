@@ -44,3 +44,5 @@ The [testing guide](docs/testing.md) covers dependencies, individual targets, su
 ## Licensing
 
 VirtualBox-derived files carry GPL-2.0 notices; the license text is in [COPYING](COPYING). VMware protocol headers and bundled Khronos headers retain their own notices. No blanket license has been chosen for original project code.
+
+Presentation supports the primary screen (ID 0 or invalid/legacy ID). Other screen IDs return an error. Source and scanout pixel widths must match; 16-to-32 and 32-to-16 presentation return unsupported-format rather than truncating pixels. Surface-to-screen blits scale with nearest-neighbor sampling and select the requested cube face. Preload GMRFB blits support framebuffer GMR with 32-bit pixels and 24-bit color depth; other configurations emit a rate-limited rejection log.

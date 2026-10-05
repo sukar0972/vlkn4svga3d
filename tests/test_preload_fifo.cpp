@@ -194,6 +194,13 @@ int main() {
   scanoutOk &= !bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,65536) &&
       g_screen_scanout_offset==4096 && displayCreates==1;
   auto unchanged = vram;
+  g_display_gmrfb.ptr.gmrId=7;
+  scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram==unchanged;
+  g_display_gmrfb.ptr.gmrId=SVGA_GMR_FRAMEBUFFER;
+  g_display_gmrfb.format.value=0x1010;
+  scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram==unchanged;
+  g_display_gmrfb.format.value=0x1820;
+
   g_display_gmrfb.ptr.offset = 65520;
   scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram == unchanged;
   g_display_gmrfb.ptr.offset = 8192;

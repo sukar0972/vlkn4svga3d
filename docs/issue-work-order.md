@@ -97,10 +97,10 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 ## Presentation, adapter policy and cleanup
 
-- [ ] [#135](https://github.com/sukar0972/vlkn4svga3d/issues/135) — Medium: Present/scanout bpp mismatch truncates/pads with no convert
-- [ ] [#149](https://github.com/sukar0972/vlkn4svga3d/issues/149) — Medium: blitSurfaceToScreen ignores destScreenId
-- [ ] [#150](https://github.com/sukar0972/vlkn4svga3d/issues/150) — Medium: BLIT_GMRFB_TO_SCREEN only FRAMEBUFFER + 32bpp/24-depth
-- [ ] [#109](https://github.com/sukar0972/vlkn4svga3d/issues/109) — Low: Surface-to-screen blit crops instead of scales
+- [x] [#135](https://github.com/sukar0972/vlkn4svga3d/issues/135) — Medium: Present/scanout bpp mismatch truncates/pads with no convert
+- [x] [#149](https://github.com/sukar0972/vlkn4svga3d/issues/149) — Medium: blitSurfaceToScreen ignores destScreenId
+- [x] [#150](https://github.com/sukar0972/vlkn4svga3d/issues/150) — Medium: BLIT_GMRFB_TO_SCREEN only FRAMEBUFFER + 32bpp/24-depth
+- [x] [#109](https://github.com/sukar0972/vlkn4svga3d/issues/109) — Low: Surface-to-screen blit crops instead of scales
 - [ ] [#108](https://github.com/sukar0972/vlkn4svga3d/issues/108) — Low: Stretch blit drops face/mip; same-image overlap; no MSAA resolve
 - [ ] [#86](https://github.com/sukar0972/vlkn4svga3d/issues/86) — Medium: Partial DMA still barriers all mip levels / array layers
 - [x] [#85](https://github.com/sukar0972/vlkn4svga3d/issues/85) — Medium: Present CPU readback cache is write-only dead API
