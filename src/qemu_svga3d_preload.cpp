@@ -767,6 +767,12 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
             int32_t bottom = (int32_t)P(6);
             uint32_t screen_id = P(7);
             bool copied = blit_gmrfb_to_legacy(s, src_x, src_y, left, top, right, bottom, screen_id);
+            if (!copied) {
+                static uint32_t rejected_blits=0;
+                uint32_t count=++rejected_blits;
+                if ((count & (count-1))==0)
+                    log_msg("[libqemu_svga3d] BLIT_GMRFB_TO_SCREEN rejected #%u: only primary framebuffer GMR, 32-bpp/24-depth is supported (gmr=%u format=0x%x screen=%u)\n",count,g_display_gmrfb.ptr.gmrId,g_display_gmrfb.format.value,screen_id);
+            }
             static uint32_t blit_log_count = 0;
             if (blit_log_count++ < 8) {
                 log_msg("[libqemu_svga3d] BLIT_GMRFB_TO_SCREEN #%u: gmr=%u offset=0x%x pitch=%u format=0x%x src=(%d,%d) dst=(%d,%d)-(%d,%d) screen=%u copied=%d\n",

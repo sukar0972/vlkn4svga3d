@@ -784,8 +784,8 @@ int main() {
         0, {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX}};
     status = executeBlit(partialBlit, {});
     TEST_CHECK(status == SVGA3_VLKN_SUCCESS &&
-        std::all_of(qemuFb.begin(), qemuFb.end(), [&](const Pixel &p) {return pixelsIdentical(p, BASELINE_PIXEL);}),
-        "Extreme signed endpoints safely produce an offscreen blit");
+        std::all_of(qemuFb.begin(), qemuFb.end(), [&](const Pixel &p) {return pixelsIdentical(p, renderedSurface[32*RT_W+32]);}),
+        "Extreme signed endpoints scale safely across the visible screen");
 
     /* =========================================================================
      * TEST 7: Negative Controls
@@ -881,6 +881,31 @@ int main() {
     if (status == SVGA3_VLKN_SUCCESS) status = svga3_vlkn_device_wait_idle(dev);
     TEST_CHECK_ERR(status == SVGA3_VLKN_SUCCESS && qemuFb[0].r == 0 && qemuFb[0].g == 0 && qemuFb[0].b == 0,
                    "Presenting a black frame clears old framebuffer pixels");
+
+    // Scaling and cube-face selection must preserve every destination pixel.
+    SVGA3dSize cubeSize{2,2,1};
+    TEST_CHECK(dev->surfaceMgr->defineSurface(9900,SVGA3D_SURFACE_CUBEMAP,SVGA3D_A8R8G8B8,&cubeSize,1)==SVGA3_VLKN_SUCCESS,"Define presentation cube");
+    auto *cube=dev->surfaceMgr->getSurface(9900);
+    uint32_t face0[4]={0xff0000ff,0xff0000ff,0xff0000ff,0xff0000ff};
+    uint32_t face3[4]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff};
+    SVGA3dBox tiny{0,0,0,2,2,1};
+    TEST_CHECK(cube->dmaUpload(0,&tiny,face0,8,false,0)==SVGA3_VLKN_SUCCESS && cube->dmaUpload(0,&tiny,face3,8,false,3)==SVGA3_VLKN_SUCCESS,"Upload distinct cube faces");
+    resetFramebuffer(); SVGA3dSurfaceImageId image{9900,3,0}; SVGASignedRect from{0,0,2,2},to{10,10,14,14};
+    TEST_CHECK(dev->surfaceMgr->blitSurfaceToScreen(image,from,0,to,nullptr,0,dev->guestMem.get())==SVGA3_VLKN_SUCCESS,"Scale cube face 3 to 4x4");
+    bool scaled=true;
+    for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x) {
+        uint32_t actual; memcpy(&actual,&qemuFb[(10+y)*FB_W+10+x],4);
+        scaled &= actual==face3[(y/2)*2+x/2];
+    }
+    TEST_CHECK(scaled,"Twofold scaling fills destination with selected cube face pixels");
+    auto before=qemuFb;
+    TEST_CHECK(dev->surfaceMgr->blitSurfaceToScreen(image,from,1,to,nullptr,0,dev->guestMem.get())==SVGA3_VLKN_ERROR_INVALID_PARAM && memcmp(before.data(),qemuFb.data(),qemuFb.size()*4)==0,"Non-primary screen rejected without changing scanout");
+    TEST_CHECK(svga3_vlkn_surface_define(dev,9901,0,SVGA3D_R5G6B5,&cubeSize,1)==SVGA3_VLKN_SUCCESS,"Define 16-bit presentation source");
+    TEST_CHECK(dev->surfaceMgr->present(9901,nullptr,0,dev->guestMem.get())==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT,"Reject 16-bit source to 32-bit scanout");
+    std::vector<uint16_t> fb16(FB_W*FB_H);
+    svga3_vlkn_device_set_framebuffer(dev,fb16.data(),0,fb16.size()*2,FB_W,FB_H,FB_W*2,2);
+    TEST_CHECK(dev->surfaceMgr->present(SID_RT,nullptr,0,dev->guestMem.get())==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT,"Reject 32-bit source to 16-bit scanout");
+    svga3_vlkn_device_set_framebuffer(dev,qemuFb.data(),0,qemuFb.size()*4,FB_W,FB_H,FB_W*4,4);
 
     /* Clean up */
     svga3_vlkn_context_destroy(dev, CID);

@@ -2219,7 +2219,8 @@ bool mergePresentationRect(SVGA3dCopyRect &a, const SVGA3dCopyRect &b) {
 bool copyPresentationRect(uint8_t *dst, size_t dstSize, size_t dstPitch, size_t dstBpp,
                           const uint8_t *src, size_t srcPitch, size_t srcBpp,
                           const SVGA3dCopyRect &r, PerformanceCounters *counters) {
-    const size_t pixelBytes = std::min(srcBpp, dstBpp);
+    if (srcBpp != dstBpp) return false;
+    const size_t pixelBytes = srcBpp;
     const uint64_t first = uint64_t(r.y) * dstPitch + uint64_t(r.x) * dstBpp;
     const uint64_t last = uint64_t(r.y + r.h - 1) * dstPitch + uint64_t(r.x + r.w - 1) * dstBpp;
     if (last > dstSize || pixelBytes > dstSize - last) return false;
@@ -2255,13 +2256,16 @@ Svga3VlknStatus VlknSurfaceManager::blitSurfaceToScreen(const SVGA3dSurfaceImage
                                                       uint32_t numClipRects,
                                                       GuestMemoryManager *guestMem)
 {
-    (void)destScreenId;
+    if (destScreenId != 0 && destScreenId != SVGA_ID_INVALID) {
+        log_msg("[libqemu_svga3d] BLIT_SURFACE_TO_SCREEN: unsupported screen %u (primary screen only)\n", destScreenId);
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
     auto *counters = m_backend->performanceCounters();
     if (counters) ++counters->presentationCalls;
     VlknSurface *surf = getSurface(srcImage.sid);
     if (!surf) return SVGA3_VLKN_ERROR_NOT_FOUND;
     const auto *mip = surf->getMipInfo(srcImage.mipmap);
-    if (!mip) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (!mip || srcImage.face >= surf->arrayLayers()) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     if (svga3_format_is_compressed(surf->svgaFormat()) || surf->isDepthStencil())
         return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
 
@@ -2269,7 +2273,7 @@ Svga3VlknStatus VlknSurfaceManager::blitSurfaceToScreen(const SVGA3dSurfaceImage
         const auto &fb = guestMem->getFramebuffer();
         const size_t bpp = svga3_format_bytes_per_pixel(surf->svgaFormat());
         const size_t dstBpp = fb.bpp;
-        if (!bpp || !dstBpp) return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+        if (!bpp || bpp != dstBpp) return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
         const size_t dstPitch = fb.pitch ? fb.pitch : static_cast<size_t>(fb.width) * dstBpp;
 
         /* Clip in screen coordinates before readback. Use wide signed values
@@ -2280,6 +2284,39 @@ Svga3VlknStatus VlknSurfaceManager::blitSurfaceToScreen(const SVGA3dSurfaceImage
         const int64_t sh = int64_t(srcRect.bottom) - sy;
         const int64_t dw = int64_t(destRect.right) - dx;
         const int64_t dh = int64_t(destRect.bottom) - dy;
+        if (sw > 0 && sh > 0 && dw > 0 && dh > 0 && (sw != dw || sh != dh)) {
+            // Scale from an immutable readback, preserving the destination
+            // mapping when clipping removes pixels at the screen edges.
+            if (dx >= int64_t(fb.width) || dy >= int64_t(fb.height) || dx+dw <= 0 || dy+dh <= 0)
+                return SVGA3_VLKN_SUCCESS;
+            if (sx < 0 || sy < 0 || sx + sw > mip->width || sy + sh > mip->height)
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            const SVGA3dBox box{uint32_t(sx),uint32_t(sy),0,uint32_t(sw),uint32_t(sh),1};
+            const void *mapped=nullptr; size_t pitch=0; std::unique_lock<std::mutex> lock;
+            auto st=surf->dmaDownloadToStaging(srcImage.mipmap,&box,&mapped,&pitch,lock,srcImage.face);
+            if (st!=SVGA3_VLKN_SUCCESS) return st;
+            if (counters) counters->readbackBytes += size_t(sw)*sh*bpp;
+            auto copy=[&](int64_t l,int64_t t,int64_t r,int64_t b) {
+                l=std::max({l,dx,int64_t(0)}); t=std::max({t,dy,int64_t(0)});
+                r=std::min({r,dx+dw,int64_t(fb.width)}); b=std::min({b,dy+dh,int64_t(fb.height)});
+                if (r<=l || b<=t) return true;
+                uint64_t last=uint64_t(b-1)*dstPitch+uint64_t(r)*dstBpp;
+                if (last>fb.scanoutSize()) return false;
+                auto *src=static_cast<const uint8_t*>(mapped);
+                for (int64_t y=t;y<b;++y) for (int64_t x=l;x<r;++x) {
+                    size_t ix=size_t((x-dx)*sw/dw), iy=size_t((y-dy)*sh/dh);
+                    memcpy(fb.scanoutHva()+size_t(y)*dstPitch+size_t(x)*bpp,src+iy*pitch+ix*bpp,bpp);
+                }
+                if (counters) { counters->framebufferCopyBytes+=size_t(r-l)*(b-t)*bpp; counters->framebufferCopyCalls+=size_t(r-l)*(b-t); }
+                guestMem->notifyDisplayUpdate(int32_t(l),int32_t(t),int32_t(r-l),int32_t(b-t));
+                return true;
+            };
+            bool valid=true;
+            if (!numClipRects || !clipRects) valid=copy(dx,dy,dx+dw,dy+dh);
+            else for (uint32_t i=0;i<numClipRects;++i)
+                valid=copy(dx+clipRects[i].left,dy+clipRects[i].top,dx+clipRects[i].right,dy+clipRects[i].bottom)&&valid;
+            return valid ? SVGA3_VLKN_SUCCESS : SVGA3_VLKN_ERROR_INVALID_PARAM;
+        }
         const int64_t x0 = std::max({dx, int64_t(0), dx - sx});
         const int64_t y0 = std::max({dy, int64_t(0), dy - sy});
         const int64_t x1 = std::min({dx + std::min(sw, dw), int64_t(fb.width), dx + mip->width - sx});
@@ -2335,7 +2372,7 @@ Svga3VlknStatus VlknSurfaceManager::blitSurfaceToScreen(const SVGA3dSurfaceImage
         size_t rowPitch = 0;
         std::unique_lock<std::mutex> lock;
         Svga3VlknStatus st = surf->dmaDownloadToStaging(srcImage.mipmap, &readbackBox,
-                                                      &mappedData, &rowPitch, lock);
+                                                      &mappedData, &rowPitch, lock, srcImage.face);
         if (st != SVGA3_VLKN_SUCCESS) return st;
 
         bool boundsValid = true;
@@ -2407,7 +2444,7 @@ Svga3VlknStatus VlknSurfaceManager::present(uint32_t sid,
     const uint32_t dstW = fb.width ? fb.width : surfW, dstH = fb.height ? fb.height : surfH;
     const size_t bpp = svga3_format_bytes_per_pixel(surf->svgaFormat());
     const size_t dstBpp = fb.bpp ? fb.bpp : 4;
-    if (!bpp || surf->isDepthStencil() || svga3_format_is_compressed(surf->svgaFormat()))
+    if (!bpp || bpp != dstBpp || surf->isDepthStencil() || svga3_format_is_compressed(surf->svgaFormat()))
         return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
     const size_t dstPitch = fb.pitch ? fb.pitch : size_t(dstW) * dstBpp;
 
