@@ -371,6 +371,11 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
     VkPhysicalDeviceFeatures enabledFeatures = {};
+    if (!m_features.robustBufferAccess) {
+        log_msg("[libqemu_svga3d] robustBufferAccess is required for untrusted guest vertex/index fetches\n");
+        return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
+    }
+    enabledFeatures.robustBufferAccess = VK_TRUE;
     enabledFeatures.samplerAnisotropy = m_features.samplerAnisotropy;
     enabledFeatures.textureCompressionBC = m_features.textureCompressionBC;
     enabledFeatures.depthClamp = m_features.depthClamp;

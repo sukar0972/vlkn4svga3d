@@ -5,6 +5,43 @@
 #include <vector>
 #define DST(t, n) (0x800f0000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 #define SRC(t, n) (0x80e40000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
+static bool robust_index_regression() {
+  Svga3VlknConfig cfg{}; cfg.enableValidationLayers = true;
+  auto *d = svga3_vlkn_device_create(&cfg);
+  if (!d) return false;
+  bool ok = svga3_vlkn_context_create(d, 1) == SVGA3_VLKN_SUCCESS;
+  SVGA3dSize target{4,4,1}, vertex{36,1,1}, index{12,1,1};
+  ok &= svga3_vlkn_surface_define(d,1,0,SVGA3D_A8R8G8B8,&target,1) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,2,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&vertex,1) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,3,SVGA3D_SURFACE_HINT_INDEXBUFFER,SVGA3D_BUFFER,&index,1) == SVGA3_VLKN_SUCCESS;
+  const float positions[]{-1,-1,0,3,-1,0,-1,3,0};
+  uint32_t indices[]{UINT32_MAX, UINT32_MAX, UINT32_MAX};
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_upload(d,3,0,nullptr,indices,12) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_COLOR0,1,0,0) == SVGA3_VLKN_SUCCESS;
+  SVGA3dRect vp{0,0,4,4};
+  ok &= svga3_vlkn_context_set_viewport(d,1,&vp) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CULLMODE,SVGA3D_FACE_NONE) == SVGA3_VLKN_SUCCESS;
+  SVGA3dVertexDecl decl{};
+  decl.identity.type = SVGA3D_DECLTYPE_FLOAT3; decl.identity.usage = SVGA3D_DECLUSAGE_POSITION;
+  decl.array = {2,0,12};
+  SVGA3dPrimitiveRange range{}; range.primType = SVGA3D_PRIMITIVE_TRIANGLELIST;
+  range.primitiveCount = 1; range.indexArray = {3,0,4}; range.indexWidth = 4;
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS;
+  uint32_t pixels[16]{};
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
+  indices[0]=0; indices[1]=1; indices[2]=2;
+  ok &= svga3_vlkn_surface_dma_upload(d,3,0,nullptr,indices,12) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
+  ok &= pixels[5] == 0xffffffff;
+  d->contextMgr->clear(); d->surfaceMgr->clear();
+  d->backend->shutdown();
+  ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
+  svga3_vlkn_device_destroy(d);
+  printf("out-of-range indices followed by valid rendering: %s\n",ok?"PASS":"FAIL");
+  return ok;
+}
 static bool staging_wrap_regression() {
   Svga3VlknConfig cfg{};
   cfg.apiVersion = VK_API_VERSION_1_1;
@@ -469,5 +506,6 @@ int main() {
              d->backend->validationWarnings() == 0;
   svga3_vlkn_device_destroy(d);
   correct &= staging_wrap_regression();
+  correct &= robust_index_regression();
   return correct ? 0 : 1;
 }

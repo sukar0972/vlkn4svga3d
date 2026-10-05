@@ -130,7 +130,7 @@ static VkFormat svga3_decl_type_to_vk(SVGA3dDeclType type) {
         case SVGA3D_DECLTYPE_USHORT4N:  return VK_FORMAT_R16G16B16A16_UNORM;
         case SVGA3D_DECLTYPE_FLOAT16_2: return VK_FORMAT_R16G16_SFLOAT;
         case SVGA3D_DECLTYPE_FLOAT16_4: return VK_FORMAT_R16G16B16A16_SFLOAT;
-        default:                        return VK_FORMAT_R32G32B32A32_SFLOAT;
+        default:                        return VK_FORMAT_UNDEFINED;
     }
 }
 
@@ -2345,6 +2345,82 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     }
     // The guest can emit an empty viewport for a fully clipped draw.
     if (m_viewport.width <= 0 || m_viewport.height <= 0) return SVGA3_VLKN_SUCCESS;
+    if ((numDecls && !decls) || (numRanges && !ranges) || numDecls > SVGA3_MAX_VERTEX_DECLS)
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    for (uint32_t i = 0; i < numDecls; ++i)
+        if (svga3_decl_type_to_vk(static_cast<SVGA3dDeclType>(decls[i].identity.type)) == VK_FORMAT_UNDEFINED)
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    /* Ensure buffer capacity for vertex declarations BEFORE starting render pass.
+     * Size for the actual draw: offset + stride * maxVertexCount, in 64-bit
+     * with overflow checks. The old code only covered 4096 vertices, so any
+     * larger draw let the GPU read out of bounds. */
+    struct BufferCapacity { VlknSurface *surface; size_t bytes; uint32_t flags; };
+    std::vector<BufferCapacity> capacities;
+    uint32_t maxVertexCount = 0;
+    for (uint32_t i = 0; i < numRanges; ++i) {
+        SVGA3dPrimitiveType ptype = (ranges[i].primType != SVGA3D_PRIMITIVE_INVALID)
+            ? (SVGA3dPrimitiveType)ranges[i].primType : primitiveType;
+        uint32_t c = calcVertexCount(ptype, ranges[i].primitiveCount);
+        if (c > maxVertexCount) maxVertexCount = c;
+    }
+    if (numDecls > 0 && decls) {
+        uint32_t cappedDecls = std::min(numDecls, SVGA3_MAX_VERTEX_DECLS);
+        for (uint32_t i = 0; i < cappedDecls; ++i) {
+            uint32_t sid = decls[i].array.surfaceId;
+            VlknSurface *surf = m_surfaceMgr->getSurface(sid);
+            if (surf) {
+                uint64_t stride = decls[i].array.stride ? decls[i].array.stride : 1;
+                uint64_t attrMax = 0;
+                bool ov = __builtin_mul_overflow(stride, (uint64_t)maxVertexCount, &attrMax) ||
+                          __builtin_add_overflow(attrMax, (uint64_t)decls[i].array.offset, &attrMax);
+                if (ov || attrMax > SVGA3_MAX_DMA_BYTES) {
+                    log_msg("[libqemu_svga3d] draw error: vertex range overflow (decl=%u)\n", i);
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                }
+                capacities.push_back({surf, size_t(attrMax), SVGA3D_SURFACE_HINT_VERTEXBUFFER});
+            }
+        }
+    }
+
+    /* Pre-check and ensure capacity for all index buffers BEFORE starting render pass */
+    for (uint32_t i = 0; i < numRanges; ++i) {
+        const SVGA3dPrimitiveRange &r = ranges[i];
+        if (r.indexArray.surfaceId != SVGA3D_INVALID_ID && r.indexArray.surfaceId != 0 && (r.indexArray.stride > 0 || r.indexWidth > 0)) {
+            VlknSurface *idxSurf = m_surfaceMgr->getSurface(r.indexArray.surfaceId);
+            if (idxSurf) {
+                if (idxSurf->height() <= 1 && idxSurf->depth() <= 1) {
+                    idxSurf->addFlags(SVGA3D_SURFACE_HINT_INDEXBUFFER);
+                }
+                SVGA3dPrimitiveType ptype = (r.primType != SVGA3D_PRIMITIVE_INVALID) ? (SVGA3dPrimitiveType)r.primType : primitiveType;
+                uint32_t count = calcVertexCount(ptype, r.primitiveCount);
+                /* Index width must be 2 or 4; anything else is rejected
+                 * rather than misinterpreted. 64-bit: count*stride wrapped. */
+                uint32_t idxStride = r.indexWidth ? r.indexWidth : r.indexArray.stride;
+                if ((idxStride != 2 && idxStride != 4) || (r.indexArray.stride && r.indexArray.stride != idxStride)) {
+                    log_msg("[libqemu_svga3d] draw error: bad index stride %u\n", idxStride);
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                }
+                uint64_t neededIdxBytes = 0;
+                bool ov = __builtin_mul_overflow((uint64_t)count, (uint64_t)idxStride, &neededIdxBytes) ||
+                          __builtin_add_overflow(neededIdxBytes, (uint64_t)r.indexArray.offset, &neededIdxBytes);
+                if (ov || neededIdxBytes > SVGA3_MAX_DMA_BYTES) {
+                    log_msg("[libqemu_svga3d] draw error: index range overflow\n");
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                }
+                capacities.push_back({idxSurf, size_t(neededIdxBytes), SVGA3D_SURFACE_HINT_INDEXBUFFER});
+            }
+        }
+    }
+
+    for (auto &capacity : capacities) {
+        if (capacity.surface->height() <= 1 && capacity.surface->depth() <= 1)
+            capacity.surface->addFlags(capacity.flags);
+        if (capacity.bytes > capacity.surface->bufferSize()) {
+            auto status = capacity.surface->ensureBufferSize(capacity.bytes);
+            if (status != SVGA3_VLKN_SUCCESS) return status;
+        }
+    }
+
     /* Retire bounded caches only after all recorded references complete, and
      * before allocating this draw's constants or descriptor inputs. */
     if (m_samplerCache.size() >= 64 || m_descriptorSetCache.size() >= 2048) {
@@ -2589,75 +2665,6 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                     0, 0, nullptr, 0, nullptr, 1, &barrier
                 );
                 surf->setLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-            }
-        }
-    }
-
-    /* Ensure buffer capacity for vertex declarations BEFORE starting render pass.
-     * Size for the actual draw: offset + stride * maxVertexCount, in 64-bit
-     * with overflow checks. The old code only covered 4096 vertices, so any
-     * larger draw let the GPU read out of bounds. */
-    uint32_t maxVertexCount = 0;
-    for (uint32_t i = 0; i < numRanges; ++i) {
-        SVGA3dPrimitiveType ptype = (ranges[i].primType != SVGA3D_PRIMITIVE_INVALID)
-            ? (SVGA3dPrimitiveType)ranges[i].primType : primitiveType;
-        uint32_t c = calcVertexCount(ptype, ranges[i].primitiveCount);
-        if (c > maxVertexCount) maxVertexCount = c;
-    }
-    if (numDecls > 0 && decls) {
-        uint32_t cappedDecls = std::min(numDecls, SVGA3_MAX_VERTEX_DECLS);
-        for (uint32_t i = 0; i < cappedDecls; ++i) {
-            uint32_t sid = decls[i].array.surfaceId;
-            VlknSurface *surf = m_surfaceMgr->getSurface(sid);
-            if (surf) {
-                if (surf->height() <= 1 && surf->depth() <= 1) {
-                    surf->addFlags(SVGA3D_SURFACE_HINT_VERTEXBUFFER);
-                }
-                uint64_t stride = decls[i].array.stride ? decls[i].array.stride : 1;
-                uint64_t attrMax = 0;
-                bool ov = __builtin_mul_overflow(stride, (uint64_t)maxVertexCount, &attrMax) ||
-                          __builtin_add_overflow(attrMax, (uint64_t)decls[i].array.offset, &attrMax);
-                if (ov || attrMax > SVGA3_MAX_DMA_BYTES) {
-                    log_msg("[libqemu_svga3d] draw error: vertex range overflow (decl=%u)\n", i);
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
-                }
-                if (attrMax > surf->bufferSize()) {
-                    Svga3VlknStatus ensSt = surf->ensureBufferSize((size_t)attrMax);
-                    if (ensSt != SVGA3_VLKN_SUCCESS) return ensSt;
-                }
-            }
-        }
-    }
-
-    /* Pre-check and ensure capacity for all index buffers BEFORE starting render pass */
-    for (uint32_t i = 0; i < numRanges; ++i) {
-        const SVGA3dPrimitiveRange &r = ranges[i];
-        if (r.indexArray.surfaceId != SVGA3D_INVALID_ID && r.indexArray.surfaceId != 0 && r.indexArray.stride > 0) {
-            VlknSurface *idxSurf = m_surfaceMgr->getSurface(r.indexArray.surfaceId);
-            if (idxSurf) {
-                if (idxSurf->height() <= 1 && idxSurf->depth() <= 1) {
-                    idxSurf->addFlags(SVGA3D_SURFACE_HINT_INDEXBUFFER);
-                }
-                SVGA3dPrimitiveType ptype = (r.primType != SVGA3D_PRIMITIVE_INVALID) ? (SVGA3dPrimitiveType)r.primType : primitiveType;
-                uint32_t count = calcVertexCount(ptype, r.primitiveCount);
-                /* Index width must be 2 or 4; anything else is rejected
-                 * rather than misinterpreted. 64-bit: count*stride wrapped. */
-                uint32_t idxStride = r.indexWidth ? r.indexWidth : r.indexArray.stride;
-                if (idxStride != 2 && idxStride != 4) {
-                    log_msg("[libqemu_svga3d] draw error: bad index stride %u\n", idxStride);
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
-                }
-                uint64_t neededIdxBytes = 0;
-                bool ov = __builtin_mul_overflow((uint64_t)count, (uint64_t)idxStride, &neededIdxBytes) ||
-                          __builtin_add_overflow(neededIdxBytes, (uint64_t)r.indexArray.offset, &neededIdxBytes);
-                if (ov || neededIdxBytes > SVGA3_MAX_DMA_BYTES) {
-                    log_msg("[libqemu_svga3d] draw error: index range overflow\n");
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
-                }
-                if (neededIdxBytes > idxSurf->bufferSize()) {
-                    Svga3VlknStatus ensSt = idxSurf->ensureBufferSize((size_t)neededIdxBytes);
-                    if (ensSt != SVGA3_VLKN_SUCCESS) return ensSt;
-                }
             }
         }
     }
@@ -2929,7 +2936,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             currentBoundType = ptype;
         }
         uint32_t count = calcVertexCount(ptype, r.primitiveCount);
-        if (r.indexArray.surfaceId != SVGA3D_INVALID_ID && r.indexArray.surfaceId != 0 && r.indexArray.stride > 0) {
+        if (r.indexArray.surfaceId != SVGA3D_INVALID_ID && r.indexArray.surfaceId != 0 && (r.indexArray.stride > 0 || r.indexWidth > 0)) {
             /* Indexed draw */
             VlknSurface *idxSurf = m_surfaceMgr->getSurface(r.indexArray.surfaceId);
             if (idxSurf) {
@@ -2937,7 +2944,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
             }
             VkBuffer idxBuf = (idxSurf && idxSurf->buffer()) ? idxSurf->buffer() : fallbackBuf;
             if (idxBuf) {
-                VkIndexType idxType = (r.indexArray.stride == 2) ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+                VkIndexType idxType = ((r.indexWidth ? r.indexWidth : r.indexArray.stride) == 2) ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
                 VkDeviceSize idxOffset = (idxSurf && idxSurf->buffer() && r.indexArray.offset < idxSurf->bufferSize()) ? r.indexArray.offset : 0;
                 m_backend->dispatch().vkCmdBindIndexBuffer(cb, idxBuf, idxOffset, idxType);
                 m_backend->dispatch().vkCmdDrawIndexed(
