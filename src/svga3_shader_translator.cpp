@@ -3,6 +3,8 @@
  */
 
 #include "svga3_shader_translator.h"
+#include "svga3_semantics.h"
+#include <set>
 #include "svga3_spirv_builder.h"
 #include <map>
 #include <unordered_map>
@@ -656,24 +658,39 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             }
             samplerDimensions[regNum] = dimension == 5 ? 2 : dimension;
         } else if (regType == D3DSPR_INPUT || regType == D3DSPR_TEXTURE) {
-            inputRegToSemantic[regNum] = { usage, usageIndex };
+            if (!isVS && major==2) {
+                usage=regType==D3DSPR_TEXTURE ? 5 : 10;
+                usageIndex=regNum;
+            }
+            uint32_t location=isVS ? vertexSemanticLocation(usage,usageIndex) : varyingSemanticLocation(usage,usageIndex);
+            if (location==UINT32_MAX) { outError="Unsupported shader input semantic"; return SVGA3_VLKN_ERROR_INVALID_PARAM; }
+            inputRegToSemantic[isVS ? regNum : ((regType<<16)|regNum)] = { usage, usageIndex };
         } else if (regType == 6) { /* D3DSPR_OUTPUT in SM 3.0 */
+            if (isVS && !((usage==0 || usage==9 || usage==4) && usageIndex==0) &&
+                varyingSemanticLocation(usage,usageIndex)==UINT32_MAX) {
+                outError="Unsupported shader output semantic"; return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            }
             outputRegToSemantic[regNum] = { usage, usageIndex };
         }
     }
 
-    auto getVsInputLocation = [](uint32_t usage, uint32_t usageIndex) -> uint32_t {
-        if (usage == 0 || usage == 9) { /* POSITION or POSITIONT */
-            return 0;
-        } else if (usage == 10) { /* COLOR */
-            return (usageIndex == 0) ? 1 : 7;
-        } else if (usage == 5) { /* TEXCOORD */
-            return 2 + usageIndex;
-        } else if (usage == 3) { /* NORMAL */
-            return 6;
+    std::set<uint32_t> declaredLocations;
+    for (const auto &decl:inputRegToSemantic) {
+        uint32_t location=isVS ? vertexSemanticLocation(decl.second.usage,decl.second.usageIndex)
+            : varyingSemanticLocation(decl.second.usage,decl.second.usageIndex);
+        if (!declaredLocations.insert(location).second) {
+            outError="Colliding shader input semantics"; return SVGA3_VLKN_ERROR_INVALID_PARAM;
         }
-        return 8 + usageIndex;
-    };
+    }
+    declaredLocations.clear();
+    if (isVS) for (const auto &decl:outputRegToSemantic) {
+        uint32_t usage=decl.second.usage;
+        uint32_t location=(usage==0 || usage==9) ? UINT32_MAX-1 : usage==4 ? UINT32_MAX-2
+            : varyingSemanticLocation(usage,decl.second.usageIndex);
+        if (!declaredLocations.insert(location).second) {
+            outError="Colliding shader output semantics"; return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        }
+    }
 
     /* Interface Variables */
     std::vector<uint32_t> entryInterface;
@@ -731,7 +748,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             uint32_t defIndices[] = { 0, 0, 0, 1 };
             for (int k = 0; k < 4; ++k) {
                 uint32_t vid = b.allocId();
-                uint32_t loc = getVsInputLocation(defUsages[k], defIndices[k]);
+                uint32_t loc = vertexSemanticLocation(defUsages[k], defIndices[k]);
                 vsInRegs[defRegs[k]] = { vid, loc };
                 entryInterface.push_back(vid);
                 inLocMask |= (1u << loc);
@@ -739,7 +756,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         } else {
             for (const auto &pair : inputRegToSemantic) {
                 uint32_t vid = b.allocId();
-                uint32_t loc = getVsInputLocation(pair.second.usage, pair.second.usageIndex);
+                uint32_t loc = vertexSemanticLocation(pair.second.usage, pair.second.usageIndex);
                 vsInRegs[pair.first] = { vid, loc };
                 entryInterface.push_back(vid);
                 inLocMask |= (1u << loc);
@@ -1123,7 +1140,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 }
             } else {
                 uint32_t inVar = 0;
-                auto it = inputRegToSemantic.find(src.regNum);
+                auto it = inputRegToSemantic.find((src.regType<<16)|src.regNum);
                 if (it != inputRegToSemantic.end()) {
                     if (it->second.usage == 10) {
                         inVar = psInColor[it->second.usageIndex < 4 ? it->second.usageIndex : 0];

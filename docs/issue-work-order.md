@@ -69,15 +69,15 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 - [x] [#118](https://github.com/sukar0972/vlkn4svga3d/issues/118) — Medium: Dest relative addressing not rejected
 - [x] [#137](https://github.com/sukar0972/vlkn4svga3d/issues/137) — Medium: Predicated non-MOV ALU accepted then mis-emitted
-- [ ] [#125](https://github.com/sukar0972/vlkn4svga3d/issues/125) — High: ps_2_x shaders read texture coordinates from wrong input (dcl t#/v# collision)
-- [ ] [#127](https://github.com/sukar0972/vlkn4svga3d/issues/127) — Medium: SM3 non-COLOR/TEXCOORD I/O lands in wrong slot (overwrites TEXCOORD0)
-- [ ] [#107](https://github.com/sukar0972/vlkn4svga3d/issues/107) — Medium: Vertex attribute locations disagree (context vs translator)
+- [x] [#125](https://github.com/sukar0972/vlkn4svga3d/issues/125) — High: ps_2_x shaders read texture coordinates from wrong input (dcl t#/v# collision)
+- [x] [#127](https://github.com/sukar0972/vlkn4svga3d/issues/127) — Medium: SM3 non-COLOR/TEXCOORD I/O lands in wrong slot (overwrites TEXCOORD0)
+- [x] [#107](https://github.com/sukar0972/vlkn4svga3d/issues/107) — Medium: Vertex attribute locations disagree (context vs translator)
 - [x] [#130](https://github.com/sukar0972/vlkn4svga3d/issues/130) — Medium: Unknown vertex types silently become float4 (size/OOB risk)
 - [x] [#124](https://github.com/sukar0972/vlkn4svga3d/issues/124) — Medium: Indexed draw uses stride for VkIndexType, ignores indexWidth
 - [x] [#128](https://github.com/sukar0972/vlkn4svga3d/issues/128) — Medium: RSQ and POW skip abs required by D3D9
 - [x] [#126](https://github.com/sukar0972/vlkn4svga3d/issues/126) — Medium: SM2 SINCOS (3-source) rejected; only SM3 form accepted
 - [ ] [#110](https://github.com/sukar0972/vlkn4svga3d/issues/110) — Low: Int/bool shader consts stored never uploaded
-- [ ] [#88](https://github.com/sukar0972/vlkn4svga3d/issues/88) — Low: D3D9 opcode allowlist gaps
+- [x] [#88](https://github.com/sukar0972/vlkn4svga3d/issues/88) — Low: D3D9 opcode allowlist gaps
 
 ## Render-state and fixed-function correctness
 
@@ -120,3 +120,10 @@ Confirmed device idle or a successful later submission retires them. Failed shut
 idle retains Vulkan allocations until reset or process exit. The preload disables
 3D after a fence flush failure and drains fences and 2D updates; this does not
 establish the live-host recovery acceptance of #113.
+
+Shader interface: vertex input semantics share a bounded, collision-checked location
+map. Interpolators currently support COLOR0..3 and TEXCOORD0..7; other SM3
+varying declarations fail explicitly. SM2 v# and t# declarations stay distinct.
+LOG, LIT, DST, CRS, NRM, DP2ADD, M4x3, DSX, DSY, TEXLDD and TEXLDL remain
+unsupported; rejection tests protect those gaps. New opcode support must include
+emission, SPIR-V validation and value/pixel coverage before expanding the allowlist.

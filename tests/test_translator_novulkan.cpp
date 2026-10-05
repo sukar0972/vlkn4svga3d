@@ -1,3 +1,4 @@
+#include "svga3_semantics.h"
 // ICD-free D3D9->SPIR-V translator tests.
 // Calls svga3_translate_shader_d3d9 directly without a Vulkan device.
 // Optionally validates output with spirv-val when available.
@@ -882,6 +883,33 @@ int main() {
                    "Predicated MOV to a read-only destination is rejected");
     }
 
+    {
+        uint32_t seen=0;
+        for (uint32_t usage=0;usage<14;++usage) {
+            uint32_t location=svga3_vlkn::vertexSemanticLocation(usage,0);
+            TEST_CHECK(location<32,"Each supported vertex usage has a bounded location");
+            if (usage!=9) { TEST_CHECK(!(seen&(1u<<location)),"Vertex usages have unique locations"); seen|=1u<<location; }
+            const uint32_t tokens[]{0xfffe0300,31u|(2u<<24),0x80000000u|usage,D3D9_DST(1,0,15),
+                1u|(2u<<24),D3D9_DST(4,0,15),D3D9_SRC(1,0,0xe4),0xffff};
+            std::vector<uint32_t> spirv; std::string error; uint32_t mask=0;
+            TEST_CHECK(svga3_vlkn::svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,tokens,sizeof(tokens)/4,spirv,error,&mask)==SVGA3_VLKN_SUCCESS && mask==(1u<<location),"Translator uses shared vertex semantic locations");
+            TEST_CHECK_SPIRV(spirv,"vertex_semantics","Vertex semantic SPIR-V validates");
+        }
+        for (uint32_t usage : {3u,6u,7u,1u}) {
+            const uint32_t ps[]{0xffff0300,31u|(2u<<24),0x80000000u|usage,D3D9_DST(1,0,15),0xffff};
+            const uint32_t vs[]{0xfffe0300,31u|(2u<<24),0x80000000u|usage,D3D9_DST(6,0,15),0xffff};
+            std::vector<uint32_t> spirv; std::string error;
+            TEST_CHECK(svga3_vlkn::svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,ps,sizeof(ps)/4,spirv,error)!=SVGA3_VLKN_SUCCESS,"Unsupported varying inputs fail explicitly");
+            TEST_CHECK(svga3_vlkn::svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,vs,sizeof(vs)/4,spirv,error)!=SVGA3_VLKN_SUCCESS,"Unsupported varying outputs fail explicitly");
+        }
+    }
+
+    for (uint32_t opcode : {15u,16u,17u,20u,33u,36u,90u,91u,92u,93u,95u}) {
+        const uint32_t tokens[]{0xffff0300,opcode|(3u<<24),D3D9_DST(0,0,15),D3D9_SRC(2,0,0xe4),D3D9_SRC(2,1,0xe4),0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_vlkn::svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,tokens,sizeof(tokens)/4,spirv,error)!=SVGA3_VLKN_SUCCESS,
+            "Unimplemented opcodes remain fail closed");
+    }
     std::cout << "All ICD-free translator tests PASSED!" << std::endl;
     return 0;
 }

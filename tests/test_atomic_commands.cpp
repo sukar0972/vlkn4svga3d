@@ -137,6 +137,10 @@ int main() {
     range.indexArray.surfaceId = 5; range.indexWidth = 2; range.indexArray.stride = 4;
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     range.indexArray.stride = 0;
+    SVGA3dVertexDecl duplicate[2]{decl,decl};
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,duplicate,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
+    duplicate[1].identity.usage=SVGA3D_DECLUSAGE_TEXCOORD; duplicate[1].identity.usageIndex=8;
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,duplicate,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS && boundIndexType == VK_INDEX_TYPE_UINT16);
     savedSampler=dispatch.vkCreateSampler; dispatch.vkCreateSampler=captureSampler;
     CHECK(ctx->setTexture(0,3)==SVGA3_VLKN_SUCCESS);

@@ -95,6 +95,57 @@ static bool robust_index_regression() {
     }
     ok &= narrow>0 && wide>narrow;
   }
+  // fxc ps_2_0 declares t0, v0 and v1 with identical usage tokens.
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+  range.primType=SVGA3D_PRIMITIVE_TRIANGLELIST;
+  const uint32_t semanticVS[]{0xfffe0300,
+    31u|(2u<<24),0x80000000u,DST(1,0),
+    31u|(2u<<24),0x80000000u,DST(6,0),
+    31u|(2u<<24),0x8000000au,DST(6,1),
+    31u|(2u<<24),0x80000005u,DST(6,2),
+    31u|(2u<<24),0x8001000au,DST(6,3),
+    1u|(2u<<24),DST(6,0),SRC(1,0),
+    1u|(2u<<24),DST(6,1),SRC(2,1),
+    1u|(2u<<24),DST(6,2),SRC(2,0),
+    1u|(2u<<24),DST(6,3),SRC(2,2),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,8,SVGA3D_SHADERTYPE_VS,semanticVS,sizeof(semanticVS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,8)==SVGA3_VLKN_SUCCESS;
+  const float values[3][4]{{.25f,.75f,.5f,1},{1,0,0,1},{0,1,0,1}};
+  for (unsigned i=0;i<3;++i) ok &= svga3_vlkn_context_set_shader_const(d,1,i,SVGA3D_SHADERTYPE_VS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(values[i]))==SVGA3_VLKN_SUCCESS;
+  for (unsigned selector=0;selector<3;++selector) {
+    uint32_t shader[]{0xffff0200,
+      31u|(2u<<24),0x80000000u,DST(1,0),
+      31u|(2u<<24),0x80000000u,DST(3,0),
+      31u|(2u<<24),0x80000000u,DST(1,1),
+      1u|(2u<<24),DST(8,0),SRC(selector==0?3:1,selector==2?1:0),0xffff};
+    ok &= svga3_vlkn_context_define_shader(d,1,9,SVGA3D_SHADERTYPE_PS,shader,sizeof(shader)/4)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,9)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    const uint32_t expected[]{0xff40bf80,0xffff0000,0xff00ff00};
+    ok &= pixels[5]==expected[selector];
+  }
+  // TANGENT is a vertex input, while unsupported tangent interpolators fail closed.
+  SVGA3dSize tangentSize{48,1,1};
+  float tangents[12]; for (unsigned i=0;i<3;++i) memcpy(tangents+i*4,values[0],16);
+  ok &= svga3_vlkn_surface_define(d,4,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&tangentSize,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_upload(d,4,0,nullptr,tangents,48)==SVGA3_VLKN_SUCCESS;
+  const uint32_t tangentVS[]{0xfffe0300,
+    31u|(2u<<24),0x80000000u,DST(1,0),
+    31u|(2u<<24),0x80000006u,DST(1,1),
+    31u|(2u<<24),0x80000000u,DST(6,0),
+    31u|(2u<<24),0x8000000au,DST(6,1),
+    1u|(2u<<24),DST(6,0),SRC(1,0),1u|(2u<<24),DST(6,1),SRC(1,1),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,10,SVGA3D_SHADERTYPE_VS,tangentVS,sizeof(tangentVS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,10)==SVGA3_VLKN_SUCCESS;
+  const uint32_t colorPS[]{0xffff0300,31u|(2u<<24),0x8000000au,DST(1,0),1u|(2u<<24),DST(8,0),SRC(1,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,11,SVGA3D_SHADERTYPE_PS,colorPS,sizeof(colorPS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,11)==SVGA3_VLKN_SUCCESS;
+  SVGA3dVertexDecl tangentDecls[2]{decl,{}};
+  tangentDecls[1].identity.type=SVGA3D_DECLTYPE_FLOAT4; tangentDecls[1].identity.usage=SVGA3D_DECLUSAGE_TANGENT;
+  tangentDecls[1].array={4,0,16};
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS && pixels[5]==0xff40bf80;
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
