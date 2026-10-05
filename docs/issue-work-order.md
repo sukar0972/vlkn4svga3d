@@ -61,21 +61,21 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [ ] [#116](https://github.com/sukar0972/vlkn4svga3d/issues/116) — Medium: MIRRORONCE without samplerMirrorClampToEdge
 - [ ] [#114](https://github.com/sukar0972/vlkn4svga3d/issues/114) — Medium: Dual-source blend factors (SRC1*) silently map to ONE
 - [ ] [#162](https://github.com/sukar0972/vlkn4svga3d/issues/162) — Medium: Relative const addressing rejected while SM3 advertised
-- [ ] [#161](https://github.com/sukar0972/vlkn4svga3d/issues/161) — Medium: ps_1_x accepted but wrong (white output; _x2/_x4/_d2 dropped)
-- [ ] [#151](https://github.com/sukar0972/vlkn4svga3d/issues/151) — Medium: DEVCAP shader temps=32 but translator only r0–r15
+- [x] [#161](https://github.com/sukar0972/vlkn4svga3d/issues/161) — Medium: ps_1_x accepted but wrong (white output; _x2/_x4/_d2 dropped)
+- [x] [#151](https://github.com/sukar0972/vlkn4svga3d/issues/151) — Medium: DEVCAP shader temps=32 but translator only r0–r15
 - [ ] [#160](https://github.com/sukar0972/vlkn4svga3d/issues/160) — Medium: Geometry instancing (vertex divisors) silently ignored
 
 ## Shader and vertex-input correctness
 
-- [ ] [#118](https://github.com/sukar0972/vlkn4svga3d/issues/118) — Medium: Dest relative addressing not rejected
-- [ ] [#137](https://github.com/sukar0972/vlkn4svga3d/issues/137) — Medium: Predicated non-MOV ALU accepted then mis-emitted
+- [x] [#118](https://github.com/sukar0972/vlkn4svga3d/issues/118) — Medium: Dest relative addressing not rejected
+- [x] [#137](https://github.com/sukar0972/vlkn4svga3d/issues/137) — Medium: Predicated non-MOV ALU accepted then mis-emitted
 - [ ] [#125](https://github.com/sukar0972/vlkn4svga3d/issues/125) — High: ps_2_x shaders read texture coordinates from wrong input (dcl t#/v# collision)
 - [ ] [#127](https://github.com/sukar0972/vlkn4svga3d/issues/127) — Medium: SM3 non-COLOR/TEXCOORD I/O lands in wrong slot (overwrites TEXCOORD0)
 - [ ] [#107](https://github.com/sukar0972/vlkn4svga3d/issues/107) — Medium: Vertex attribute locations disagree (context vs translator)
 - [x] [#130](https://github.com/sukar0972/vlkn4svga3d/issues/130) — Medium: Unknown vertex types silently become float4 (size/OOB risk)
 - [x] [#124](https://github.com/sukar0972/vlkn4svga3d/issues/124) — Medium: Indexed draw uses stride for VkIndexType, ignores indexWidth
-- [ ] [#128](https://github.com/sukar0972/vlkn4svga3d/issues/128) — Medium: RSQ and POW skip abs required by D3D9
-- [ ] [#126](https://github.com/sukar0972/vlkn4svga3d/issues/126) — Medium: SM2 SINCOS (3-source) rejected; only SM3 form accepted
+- [x] [#128](https://github.com/sukar0972/vlkn4svga3d/issues/128) — Medium: RSQ and POW skip abs required by D3D9
+- [x] [#126](https://github.com/sukar0972/vlkn4svga3d/issues/126) — Medium: SM2 SINCOS (3-source) rejected; only SM3 form accepted
 - [ ] [#110](https://github.com/sukar0972/vlkn4svga3d/issues/110) — Low: Int/bool shader consts stored never uploaded
 - [ ] [#88](https://github.com/sukar0972/vlkn4svga3d/issues/88) — Low: D3D9 opcode allowlist gaps
 
