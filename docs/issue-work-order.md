@@ -26,8 +26,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#159](https://github.com/sukar0972/vlkn4svga3d/issues/159) — Medium: Render-state and transform maps grow without limit
 - [x] [#104](https://github.com/sukar0972/vlkn4svga3d/issues/104) — Medium: Vertex reads can OOB (no robustBufferAccess)
 - [x] [#131](https://github.com/sukar0972/vlkn4svga3d/issues/131) — High: Surface redefine destroys old surface before allocate; failure orphans sid
-- [ ] [#158](https://github.com/sukar0972/vlkn4svga3d/issues/158) — Medium: Pipeline cache unbounded; stencil ref in key (not dynamic)
-- [ ] [#140](https://github.com/sukar0972/vlkn4svga3d/issues/140) — Medium: Svga3VlknConfig capacity fields dead; DEVCAP vs SVGA3_MAX_* drift
+- [x] [#158](https://github.com/sukar0972/vlkn4svga3d/issues/158) — Medium: Pipeline cache unbounded; stencil ref in key (not dynamic)
+- [x] [#140](https://github.com/sukar0972/vlkn4svga3d/issues/140) — Medium: Svga3VlknConfig capacity fields dead; DEVCAP vs SVGA3_MAX_* drift
 
 ## Submission, query and device-loss recovery
 

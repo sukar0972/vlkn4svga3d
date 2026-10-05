@@ -48,8 +48,8 @@ typedef struct Svga3VlknConfig {
     bool        enableValidationLayers; /* Enable VK_LAYER_KHRONOS_validation */
     bool        preferIntegratedGpu;    /* For power savings or testing */
     bool        forceMockBackend;       /* Force headless mock Vulkan driver for testing */
-    uint32_t    maxSurfaces;            /* Surface capacity (default: 4096) */
-    uint32_t    maxContexts;            /* Context capacity (default: 256) */
+    uint32_t    maxSurfaces;            /* Surface capacity (default: 4096; maximum: 4096) */
+    uint32_t    maxContexts;            /* Context capacity (default: 64; maximum: 64) */
     size_t      stagingBufferSize;      /* Staging buffer size in bytes (default: 64MB) */
 } Svga3VlknConfig;
 

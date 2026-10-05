@@ -429,7 +429,7 @@ private:
 
 class VlknContextManager {
 public:
-    VlknContextManager(VlknBackend *backend, VlknSurfaceManager *surfaceMgr);
+    VlknContextManager(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, uint32_t capacity = SVGA3_MAX_CONTEXTS);
     ~VlknContextManager();
 
     Svga3VlknStatus createContext(uint32_t cid);
@@ -438,6 +438,7 @@ public:
     bool exists(uint32_t cid) const;
     void clear();
     size_t count() const;
+    uint32_t capacity() const { return m_capacity; }
     void endAllRenderPasses();
     void endAllRenderPassesExcept(uint32_t cid);
     std::vector<std::pair<uint32_t, uint32_t>> collectPendingWindowPresents();
@@ -446,6 +447,7 @@ public:
 private:
     VlknBackend *m_backend;
     VlknSurfaceManager *m_surfaceMgr;
+    uint32_t m_capacity;
     std::unordered_map<uint32_t, std::unique_ptr<VlknContext>> m_contexts;
     mutable std::recursive_mutex m_mutex;
 };

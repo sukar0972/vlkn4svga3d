@@ -653,6 +653,8 @@ static void VKAPI_CALL mock_vkCmdSetScissor(VkCommandBuffer commandBuffer, uint3
     (void)commandBuffer; (void)first; (void)count; (void)pScissors;
 }
 
+static void VKAPI_CALL mock_vkCmdSetStencilValue(VkCommandBuffer, VkStencilFaceFlags, uint32_t) {}
+
 static void VKAPI_CALL mock_vkCmdSetBlendConstants(VkCommandBuffer commandBuffer, const float blendConstants[4]) {
     (void)commandBuffer; (void)blendConstants;
 }
@@ -1056,6 +1058,9 @@ static void populate_mock_table(VlknDispatchTable *t) {
     t->vkCmdSetViewport = mock_vkCmdSetViewport;
     t->vkCmdSetScissor = mock_vkCmdSetScissor;
     t->vkCmdSetBlendConstants = mock_vkCmdSetBlendConstants;
+    t->vkCmdSetStencilReference = mock_vkCmdSetStencilValue;
+    t->vkCmdSetStencilCompareMask = mock_vkCmdSetStencilValue;
+    t->vkCmdSetStencilWriteMask = mock_vkCmdSetStencilValue;
     t->vkCmdBindVertexBuffers = mock_vkCmdBindVertexBuffers;
     t->vkCmdBindIndexBuffer = mock_vkCmdBindIndexBuffer;
     t->vkCmdDraw = mock_vkCmdDraw;
@@ -1223,6 +1228,9 @@ bool vlkn_dispatch_init_device(VlknDispatchTable *table, VkInstance instance, Vk
     LOAD_DEV(vkCmdSetViewport);
     LOAD_DEV(vkCmdSetScissor);
     LOAD_DEV(vkCmdSetBlendConstants);
+    LOAD_DEV(vkCmdSetStencilReference);
+    LOAD_DEV(vkCmdSetStencilCompareMask);
+    LOAD_DEV(vkCmdSetStencilWriteMask);
     LOAD_DEV(vkCmdBindVertexBuffers);
     LOAD_DEV(vkCmdBindIndexBuffer);
     LOAD_DEV(vkCmdDraw);

@@ -1937,6 +1937,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         key.alphaFunc = SVGA3D_CMP_ALWAYS;
         key.alphaRef = 0;
     }
+    // Stencil reference/masks are dynamic and never multiply cache keys.
+    key.stencilRef = key.ccwStencilRef = 0;
+    key.stencilMask = key.ccwStencilMask = 0;
+    key.stencilWriteMask = key.ccwStencilWriteMask = 0;
     key._pad = 0;
 
     auto it = m_pipelineCache.find(key);
@@ -1944,6 +1948,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         return it->second;
     }
 
+    if (m_pipelineCache.size() >= 256) return VK_NULL_HANDLE;
     /* Create Graphics Pipeline */
     VkGraphicsPipelineCreateInfo pipeInfo = {};
     pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -2287,10 +2292,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     pipeInfo.pColorBlendState = &blendInfo;
 
     /* Dynamic State */
-    VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS };
+    VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK };
     VkPipelineDynamicStateCreateInfo dynInfo = {};
     dynInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynInfo.dynamicStateCount = 3;
+    dynInfo.dynamicStateCount = sizeof(dynStates) / sizeof(dynStates[0]);
     dynInfo.pDynamicStates = dynStates;
     pipeInfo.pDynamicState = &dynInfo;
 
@@ -2428,6 +2433,14 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         }
     }
 
+    if (m_pipelineCache.size() >= 256) {
+        endRenderPassIfActive();
+        auto status = m_backend->flushCommandBuffer();
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+        for (const auto &entry : m_pipelineCache)
+            m_backend->dispatch().vkDestroyPipeline(m_backend->device(), entry.second, nullptr);
+        m_pipelineCache.clear();
+    }
     /* Retire bounded caches only after all recorded references complete, and
      * before allocating this draw's constants or descriptor inputs. */
     if (m_samplerCache.size() >= 64 || m_descriptorSetCache.size() >= 2048) {
@@ -2859,6 +2872,18 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     };
     m_backend->dispatch().vkCmdSetBlendConstants(cb, blendConstants);
 
+    auto stencilValues = [&](SVGA3dRenderStateName state, auto command) {
+        uint32_t front = m_renderStates[state], back = front;
+        if (m_renderStates[SVGA3D_RS_STENCILENABLE2SIDED] && (front & 0xffff0000u) == 0x564c0000u) {
+            back = (front >> 8) & 255; front &= 255;
+        }
+        command(cb, VK_STENCIL_FACE_FRONT_BIT, front);
+        command(cb, VK_STENCIL_FACE_BACK_BIT, back);
+    };
+    stencilValues(SVGA3D_RS_STENCILREF, m_backend->dispatch().vkCmdSetStencilReference);
+    stencilValues(SVGA3D_RS_STENCILMASK, m_backend->dispatch().vkCmdSetStencilCompareMask);
+    stencilValues(SVGA3D_RS_STENCILWRITEMASK, m_backend->dispatch().vkCmdSetStencilWriteMask);
+
     if (m_descriptorSet) {
         uint32_t dynamicOffsets[2] = {m_vsConstDynamicOffset, m_psConstDynamicOffset};
         m_backend->dispatch().vkCmdBindDescriptorSets(
@@ -3058,9 +3083,10 @@ bool VlknContext::isQueryActive(SVGA3dQueryType type) const {
 
 /* Context Manager */
 
-VlknContextManager::VlknContextManager(VlknBackend *backend, VlknSurfaceManager *surfaceMgr)
+VlknContextManager::VlknContextManager(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, uint32_t capacity)
     : m_backend(backend)
     , m_surfaceMgr(surfaceMgr)
+    , m_capacity(std::min(capacity, SVGA3_MAX_CONTEXTS))
 {}
 
 VlknContextManager::~VlknContextManager() {
@@ -3074,9 +3100,9 @@ Svga3VlknStatus VlknContextManager::createContext(uint32_t cid) {
     }
     /* Cap contexts: each holds pipelines, shaders and buffers, so an
      * unbounded count exhausts host memory. */
-    if (m_contexts.size() >= SVGA3_MAX_CONTEXTS) {
+    if (m_contexts.size() >= m_capacity) {
         log_msg("[libqemu_svga3d] createContext error: context limit %u reached\n",
-                SVGA3_MAX_CONTEXTS);
+                m_capacity);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
 
