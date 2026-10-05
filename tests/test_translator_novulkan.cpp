@@ -904,7 +904,7 @@ int main() {
         }
     }
 
-    for (uint32_t opcode : {15u,16u,17u,20u,33u,36u,90u,91u,92u,93u,95u}) {
+    for (uint32_t opcode : {15u,16u,17u,21u,33u,36u,90u,91u,92u,93u,95u}) {
         const uint32_t tokens[]{0xffff0300,opcode|(3u<<24),D3D9_DST(0,0,15),D3D9_SRC(2,0,0xe4),D3D9_SRC(2,1,0xe4),0xffff};
         std::vector<uint32_t> spirv; std::string error;
         TEST_CHECK(svga3_vlkn::svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_PS,tokens,sizeof(tokens)/4,spirv,error)!=SVGA3_VLKN_SUCCESS,
