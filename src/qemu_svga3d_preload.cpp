@@ -7,9 +7,9 @@
  * Unallowlisted QEMU processes _exit(78) before patching. Other processes
  * do not arm this adapter.
  *
- * Each allowlist entry pairs ONE build-id with the RVA set further down.
- * Those RVAs are per-build; adding a build means re-verifying EVERY ADDR_*
- * against that exact binary. Never extend the list from a guess.
+ * This adapter supports exactly one build-id and one ADDR and OFFSET set.
+ * A compile-time guard forbids adding another allowlist entry until all addresses,
+ * object offsets and byte probes become per-build tables. Never reuse these RVAs.
  *
  * Validation layers: on for debug builds, off for release builds, with the
  * SVGA3_VLKN_VALIDATE env var able to force either way ("1"/"0").
@@ -92,20 +92,10 @@
 #define SCREEN_W                      1280
 #define SCREEN_H                      800
 
-/* SVGA Capabilities Advertised to Guest (0x00d2c0e3):
- * Bit 0: RECT_COPY (0x01)
- * Bit 1: CURSOR (0x02)
- * Bit 5: CURSOR (legacy 0x20)
- * Bit 6: SYNCHRONIZATION (0x40)
- * Bit 7: GLYPH (0x80)
- * Bit 14: 3D (0x4000)
- * Bit 15: EXTENDED_FIFO (0x8000)
- * Bit 17: PITCHLOCK (0x20000)
- * Bit 18: IRQMASK cleared (0x0) -> forces synchronous polling
- * Bit 20: GMR (0x100000)
- * Bit 22: GMR2 (0x400000)
- * Bit 23: SCREEN_OBJECT_2 (0x800000)
- */
+/* Advertised SVGA register capabilities (0x00d2c0e2): RECT_COPY (bit 1),
+ * CURSOR (5), CURSOR_BYPASS (6), CURSOR_BYPASS_2 (7), 3D (14),
+ * EXTENDED_FIFO (15), PITCHLOCK (17), GMR (20), GMR2 (22), SCREEN_OBJECT_2 (23).
+ * Undefined bit 0 and IRQMASK are clear; the lab path uses polling. */
 #ifndef SVGA_CAP_PITCHLOCK
 #define SVGA_CAP_PITCHLOCK            0x00020000
 #endif
@@ -118,7 +108,7 @@
 #ifndef SVGA_FIFO_CAP_SCREEN_OBJECT_2
 #define SVGA_FIFO_CAP_SCREEN_OBJECT_2   (1 << 9)
 #endif
-#define SVGA_CAPABILITIES_VALUE       (0x0050c0e3 | SVGA_CAP_PITCHLOCK | SVGA_CAP_SCREEN_OBJECT_2)
+#define SVGA_CAPABILITIES_VALUE       (0x0050c0e2 | SVGA_CAP_PITCHLOCK | SVGA_CAP_SCREEN_OBJECT_2)
 #define EXPANDED_FIFO_SIZE            0x400000
 /* vmwgfx (GMR2 path) sets legacy surface memory to
  * SVGA_REG_MEMORY_SIZE - SVGA_REG_VRAM_SIZE. Equal values leave a 0 kB
@@ -141,7 +131,8 @@
 #define SVGA_CMD_RECT_FILL            2
 #endif
 #define SVGA_FIFO_NEXT                SVGA_FIFO_NEXT_CMD
-#define SVGA3D_HWVERSION_WS65_B1      0x00020001
+static constexpr uint32_t kPreloadHardwareVersion = SVGA3D_HWVERSION_WS65_B1;
+static_assert(kPreloadHardwareVersion == 0x00020000, "WS65_B1 protocol value");
 #define SVGA_FIFO_BUSY                290
 
 struct vmsvga_rect_s {
@@ -195,23 +186,44 @@ static bool portrait_profile_enabled() {
 
 /* Explicit build-id allowlist for the binary-patch path. See the file-top
  * policy comment: one entry = one (build-id, RVA-set) pair. */
+struct PreloadPatchLayout {
+    uintptr_t ioOps;
+    uintptr_t ioRead;
+    uintptr_t ioWrite;
+    uintptr_t syncCallTarget;
+};
+static constexpr PreloadPatchLayout kSingleBuildLayout{ADDR_VMSVGA_IO_OPS,ADDR_VMSVGA_IO_READ,ADDR_VMSVGA_IO_WRITE,0x607150};
 struct PreloadBuildEntry {
     const char *label;
     unsigned char build_id[20];
+    const PreloadPatchLayout *layout;
 };
 static const PreloadBuildEntry kPreloadBuildAllowlist[] = {
     { "qemu-system-x86_64 10.1.2 (owner lab build)",
       { 0x2e,0x87,0x0e,0x40,0x0e,0x16,0x92,0xf5,
         0xf5,0xa5,0x4d,0xa8,0x97,0xd1,0xdc,0x15,
-        0x2b,0x18,0x72,0x78 } },
+        0x2b,0x18,0x72,0x78 }, &kSingleBuildLayout },
 };
 
+static_assert(sizeof(kPreloadBuildAllowlist)/sizeof(kPreloadBuildAllowlist[0])==1,
+    "Multiple QEMU builds require per-build ADDR/OFFSET and byte-probe tables");
+static const PreloadPatchLayout *preload_layout_for_build(const unsigned char *id,size_t len) {
+    if (!id || len!=sizeof(kPreloadBuildAllowlist[0].build_id)) return nullptr;
+    const auto &entry=kPreloadBuildAllowlist[0];
+    return !memcmp(id,entry.build_id,len) ? entry.layout : nullptr;
+}
+static bool preload_io_ops_match(const void *const *ops,uintptr_t base,const PreloadPatchLayout &layout) {
+    return ops && reinterpret_cast<uintptr_t>(ops[0])==base+layout.ioRead &&
+        reinterpret_cast<uintptr_t>(ops[1])==base+layout.ioWrite;
+}
+static bool preload_sync_call_matches(const uint8_t *code,uintptr_t address,uintptr_t target) {
+    if (!code || code[8]!=0xe8) return false;
+    int32_t displacement; memcpy(&displacement,code+9,sizeof(displacement));
+    return address+13+int64_t(displacement)==target;
+}
+
 static bool preload_build_id_allowed(const unsigned char *id, size_t len) {
-    if (!id || len != sizeof(kPreloadBuildAllowlist[0].build_id)) return false;
-    for (const auto &entry : kPreloadBuildAllowlist) {
-        if (!memcmp(id, entry.build_id, sizeof(entry.build_id))) return true;
-    }
-    return false;
+    return preload_layout_for_build(id,len)!=nullptr;
 }
 
 /* Stable lowercase hex for refusal diagnostics: the operator must be able to
@@ -774,7 +786,9 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                     redraw(s, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
             }
         } else if (cmd == SVGA_CMD_BLIT_SCREEN_TO_GMRFB) {
-            log_msg("[libqemu_svga3d] BLIT_SCREEN_TO_GMRFB\n");
+            static uint64_t unsupportedReadbacks=0;
+            if (++unsupportedReadbacks==1 || (unsupportedReadbacks&(unsupportedReadbacks-1))==0)
+                log_msg("[libqemu_svga3d] BLIT_SCREEN_TO_GMRFB is unsupported (total=%llu)\n",(unsigned long long)unsupportedReadbacks);
         } else if (cmd == SVGA_CMD_ANNOTATION_FILL || cmd == SVGA_CMD_ANNOTATION_COPY) {
             /* Handled / consumed */
         } else if ((cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) ||
@@ -919,8 +933,8 @@ extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, u
                                                     SVGA_FIFO_CAP_SCREEN_OBJECT | SVGA_FIFO_CAP_SCREEN_OBJECT_2;
                     fifo[SVGA_FIFO_FLAGS] = 0;
                     fifo[SVGA_FIFO_FENCE] = 0;
-                    fifo[SVGA_FIFO_3D_HWVERSION] = SVGA3D_HWVERSION_WS65_B1;
-                    fifo[SVGA_FIFO_3D_HWVERSION_REVISED] = SVGA3D_HWVERSION_WS65_B1;
+                    fifo[SVGA_FIFO_3D_HWVERSION] = kPreloadHardwareVersion;
+                    fifo[SVGA_FIFO_3D_HWVERSION_REVISED] = kPreloadHardwareVersion;
                     if (fifo[SVGA_FIFO_MIN] > (SVGA_FIFO_BUSY * 4)) {
                         fifo[SVGA_FIFO_BUSY] = 0;
                     }
@@ -1216,6 +1230,12 @@ static void svga3d_init(void) {
         _exit(78);
     }
 
+    const auto &layout=*kPreloadBuildAllowlist[0].layout;
+    if (!preload_io_ops_match(reinterpret_cast<const void *const *>(qemu_base+layout.ioOps),qemu_base,layout) ||
+        !preload_sync_call_matches(reinterpret_cast<const uint8_t *>(qemu_base+ADDR_QEMU_INPUT_EVENT_SYNC),
+            qemu_base+ADDR_QEMU_INPUT_EVENT_SYNC,qemu_base+layout.syncCallTarget)) {
+        fprintf(stderr,"SVGA shim: unexpected IO ops or sync call target; refusing patch\n"); _exit(78);
+    }
     const unsigned char expected_flush[]={0x41,0x57,0x41,0x56,0x49,0x89,0xfe,0x41,0x55,0x41,0x54,0x55,0x53,0x48,0x83,0xec,0x28};
     const unsigned char expected_create[]={0xf3,0x0f,0x1e,0xfa,0x41,0x57,0x41,0x89,0xcf};
     const unsigned char expected_replace[]={0xf3,0x0f,0x1e,0xfa,0x41,0x56,0x41,0x55,0x49,0x89,0xf5};
@@ -1302,7 +1322,7 @@ static void svga3d_init(void) {
     orig_input_queue_rel = (void (*)(void *, int, int))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_QUEUE_REL, 21, -1, 0);
     orig_input_queue_abs = (void (*)(void *, int, int, int, int))(qemu_base + ADDR_QEMU_INPUT_QUEUE_ABS);
     orig_input_event_sync = (void (*)(void))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_EVENT_SYNC, 15, 8,
-                                                            qemu_base + 0x607150);
+                                                            qemu_base + layout.syncCallTarget);
     if (!orig_input_update_buttons || !orig_input_queue_rel || !orig_input_event_sync) {
         perror("[libqemu_svga3d] mmap input trampoline failed"); _exit(78);
     }

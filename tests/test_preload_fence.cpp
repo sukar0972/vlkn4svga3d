@@ -17,7 +17,31 @@ static const unsigned char kGoodBuildId[20] = {
     0x2b,0x18,0x72,0x78
 };
 
+static void fakeWrite(void *,uint64_t,uint64_t,unsigned) {}
 int main() {
+    const auto *layout=preload_layout_for_build(kGoodBuildId,sizeof(kGoodBuildId));
+    CHECK(layout==&kSingleBuildLayout && layout->ioOps==ADDR_VMSVGA_IO_OPS && layout->syncCallTarget==0x607150);
+    CHECK(preload_layout_for_build(nullptr,20)==nullptr);
+    unsigned char badId[20]{}; CHECK(preload_layout_for_build(badId,20)==nullptr);
+    uintptr_t base=0x100000;
+    const void *ops[2]{reinterpret_cast<void *>(base+layout->ioRead),reinterpret_cast<void *>(base+layout->ioWrite)};
+    CHECK(preload_io_ops_match(ops,base,*layout));
+    ops[1]=nullptr; CHECK(!preload_io_ops_match(ops,base,*layout));
+    uint8_t sync[13]{}; sync[8]=0xe8;
+    int32_t displacement=42; memcpy(sync+9,&displacement,4);
+    CHECK(preload_sync_call_matches(sync,base,base+13+42));
+    CHECK(!preload_sync_call_matches(sync,base,base+13+43));
+    std::vector<uint64_t> stateWords(0x13000/8);
+    auto *state=reinterpret_cast<char *>(stateWords.data());
+    std::vector<uint32_t> fifo(2048); fifo[SVGA_FIFO_MIN]=4096;
+    *reinterpret_cast<uint32_t **>(state+OFFSET_FIFO)=fifo.data();
+    *reinterpret_cast<int *>(state+OFFSET_INDEX)=SVGA_REG_CONFIG_DONE;
+    orig_io_write=fakeWrite; g_vlkn_initialized=true;
+    my_vmsvga_io_write(state,1,1,4);
+    CHECK(fifo[SVGA_FIFO_3D_HWVERSION]==SVGA3D_HWVERSION_WS65_B1 && fifo[SVGA_FIFO_3D_HWVERSION_REVISED]==0x00020000);
+    CHECK((SVGA_CAPABILITIES_VALUE&1)==0);
+    g_vlkn_initialized=false;
+
     for (const auto &cap : g_DevCaps) {
         if (cap.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND || cap.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES ||
             cap.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING || cap.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES ||

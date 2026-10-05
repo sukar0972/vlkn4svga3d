@@ -168,10 +168,6 @@ VlknSurface::VlknSurface(VlknBackend *backend,
     , m_buffer(VK_NULL_HANDLE)
     , m_bufferMemory(VK_NULL_HANDLE)
     , m_bufferSize(0)
-    , m_readbackValid(false)
-    , m_readbackW(0)
-    , m_readbackH(0)
-    , m_readbackPitch(0)
 {
     m_vkFormat = (VkFormat)svga3d_to_vk_format((uint32_t)format);
 
@@ -548,7 +544,7 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
         views.insert(views.end(),m_previousSampledViews.begin(),m_previousSampledViews.end());
         m_rtViews.clear(); m_previousSampledViews.clear();
         m_backend->retireImage(oldImage,oldMemory,std::move(views));
-        invalidateReadback();
+
         return status;
     }
     m_backend->dispatch().vkDestroyImageView(m_backend->device(), oldView, nullptr);
@@ -558,7 +554,7 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
     m_previousSampledViews.clear();
     m_backend->dispatch().vkDestroyImage(m_backend->device(), oldImage, nullptr);
     m_backend->freeMemory(oldMemory);
-    invalidateReadback();
+
     return status;
 }
 
@@ -950,7 +946,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     if (!guestData || (mipLevel >= m_mipLevels || face >= m_arrayLayers)) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
-    invalidateReadback();
+
 
     const SurfaceMipLevel &mip = m_mips[mipLevel];
     uint32_t bw = box ? box->w : mip.width;
@@ -1512,11 +1508,6 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
                 }
             }
         }
-        bool fullMip = bx == 0 && by == 0 && bz == 0 &&
-                       bw == mip.width && bh == mip.height && bd == 1;
-        if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip && face == 0) {
-            storeReadback(bw, bh, rowPitch, mapped);
-        }
         return SVGA3_VLKN_SUCCESS;
     }
 
@@ -1626,29 +1617,11 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
         }
     }
 
-    bool fullMip = bx == 0 && by == 0 && bz == 0 &&
-                   bw == mip.width && bh == mip.height && bd == 1;
-    if (mipLevel == 0 && !m_isDepthStencil && !compressed && fullMip && face == 0) {
-        storeReadback(bw, bh, copyRowBytes, mapped);
-    }
 
     m_backend->dispatch().vkUnmapMemory(m_backend->device(), stagingMem);
     m_backend->destroyBuffer(stagingBuf, stagingMem);
 
     return SVGA3_VLKN_SUCCESS;
-}
-
-void VlknSurface::storeReadback(uint32_t w, uint32_t h, size_t pitch, const void *src) {
-    if (!src || w == 0 || h == 0 || pitch == 0) {
-        m_readbackValid = false;
-        return;
-    }
-    m_readback.resize(pitch * h);
-    memcpy(m_readback.data(), src, pitch * h);
-    m_readbackW = w;
-    m_readbackH = h;
-    m_readbackPitch = pitch;
-    m_readbackValid = true;
 }
 
 VlknSurfaceManager::VlknSurfaceManager(VlknBackend *backend, uint32_t capacity)
@@ -1890,7 +1863,7 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
     }
 
     /* The destination's contents changed: invalidate its readback cache. */
-    dst->invalidateReadback();
+
     return m_backend->flushCommandBuffer();
 }
 
@@ -1990,7 +1963,6 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
         m_backend->dispatch().vkCmdBlitImage(cb, src->image(), srcLayout, dst->image(), dstLayout, 1, &blit, VK_FILTER_NEAREST);
     }
 
-    dst->invalidateReadback();
     return m_backend->flushCommandBuffer();
 }
 
@@ -2217,7 +2189,7 @@ Svga3VlknStatus VlknSurfaceManager::generateMipmaps(uint32_t sid, SVGA3dTextureF
 
     surf->transitionLayout(cb, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     surf->ensureViewMipLevels(surf->mipLevels());
-    surf->invalidateReadback();
+
     return m_backend->flushCommandBuffer();
 }
 
