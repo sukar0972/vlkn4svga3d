@@ -764,6 +764,7 @@ void VlknContext::initDefaultRenderStates() {
 }
 
 Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_t value) {
+    if ((uint32_t)state >= SVGA3D_RS_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     m_renderStates[(uint32_t)state] = value;
     return SVGA3_VLKN_SUCCESS;
 }
@@ -936,7 +937,7 @@ Svga3VlknStatus VlknContext::setScissorRect(const SVGA3dRect *rect) {
 }
 
 Svga3VlknStatus VlknContext::setTransform(SVGA3dTransformType type, const float matrix[16]) {
-    if (!matrix) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (!matrix || (uint32_t)type >= SVGA3D_TRANSFORM_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::array<float, 16> mat;
     std::copy(matrix, matrix + 16, mat.begin());
     m_transforms[(uint32_t)type] = mat;

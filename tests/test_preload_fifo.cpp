@@ -223,6 +223,21 @@ int main() {
       g_screen_deactivated && !g_screen_scanout_active && displayPixels==nullptr;
   printf("screen define/destroy FIFO packets and completion fences: %s\n",screenPacketOk?"PASS":"FAIL");
   ok &= screenPacketOk;
+  orig_io_read = fakeRead;
+  for (bool wrap : {false, true}) {
+    reset(wrap ? uint32_t(ring.size()*4-4) : 4096);
+    append(SVGA_CMD_UPDATE_VERBOSE);
+    for (uint32_t word : {0u,0u,1u,1u,0x12345678u}) append(word);
+    append(SVGA_CMD_FENCE); append(46);
+    my_vmsvga_fifo_run(state);
+    bool framed = fifo[3] == fifo[2] && fifo[SVGA_FIFO_FENCE] == 46;
+    printf("UPDATE_VERBOSE %s framing and following fence: %s\n",wrap?"wrapped":"linear",framed?"PASS":"FAIL");
+    ok &= framed;
+  }
+  reset(4096); append(0x12345678); append(SVGA_CMD_FENCE); append(47);
+  my_vmsvga_fifo_run(state);
+  ok &= fifo[3] == 4096 && fifo[SVGA_FIFO_FENCE] == 0;
+  orig_io_read = screenRead;
   // Screen backing-store pitch and size need not match legacy mode registers.
   // Copy beyond the legacy height into a screen with padding between rows.
   std::fill(vram.begin(), vram.end(), 0x9b);

@@ -198,6 +198,9 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
         return SVGA3_VLKN_SUCCESS;
     }
 
+    if (!descriptors) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+
+    constexpr uint64_t maxPpn = UINT64_MAX >> SVGA3_PAGE_SHIFT;
     bool isPPN64 = (flags & SVGA_REMAP_GMR2_PPN64) != 0;
     bool isSinglePPN = (flags & SVGA_REMAP_GMR2_SINGLE_PPN) != 0;
     bool isViaGMR = (flags & SVGA_REMAP_GMR2_VIA_GMR) != 0;
@@ -218,6 +221,9 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
             if (outBytesConsumed) *outBytesConsumed = sizeof(uint32_t);
         }
 
+        const uint64_t limit = isPPN64 ? maxPpn : UINT32_MAX;
+        if (singlePpn > limit || numPages - 1 > limit - singlePpn)
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
         for (uint32_t i = 0; i < numPages; ++i) {
             region.ppns[offsetPages + i] = singlePpn + i;
         }
@@ -253,7 +259,7 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
                 uint32_t pIdx = curOffset / SVGA3_PAGE_SIZE;
                 uint32_t pOff = curOffset % SVGA3_PAGE_SIZE;
                 uint64_t ppn = srcRegion.ppns[pIdx];
-                if (ppn == 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                if (ppn == 0 || ppn > (UINT64_MAX >> SVGA3_PAGE_SHIFT)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
                 size_t chunk = std::min(bytesLeft, static_cast<size_t>(SVGA3_PAGE_SIZE - pOff));
                 uint64_t gpa = (ppn << SVGA3_PAGE_SHIFT) + pOff;
                 if (!readPhysicalLocked(gpa, curDst, chunk)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -262,6 +268,8 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
                 curDst += chunk;
             }
 
+            for (auto ppn : pageList)
+                if (ppn > maxPpn) return SVGA3_VLKN_ERROR_INVALID_PARAM;
             for (uint32_t i = 0; i < numPages; ++i) {
                 region.ppns[offsetPages + i] = pageList[i];
             }
@@ -285,7 +293,7 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
                 uint32_t pIdx = curOffset / SVGA3_PAGE_SIZE;
                 uint32_t pOff = curOffset % SVGA3_PAGE_SIZE;
                 uint64_t ppn = srcRegion.ppns[pIdx];
-                if (ppn == 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                if (ppn == 0 || ppn > (UINT64_MAX >> SVGA3_PAGE_SHIFT)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
                 size_t chunk = std::min(bytesLeft, static_cast<size_t>(SVGA3_PAGE_SIZE - pOff));
                 uint64_t gpa = (ppn << SVGA3_PAGE_SHIFT) + pOff;
                 if (!readPhysicalLocked(gpa, curDst, chunk)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -294,6 +302,8 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
                 curDst += chunk;
             }
 
+            for (auto ppn : pageList)
+                if (ppn > maxPpn) return SVGA3_VLKN_ERROR_INVALID_PARAM;
             for (uint32_t i = 0; i < numPages; ++i) {
                 region.ppns[offsetPages + i] = pageList[i];
             }
@@ -308,6 +318,8 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
             return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
         }
         const auto *ppnArray = reinterpret_cast<const uint64_t*>(descriptors);
+        for (uint32_t i = 0; i < numPages; ++i)
+            if (ppnArray[i] > maxPpn) return SVGA3_VLKN_ERROR_INVALID_PARAM;
         for (uint32_t i = 0; i < numPages; ++i) {
             region.ppns[offsetPages + i] = ppnArray[i];
         }
@@ -448,7 +460,7 @@ Svga3VlknStatus GuestMemoryManager::readGuest(const SVGAGuestPtr &ptr, void *dst
 
     const auto &region = it->second;
     uint64_t totalBytes = static_cast<uint64_t>(region.numPages) * SVGA3_PAGE_SIZE;
-    if (static_cast<uint64_t>(ptr.offset) + size > totalBytes) {
+    if (ptr.offset > totalBytes || size > totalBytes - ptr.offset) {
         static uint32_t oob_cnt = 0;
         if (++oob_cnt <= 10) {
             log_msg("[libqemu_svga3d] readGuest error: GMR id=%u offset %u + size %zu > totalBytes %lu\n",
@@ -474,7 +486,7 @@ Svga3VlknStatus GuestMemoryManager::readGuest(const SVGAGuestPtr &ptr, void *dst
         }
 
         uint64_t ppn = region.ppns[pageIndex];
-        if (ppn == 0) {
+        if (ppn == 0 || ppn > (UINT64_MAX >> SVGA3_PAGE_SHIFT)) {
             static uint32_t ppn_zero_cnt = 0;
             if (++ppn_zero_cnt <= 10) {
                 log_msg("[libqemu_svga3d] readGuest error: ppn is 0 at pageIndex %u\n", pageIndex);
@@ -527,7 +539,7 @@ Svga3VlknStatus GuestMemoryManager::writeGuest(const SVGAGuestPtr &ptr, const vo
 
     const auto &region = it->second;
     uint64_t totalBytes = static_cast<uint64_t>(region.numPages) * SVGA3_PAGE_SIZE;
-    if (static_cast<uint64_t>(ptr.offset) + size > totalBytes) {
+    if (ptr.offset > totalBytes || size > totalBytes - ptr.offset) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
@@ -543,7 +555,7 @@ Svga3VlknStatus GuestMemoryManager::writeGuest(const SVGAGuestPtr &ptr, const vo
         }
 
         uint64_t ppn = region.ppns[pageIndex];
-        if (ppn == 0) {
+        if (ppn == 0 || ppn > (UINT64_MAX >> SVGA3_PAGE_SHIFT)) {
             return SVGA3_VLKN_ERROR_INVALID_PARAM;
         }
 

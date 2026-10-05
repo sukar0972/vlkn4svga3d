@@ -12,7 +12,7 @@ jobs:
       - name: Install build and SPIR-V validation tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libvulkan-dev spirv-tools
+          sudo apt-get install -y build-essential libvulkan-dev spirv-tools mesa-vulkan-drivers vulkan-validationlayers
       - name: Verify SPIR-V validator is installed
         run: command -v spirv-val
       - name: Check Piglit result reporting
@@ -21,3 +21,9 @@ jobs:
         run: make -j2 test
       - name: Run no-ICD shader translator tests
         run: make test-translator-novulkan
+      - name: Run malformed-input regressions
+        run: make bin/test_malformed_inputs && ./bin/test_malformed_inputs
+      - name: Run lavapipe guest-memory, presentation and QEMU suites
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: make -j2 test-guest-mem test-presentation test-qemu
