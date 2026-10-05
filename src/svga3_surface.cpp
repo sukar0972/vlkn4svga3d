@@ -1905,7 +1905,9 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
                                               uint32_t dstSid,
                                               const SVGA3dBox &boxSrc,
                                               const SVGA3dBox &boxDest,
-                                              SVGA3dStretchBltMode mode)
+                                              SVGA3dStretchBltMode mode,
+                                              uint32_t srcMip, uint32_t srcFace,
+                                              uint32_t dstMip, uint32_t dstFace)
 {
     VlknSurface *src = getSurface(srcSid);
     VlknSurface *dst = getSurface(dstSid);
@@ -1916,18 +1918,49 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
     if (src->image() == VK_NULL_HANDLE || dst->image() == VK_NULL_HANDLE) {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
+    const auto *sm=src->getMipInfo(srcMip), *dm=dst->getMipInfo(dstMip);
+    if (!sm || !dm || srcFace>=src->arrayLayers() || dstFace>=dst->arrayLayers() ||
+        !boxSrc.w || !boxSrc.h || !boxDest.w || !boxDest.h ||
+        (mode!=SVGA3D_STRETCH_BLT_LINEAR && mode!=SVGA3D_STRETCH_BLT_POINT))
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (src->multisampleCount()>1 || dst->multisampleCount()>1) {
+        log_msg("[libqemu_svga3d] stretchBlt: multisample resolve unsupported\n");
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+    VkFormatProperties sp{},dp{};
+    auto &vk=m_backend->dispatch();
+    vk.vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),src->vkFormat(),&sp);
+    vk.vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),dst->vkFormat(),&dp);
+    if (!(sp.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_SRC_BIT) || !(dp.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT) ||
+        (mode==SVGA3D_STRETCH_BLT_LINEAR && !src->isDepthStencil() && !(sp.optimalTilingFeatures&VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) ||
+        src->isDepthStencil()!=dst->isDepthStencil() || (src->isDepthStencil() && src->vkFormat()!=dst->vkFormat()))
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
     /* 64-bit box validation: (x+w) wrapped in 32-bit, producing negative
      * Vulkan extents and out-of-image blits. */
-    if ((uint64_t)boxSrc.x + boxSrc.w > src->width() ||
-        (uint64_t)boxSrc.y + boxSrc.h > src->height() ||
-        (uint64_t)boxSrc.z + (boxSrc.d ? boxSrc.d : 1) > src->depth() ||
-        (uint64_t)boxDest.x + boxDest.w > dst->width() ||
-        (uint64_t)boxDest.y + boxDest.h > dst->height() ||
-        (uint64_t)boxDest.z + (boxDest.d ? boxDest.d : 1) > dst->depth()) {
+    if ((uint64_t)boxSrc.x + boxSrc.w > sm->width ||
+        (uint64_t)boxSrc.y + boxSrc.h > sm->height ||
+        (uint64_t)boxSrc.z + (boxSrc.d ? boxSrc.d : 1) > sm->depth ||
+        (uint64_t)boxDest.x + boxDest.w > dm->width ||
+        (uint64_t)boxDest.y + boxDest.h > dm->height ||
+        (uint64_t)boxDest.z + (boxDest.d ? boxDest.d : 1) > dm->depth) {
         log_msg("[libqemu_svga3d] stretchBlt error: box out of image bounds\n");
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
+    size_t snapshotBytes=0;
+    struct BudgetReservation {
+        VlknBackend *backend; size_t &bytes;
+        ~BudgetReservation() { if (bytes) backend->resourceBudgets().releaseSurfaceBytes(bytes); }
+    } reservation{m_backend,snapshotBytes};
+    std::unique_ptr<VlknSurface> snapshot;
+    if (src==dst) {
+        SVGA3dSize size{boxSrc.w,boxSrc.h,boxSrc.d ? boxSrc.d : 1};
+        snapshot=std::make_unique<VlknSurface>(m_backend,SVGA3D_INVALID_ID,0,src->svgaFormat(),&size,1);
+        size_t bytes=snapshot->budgetedBytes();
+        if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(bytes)) return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+        snapshotBytes=bytes;
+        auto st=snapshot->allocate(); if (st!=SVGA3_VLKN_SUCCESS) return st;
+    }
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     const VkImageLayout srcLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -1937,30 +1970,47 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
 
     VkImageBlit blit = {};
     blit.srcSubresource.aspectMask = src->isDepthStencil() ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.srcSubresource.mipLevel = 0;
-    blit.srcSubresource.baseArrayLayer = 0;
+    blit.srcSubresource.mipLevel = srcMip;
+    blit.srcSubresource.baseArrayLayer = srcFace;
     blit.srcSubresource.layerCount = 1;
     blit.srcOffsets[0] = { (int32_t)boxSrc.x, (int32_t)boxSrc.y, (int32_t)boxSrc.z };
     blit.srcOffsets[1] = { (int32_t)(boxSrc.x + boxSrc.w), (int32_t)(boxSrc.y + boxSrc.h), (int32_t)(boxSrc.z + (boxSrc.d ? boxSrc.d : 1)) };
 
     blit.dstSubresource.aspectMask = dst->isDepthStencil() ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.dstSubresource.mipLevel = 0;
-    blit.dstSubresource.baseArrayLayer = 0;
+    blit.dstSubresource.mipLevel = dstMip;
+    blit.dstSubresource.baseArrayLayer = dstFace;
     blit.dstSubresource.layerCount = 1;
     blit.dstOffsets[0] = { (int32_t)boxDest.x, (int32_t)boxDest.y, (int32_t)boxDest.z };
     blit.dstOffsets[1] = { (int32_t)(boxDest.x + boxDest.w), (int32_t)(boxDest.y + boxDest.h), (int32_t)(boxDest.z + (boxDest.d ? boxDest.d : 1)) };
 
+    VkImage sourceImage=src->image(); VkImageLayout sourceLayout=srcLayout;
+    if (snapshot) {
+        snapshot->transitionLayout(cb,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkImageCopy copy{};
+        copy.srcSubresource=blit.srcSubresource; copy.srcOffset=blit.srcOffsets[0];
+        copy.dstSubresource={copy.srcSubresource.aspectMask,0,0,1};
+        copy.extent={boxSrc.w,boxSrc.h,boxSrc.d ? boxSrc.d : 1};
+        vk.vkCmdCopyImage(cb,src->image(),srcLayout,snapshot->image(),VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+        if (svga3_format_has_stencil(src->svgaFormat())) {
+            copy.srcSubresource.aspectMask=copy.dstSubresource.aspectMask=VK_IMAGE_ASPECT_STENCIL_BIT;
+            vk.vkCmdCopyImage(cb,src->image(),srcLayout,snapshot->image(),VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&copy);
+        }
+        snapshot->transitionLayout(cb,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        sourceImage=snapshot->image(); sourceLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        blit.srcSubresource.mipLevel=0; blit.srcSubresource.baseArrayLayer=0;
+        blit.srcOffsets[0]={0,0,0}; blit.srcOffsets[1]={int32_t(boxSrc.w),int32_t(boxSrc.h),int32_t(copy.extent.depth)};
+    }
     VkFilter filter = (!src->isDepthStencil() && mode == SVGA3D_STRETCH_BLT_LINEAR) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 
     m_backend->dispatch().vkCmdBlitImage(
         cb,
-        src->image(), srcLayout,
+        sourceImage, sourceLayout,
         dst->image(), dstLayout,
         1, &blit, filter
     );
     if (svga3_format_has_stencil(src->svgaFormat()) && svga3_format_has_stencil(dst->svgaFormat())) {
         blit.srcSubresource.aspectMask = blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-        m_backend->dispatch().vkCmdBlitImage(cb, src->image(), srcLayout, dst->image(), dstLayout, 1, &blit, VK_FILTER_NEAREST);
+        m_backend->dispatch().vkCmdBlitImage(cb, sourceImage, sourceLayout, dst->image(), dstLayout, 1, &blit, VK_FILTER_NEAREST);
     }
 
     return m_backend->flushCommandBuffer();

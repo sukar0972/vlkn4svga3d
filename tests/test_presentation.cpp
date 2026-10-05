@@ -907,6 +907,21 @@ int main() {
     TEST_CHECK(dev->surfaceMgr->present(SID_RT,nullptr,0,dev->guestMem.get())==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT,"Reject 32-bit source to 16-bit scanout");
     svga3_vlkn_device_set_framebuffer(dev,qemuFb.data(),0,qemuFb.size()*4,FB_W,FB_H,FB_W*4,4);
 
+    SVGA3dSize mipSizes[12];
+    for (unsigned i=0;i<12;++i) mipSizes[i]={i%2 ? 2u : 4u,i%2 ? 2u : 4u,1};
+    TEST_CHECK(dev->surfaceMgr->defineSurface(9910,SVGA3D_SURFACE_CUBEMAP,SVGA3D_A8R8G8B8,mipSizes,12)==SVGA3_VLKN_SUCCESS,"Define mipmapped stretch source");
+    auto *stretch=dev->surfaceMgr->getSurface(9910);
+    TEST_CHECK(stretch->dmaUpload(1,&tiny,face3,8,false,3)==SVGA3_VLKN_SUCCESS,"Upload stretch source mip 1 / face 3");
+    TEST_CHECK(dev->surfaceMgr->stretchBlt(9910,9900,tiny,tiny,SVGA3D_STRETCH_BLT_POINT,1,3,0,2)==SVGA3_VLKN_SUCCESS,"Stretch selected source and destination subresources");
+    uint32_t stretchPixels[4]{};
+    TEST_CHECK(cube->dmaDownload(0,&tiny,stretchPixels,8,false,2)==SVGA3_VLKN_SUCCESS && memcmp(stretchPixels,face3,sizeof(face3))==0,"Stretch reads mip 1 / face 3 and writes face 2");
+    SVGA3dBox strip{0,0,0,4,2,1}; uint32_t pattern[8]={1,2,3,4,5,6,7,8};
+    TEST_CHECK(stretch->dmaUpload(0,&strip,pattern,16,false,0)==SVGA3_VLKN_SUCCESS,"Upload overlap pattern");
+    SVGA3dBox overlapSrc{0,0,0,3,2,1},overlapDst{1,0,0,3,2,1};
+    TEST_CHECK(dev->surfaceMgr->stretchBlt(9910,9910,overlapSrc,overlapDst,SVGA3D_STRETCH_BLT_POINT)==SVGA3_VLKN_SUCCESS,"Snapshot overlapping same-image stretch");
+    uint32_t overlapPixels[8]{}; const uint32_t overlapExpected[8]={1,1,2,3,5,5,6,7};
+    TEST_CHECK(stretch->dmaDownload(0,&strip,overlapPixels,16,false,0)==SVGA3_VLKN_SUCCESS && memcmp(overlapPixels,overlapExpected,sizeof(overlapExpected))==0,"Overlapping stretch preserves original source pixels");
+
     /* Clean up */
     svga3_vlkn_context_destroy(dev, CID);
     svga3_vlkn_surface_destroy(dev, SID_RT);
