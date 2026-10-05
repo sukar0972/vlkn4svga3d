@@ -810,6 +810,15 @@ Svga3VlknStatus VlknContext::getRenderState(SVGA3dRenderStateName state, uint32_
 }
 
 Svga3VlknStatus VlknContext::setRenderTarget(SVGA3dRenderTargetType type, uint32_t sid, uint32_t face, uint32_t mipmap) {
+    if (type>=SVGA3D_RT_COLOR0 && type<=SVGA3D_RT_COLOR3) {
+        auto *surface=m_surfaceMgr->getSurface(sid);
+        if (surface && surface->image()) {
+            VkFormatProperties properties{};
+            m_backend->dispatch().vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),surface->vkFormat(),&properties);
+            if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+                return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+        }
+    }
     if (type > SVGA3D_RT_COLOR0 && type <= SVGA3D_RT_COLOR3 && !m_backend->features().independentBlend &&
         sid != SVGA3D_INVALID_ID && sid != 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     endRenderPassIfActive();

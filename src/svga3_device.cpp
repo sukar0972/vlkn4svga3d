@@ -74,11 +74,11 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_SURFACEFMT_DXT3, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_DXT4, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_DXT5, 0x4f, true },
-    { SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8, 0x4f, true },
-    { SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10, 0x4f, true },
+    { SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8, 0, true },
+    { SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8, 0x4f, true },
-    { SVGA3D_DEVCAP_SURFACEFMT_CxV8U8, 0x4f, true },
+    { SVGA3D_DEVCAP_SURFACEFMT_CxV8U8, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_R_S10E5, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_R_S23E8, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_RG_S10E5, 0x4f, true },
@@ -96,7 +96,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES, 0, true },
     { SVGA3D_DEVCAP_ALPHATOCOVERAGE, 0, true },
     { SVGA3D_DEVCAP_SUPERSAMPLE, 0, true },
-    { SVGA3D_DEVCAP_AUTOGENMIPMAPS, 1, true },
+    { SVGA3D_DEVCAP_AUTOGENMIPMAPS, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_NV12, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_AYUV, 0, true },
     { SVGA3D_DEVCAP_MAX_CONTEXT_IDS, 64, true },
@@ -216,6 +216,18 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
              * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough.
              * (Mirrors advertised_devcap in qemu_svga3d_preload.cpp.) */
             switch (capIndex) {
+            case SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8:
+            case SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8:
+            case SVGA3D_DEVCAP_SURFACEFMT_V16U16:
+                val=SVGA3DFORMAT_OP_TEXTURE;
+                if (dev && dev->backend) {
+                    VkFormat format=capIndex==SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8 ? VK_FORMAT_R8G8_SNORM
+                        : capIndex==SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8 ? VK_FORMAT_R8G8B8A8_SNORM : VK_FORMAT_R16G16_SNORM;
+                    VkFormatProperties properties{};
+                    dev->backend->dispatch().vkGetPhysicalDeviceFormatProperties(dev->backend->physicalDevice(),format,&properties);
+                    if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) val=0;
+                }
+                break;
             case SVGA3D_DEVCAP_MAX_TEXTURE_ANISOTROPY:
                 if (dev && dev->backend) val = dev->backend->features().samplerAnisotropy
                     ? uint32_t(std::max(1.0f, std::min(16.0f, dev->backend->properties().limits.maxSamplerAnisotropy))) : 1;

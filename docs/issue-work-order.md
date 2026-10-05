@@ -50,8 +50,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#92](https://github.com/sukar0972/vlkn4svga3d/issues/92) — High: MSAA/A2C/supersample caps advertised, pipelines always 1×
 - [ ] [#153](https://github.com/sukar0972/vlkn4svga3d/issues/153) — Medium: Depth-stencil format honesty (has_stencil vs Vk vs aspect)
 - [x] [#152](https://github.com/sukar0972/vlkn4svga3d/issues/152) — Medium: clear() applies STENCIL aspect without format check
-- [ ] [#121](https://github.com/sukar0972/vlkn4svga3d/issues/121) — Medium: Signed bump/normal formats mapped as UNORM (advertised)
-- [ ] [#120](https://github.com/sukar0972/vlkn4svga3d/issues/120) — Medium-High: GENERATE_MIPMAPS blits without format blit support (AUTOGEN advertised)
+- [x] [#121](https://github.com/sukar0972/vlkn4svga3d/issues/121) — Medium: Signed bump/normal formats mapped as UNORM (advertised)
+- [x] [#120](https://github.com/sukar0972/vlkn4svga3d/issues/120) — Medium-High: GENERATE_MIPMAPS blits without format blit support (AUTOGEN advertised)
 - [x] [#119](https://github.com/sukar0972/vlkn4svga3d/issues/119) — Medium: MAX_FIXED_VERTEXBLEND=4 advertised, unimplemented
 - [x] [#138](https://github.com/sukar0972/vlkn4svga3d/issues/138) — Medium: MAX_VERTEX_SHADER_TEXTURES=4 advertised; VS has no sampler interface
 - [x] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
@@ -127,3 +127,9 @@ varying declarations fail explicitly. SM2 v# and t# declarations stay distinct.
 LOG, LIT, DST, CRS, NRM, DP2ADD, M4x3, DSX, DSY, TEXLDD and TEXLDL remain
 unsupported; rejection tests protect those gaps. New opcode support must include
 emission, SPIR-V validation and value/pixel coverage before expanding the allowlist.
+
+Signed textures: BUMPU8V8/V8U8, Q8W8V8U8 and V16U16 use SNORM and
+require host sampling support. Mixed signed/luminance and reconstructed-normal
+formats remain unsupported. Automatic mipmap capability is disabled; explicit
+GENERATE_MIPMAPS works only for uncompressed color formats with the required
+host blit and filter features.
