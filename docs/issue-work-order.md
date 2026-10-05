@@ -57,8 +57,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
 - [ ] [#129](https://github.com/sukar0972/vlkn4svga3d/issues/129) — Medium: Fixed-function texture combiner advertised but not implemented
 - [x] [#123](https://github.com/sukar0972/vlkn4svga3d/issues/123) — Medium: Wireframe/point fill without fillModeNonSolid
-- [ ] [#122](https://github.com/sukar0972/vlkn4svga3d/issues/122) — Medium: Anisotropy enabled without feature gate / limit clamp
-- [ ] [#116](https://github.com/sukar0972/vlkn4svga3d/issues/116) — Medium: MIRRORONCE without samplerMirrorClampToEdge
+- [x] [#122](https://github.com/sukar0972/vlkn4svga3d/issues/122) — Medium: Anisotropy enabled without feature gate / limit clamp
+- [x] [#116](https://github.com/sukar0972/vlkn4svga3d/issues/116) — Medium: MIRRORONCE without samplerMirrorClampToEdge
 - [x] [#114](https://github.com/sukar0972/vlkn4svga3d/issues/114) — Medium: Dual-source blend factors (SRC1*) silently map to ONE
 - [ ] [#162](https://github.com/sukar0972/vlkn4svga3d/issues/162) — Medium: Relative const addressing rejected while SM3 advertised
 - [x] [#161](https://github.com/sukar0972/vlkn4svga3d/issues/161) — Medium: ps_1_x accepted but wrong (white output; _x2/_x4/_d2 dropped)
@@ -86,12 +86,12 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#117](https://github.com/sukar0972/vlkn4svga3d/issues/117) — Medium: clear() ignores SCISSORTESTENABLE
 - [ ] [#101](https://github.com/sukar0972/vlkn4svga3d/issues/101) — High: Depth bias / polygon offset ignored
 - [ ] [#100](https://github.com/sukar0972/vlkn4svga3d/issues/100) — High: Point size and point sprites ignored
-- [ ] [#103](https://github.com/sukar0972/vlkn4svga3d/issues/103) — Medium-High: Anisotropic filter maps to NEAREST
+- [x] [#103](https://github.com/sukar0972/vlkn4svga3d/issues/103) — Medium-High: Anisotropic filter maps to NEAREST
 - [ ] [#102](https://github.com/sukar0972/vlkn4svga3d/issues/102) — Medium-High: sRGB sampled/written without gamma
 - [x] [#143](https://github.com/sukar0972/vlkn4svga3d/issues/143) — Medium: MRT blend attachments diverge without independentBlend gate
 - [ ] [#144](https://github.com/sukar0972/vlkn4svga3d/issues/144) — Medium: SVGA3D_RS_CLIPPING ignored (depthClampEnable never set)
 - [ ] [#145](https://github.com/sukar0972/vlkn4svga3d/issues/145) — Medium: SVGA3D_RS_LINEWIDTH ignored (always 1.0)
-- [ ] [#146](https://github.com/sukar0972/vlkn4svga3d/issues/146) — Medium: SVGA3D_TS_TEXTURE_MIPMAP_LEVEL silently dropped
+- [x] [#146](https://github.com/sukar0972/vlkn4svga3d/issues/146) — Medium: SVGA3D_TS_TEXTURE_MIPMAP_LEVEL silently dropped
 - [ ] [#156](https://github.com/sukar0972/vlkn4svga3d/issues/156) — Medium: FF texture transforms stored but never applied
 - [ ] [#99](https://github.com/sukar0972/vlkn4svga3d/issues/99) — Low/Medium: Fixed-function lights/clip planes stored, never applied
 
@@ -110,3 +110,7 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [ ] [#112](https://github.com/sukar0972/vlkn4svga3d/issues/112) — Low: Wrong capability bit comments; dead collectPendingWindowPresents; SCREEN_TO_GMRFB no-op
 - [ ] [#111](https://github.com/sukar0972/vlkn4svga3d/issues/111) — Low: README documents removed SVGA3_VLKN_LEGACY_CLIENT_PRESENT
 
+
+Sampler compatibility: MIRRORONCE currently uses CLAMP_TO_EDGE because the device
+does not enable mirror-clamp support. Anisotropic filters retain linear sampling
+when anisotropy is unavailable or sampler creation falls back.

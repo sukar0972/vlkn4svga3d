@@ -46,6 +46,7 @@ struct TextureStageState {
     uint32_t magFilter;
     uint32_t mipFilter;
     uint32_t maxAnisotropy;
+    uint32_t minMipLevel;
     uint32_t borderColor;
     float    mipLodBias;
     VkSampler sampler;
@@ -363,7 +364,7 @@ private:
     VkDescriptorSetLayout m_descriptorSetLayout;
     VkDescriptorSet m_descriptorSet;
     std::map<std::array<uint64_t, SVGA3_MAX_TEXTURE_STAGES * 2>, VkDescriptorSet> m_descriptorSetCache;
-    std::map<std::array<uint32_t, 10>, VkSampler> m_samplerCache;
+    std::map<std::array<uint32_t, 11>, VkSampler> m_samplerCache;
     bool m_descriptorSetInitialized;
     bool m_descriptorSetDirty;
     bool m_constantsDirty;

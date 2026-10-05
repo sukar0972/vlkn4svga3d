@@ -216,6 +216,10 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
              * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough.
              * (Mirrors advertised_devcap in qemu_svga3d_preload.cpp.) */
             switch (capIndex) {
+            case SVGA3D_DEVCAP_MAX_TEXTURE_ANISOTROPY:
+                if (dev && dev->backend) val = dev->backend->features().samplerAnisotropy
+                    ? uint32_t(std::max(1.0f, std::min(16.0f, dev->backend->properties().limits.maxSamplerAnisotropy))) : 1;
+                break;
             case SVGA3D_DEVCAP_MAX_RENDER_TARGETS:
             case SVGA3D_DEVCAP_MAX_SIMULTANEOUS_RENDER_TARGETS:
                 if (dev && dev->backend && !dev->backend->features().independentBlend) val = 1;
