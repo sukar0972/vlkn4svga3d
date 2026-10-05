@@ -24,6 +24,7 @@ jobs:
       - name: Run malformed-input regressions
         run: make bin/test_malformed_inputs && ./bin/test_malformed_inputs
       - name: Run lavapipe guest-memory, presentation and QEMU suites
-        env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        run: make -j2 test-guest-mem test-presentation test-qemu
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          make -j2 test-guest-mem test-presentation test-qemu
