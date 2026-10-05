@@ -64,4 +64,26 @@ The local SPIR-V validator is unavailable; its optional checks report skips.
 CI installs and requires `spirv-val`. New controls cover merged/split/reordered
 notifications, missing coverage, partial PRESENT of an image larger than staging,
 queued upload visibility, different source mappings, and overlapping commands.
-Guest Piglit, glmark2, and deployment verification are pending.
+The exact release runtime passes all 146 selected guest Piglit cases with the
+same outcome as before: 140 passes, one known dated API-error expectation
+mismatch, and five unsupported skips. There are no regressions, failed pixel
+probes, timeouts, or graphics recoveries. The corrected depth/stencil API control
+and independent accuracy probe also pass. The expanded 29-case paired framebuffer
+comparison has 13 hardware passes, 16 unsupported hardware skips, and 154 passing
+hardware subtests; llvmpipe passes all 29 top-level cases. Both runs have zero
+Vulkan validation errors and warnings.
+
+Release glmark2 validation retains 27 Success, six Unknown, and zero Failure.
+Unknown cases are not correctness passes. A fresh pre-change probe scores 410;
+the candidate scores 443 after a half-second-per-scene warmup, using 800×600,
+vblank disabled, and one second per measured scene. Both leave VM105 and other
+services running. These single runs are separated by the accuracy replay and
+changing background load; they do not establish a causal 8% whole-suite gain.
+The original 500 goal remains unmet.
+
+The release source is `2a60939`; its adapter SHA-256 is
+`1df1f5737edc40689bedde7e46b2980a8897b09c9bd604a1764db1347e77a1b8`.
+VM119 is running this adapter with validation and performance counters disabled,
+its existing guest driver unchanged, and vCPUs pinned to cores 2 and 3. No host
+reboot, GPU passthrough, or suspension of another VM was performed. CI passes,
+including the required SPIR-V validator and seven Piglit-runner tests.
