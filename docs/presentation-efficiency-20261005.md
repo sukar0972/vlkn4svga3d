@@ -64,7 +64,7 @@ The local SPIR-V validator is unavailable; its optional checks report skips.
 CI installs and requires `spirv-val`. New controls cover merged/split/reordered
 notifications, missing coverage, partial PRESENT of an image larger than staging,
 queued upload visibility, different source mappings, and overlapping commands.
-The exact release runtime passes all 146 selected guest Piglit cases with the
+The exact release runtime completes all 146 selected guest Piglit cases with the
 same outcome as before: 140 passes, one known dated API-error expectation
 mismatch, and five unsupported skips. There are no regressions, failed pixel
 probes, timeouts, or graphics recoveries. The corrected depth/stencil API control
