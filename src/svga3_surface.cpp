@@ -355,6 +355,13 @@ Svga3VlknStatus VlknSurface::allocate() {
         return st;
     }
 
+    VkFormatProperties formatProperties{};
+    m_backend->dispatch().vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),m_vkFormat,&formatProperties);
+    if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+    if (!m_isDepthStencil && (m_flags & SVGA3D_SURFACE_HINT_RENDERTARGET) &&
+        !(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
     VkImageCreateInfo imgInfo = {};
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgInfo.imageType = ((m_depth > 1 || m_volumeImage) && !m_isCubeMap) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
@@ -381,7 +388,7 @@ Svga3VlknStatus VlknSurface::allocate() {
 
     if (m_isDepthStencil) {
         imgInfo.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    } else if (!compressed) {
+    } else if (!compressed && (formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) {
         imgInfo.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     }
 
@@ -2167,6 +2174,13 @@ Svga3VlknStatus VlknSurfaceManager::generateMipmaps(uint32_t sid, SVGA3dTextureF
     /* Buffer surfaces have no VkImage; blitting would null-deref. */
     if (surf->image() == VK_NULL_HANDLE) return SVGA3_VLKN_ERROR_INVALID_PARAM;
 
+    if (surf->isDepthStencil() || svga3_format_is_compressed(surf->svgaFormat()))
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+    VkFormatProperties properties{};
+    m_backend->dispatch().vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),surf->vkFormat(),&properties);
+    VkFormatFeatureFlags required=VK_FORMAT_FEATURE_BLIT_SRC_BIT|VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    if (filter!=SVGA3D_TEX_FILTER_NEAREST) required|=VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    if ((properties.optimalTilingFeatures&required)!=required) return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     surf->transitionLayout(cb, VK_IMAGE_LAYOUT_GENERAL);

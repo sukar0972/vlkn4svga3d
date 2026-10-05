@@ -6,6 +6,8 @@
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static unsigned barriers, imageCopies, bufferCopies;
+static void VKAPI_CALL noBlitProperties(VkPhysicalDevice,VkFormat,VkFormatProperties *out) { *out={}; out->optimalTilingFeatures=VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT; }
+static void VKAPI_CALL noFormatProperties(VkPhysicalDevice,VkFormat,VkFormatProperties *out) { *out={}; }
 static PFN_vkCreateSampler savedSampler;
 static VkSamplerCreateInfo samplerInfo;
 static unsigned samplerAttempts;
@@ -92,7 +94,7 @@ int main() {
     for (unsigned sid : {1u,2u,3u}) CHECK(dev->surfaceMgr->defineSurface(sid,0,SVGA3D_A8R8G8B8,&imageSize,1) == SVGA3_VLKN_SUCCESS);
     CHECK(dev->surfaceMgr->defineSurface(4,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&bufferSize,1) == SVGA3_VLKN_SUCCESS);
     CHECK(dev->surfaceMgr->defineSurface(5,SVGA3D_SURFACE_HINT_INDEXBUFFER,SVGA3D_BUFFER,&bufferSize,1) == SVGA3_VLKN_SUCCESS);
-    for (auto format : {SVGA3D_UYVY,SVGA3D_YUY2,SVGA3D_NV12,SVGA3D_AYUV,static_cast<SVGA3dSurfaceFormat>(UINT32_MAX)})
+    for (auto format : {SVGA3D_UYVY,SVGA3D_YUY2,SVGA3D_NV12,SVGA3D_AYUV,SVGA3D_CxV8U8,SVGA3D_A2W10V10U10,SVGA3D_X8L8V8U8,static_cast<SVGA3dSurfaceFormat>(UINT32_MAX)})
         CHECK(dev->surfaceMgr->defineSurface(99,0,format,&imageSize,1) == SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT && !dev->surfaceMgr->getSurface(99));
     CHECK(dev->surfaceMgr->defineSurfaceV2(99,0,SVGA3D_A8R8G8B8,4,SVGA3D_TEX_FILTER_NONE,&imageSize,1) != SVGA3_VLKN_SUCCESS && !dev->surfaceMgr->getSurface(99));
     auto *old = dev->surfaceMgr->getSurface(1);
@@ -137,6 +139,10 @@ int main() {
     range.indexArray.surfaceId = 5; range.indexWidth = 2; range.indexArray.stride = 4;
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     range.indexArray.stride = 0;
+    SVGA3dVertexDecl duplicate[2]{decl,decl};
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,duplicate,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
+    duplicate[1].identity.usage=SVGA3D_DECLUSAGE_TEXCOORD; duplicate[1].identity.usageIndex=8;
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,duplicate,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS && boundIndexType == VK_INDEX_TYPE_UINT16);
     savedSampler=dispatch.vkCreateSampler; dispatch.vkCreateSampler=captureSampler;
     CHECK(ctx->setTexture(0,3)==SVGA3_VLKN_SUCCESS);
@@ -161,6 +167,23 @@ int main() {
     CHECK(ctx->setTextureStageState(0,SVGA3D_TS_ADDRESSU,SVGA3D_TEX_ADDRESS_MIRRORONCE)==SVGA3_VLKN_SUCCESS);
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS && samplerInfo.addressModeU==VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
     dispatch.vkCreateSampler=savedSampler;
+    SVGA3dSize mipSizes[2]{{4,4,1},{2,2,1}};
+    for (auto format : {SVGA3D_DXT1,SVGA3D_Z_D16}) {
+        CHECK(dev->surfaceMgr->defineSurface(98,0,format,mipSizes,2)==SVGA3_VLKN_SUCCESS);
+        uint64_t serial=dev->backend->recordingSerial();
+        CHECK(dev->surfaceMgr->generateMipmaps(98,SVGA3D_TEX_FILTER_LINEAR)==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT && dev->backend->recordingSerial()==serial);
+    }
+    CHECK(dev->surfaceMgr->defineSurface(98,0,SVGA3D_A8R8G8B8,mipSizes,2)==SVGA3_VLKN_SUCCESS);
+    auto savedProperties=dispatch.vkGetPhysicalDeviceFormatProperties;
+    dispatch.vkGetPhysicalDeviceFormatProperties=noBlitProperties;
+    uint64_t serial=dev->backend->recordingSerial();
+    CHECK(dev->surfaceMgr->generateMipmaps(98,SVGA3D_TEX_FILTER_LINEAR)==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT && dev->backend->recordingSerial()==serial);
+    dispatch.vkGetPhysicalDeviceFormatProperties=noFormatProperties;
+    CHECK(dev->surfaceMgr->defineSurface(99,0,SVGA3D_V8U8,&imageSize,1)==SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT);
+    uint32_t signedCap=1;
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8,&signedCap) && signedCap==0);
+    dispatch.vkGetPhysicalDeviceFormatProperties=savedProperties;
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_AUTOGENMIPMAPS,&signedCap) && signedCap==0);
     auto savedClear = dispatch.vkCmdClearAttachments;
     dispatch.vkCmdClearAttachments = captureClear;
     for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24S8}) {

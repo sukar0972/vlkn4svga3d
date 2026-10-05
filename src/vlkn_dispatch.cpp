@@ -131,7 +131,8 @@ static void VKAPI_CALL mock_vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice
     memset(properties, 0, sizeof(*properties));
     properties->optimalTilingFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
         | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT
-        | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT
+        | VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
 }
 
 static void VKAPI_CALL mock_vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties* pProperties) {

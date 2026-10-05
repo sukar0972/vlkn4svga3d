@@ -3,6 +3,7 @@
  */
 
 #include "svga3_context.h"
+#include "svga3_semantics.h"
 #include "svga3_shader_translator.h"
 #include "svga3_spirv_builder.h"
 #include "../data/svga3d_reference.h"
@@ -809,6 +810,15 @@ Svga3VlknStatus VlknContext::getRenderState(SVGA3dRenderStateName state, uint32_
 }
 
 Svga3VlknStatus VlknContext::setRenderTarget(SVGA3dRenderTargetType type, uint32_t sid, uint32_t face, uint32_t mipmap) {
+    if (type>=SVGA3D_RT_COLOR0 && type<=SVGA3D_RT_COLOR3) {
+        auto *surface=m_surfaceMgr->getSurface(sid);
+        if (surface && surface->image()) {
+            VkFormatProperties properties{};
+            m_backend->dispatch().vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),surface->vkFormat(),&properties);
+            if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+                return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+        }
+    }
     if (type > SVGA3D_RT_COLOR0 && type <= SVGA3D_RT_COLOR3 && !m_backend->features().independentBlend &&
         sid != SVGA3D_INVALID_ID && sid != 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     endRenderPassIfActive();
@@ -1234,6 +1244,11 @@ Svga3VlknStatus VlknContext::defineShader(uint32_t shid, SVGA3dShaderType type, 
             }
             if (!length) break;
             pc += 1 + length;
+        }
+        uint32_t maxAttributes=std::min(32u,m_backend->properties().limits.maxVertexInputAttributes);
+        if (type==SVGA3D_SHADERTYPE_VS && maxAttributes<32 && (inMask>>maxAttributes)) {
+            log_msg("[libqemu_svga3d] Shader input locations exceed the host vertex attribute limit\n");
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
         }
         shader.inputLocationMask = inMask;
         shader.hasFragmentSideEffects = shader.hasBytecodeKill || shader.writesDepth;
@@ -2122,19 +2137,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
 
             VkVertexInputAttributeDescription a = {};
             a.binding = i;
-            uint32_t loc = i;
-            if ((decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION || decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT)) {
-                loc = 0;
-            } else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_COLOR) {
-                loc = (decls[i].identity.usageIndex == 0) ? 1 : 7;
-            } else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_TEXCOORD) {
-                /* usageIndex is guest-controlled: 2+0xFFFFFFFF wrapped in
-                 * 32-bit. Clamp it. */
-                uint32_t uidx = std::min(decls[i].identity.usageIndex, SVGA3_MAX_DECL_USAGE_INDEX);
-                loc = 2 + uidx;
-            } else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_NORMAL) {
-                loc = 6;
-            }
+            uint32_t loc = vertexSemanticLocation(decls[i].identity.usage,decls[i].identity.usageIndex);
             a.location = loc;
             a.format = svga3_decl_type_to_vk((SVGA3dDeclType)decls[i].identity.type);
             a.offset = 0;
@@ -2417,6 +2420,15 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     for (uint32_t i = 0; i < numDecls; ++i)
         if (svga3_decl_type_to_vk(static_cast<SVGA3dDeclType>(decls[i].identity.type)) == VK_FORMAT_UNDEFINED)
             return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    uint32_t semanticMask=0;
+    for (uint32_t i=0;i<numDecls;++i) {
+        uint32_t loc=vertexSemanticLocation(decls[i].identity.usage,decls[i].identity.usageIndex);
+        if (loc>=std::min(32u,m_backend->properties().limits.maxVertexInputAttributes) || (semanticMask & (1u<<loc))) {
+            log_msg("[libqemu_svga3d] Unsupported or colliding vertex semantic %u:%u\n",decls[i].identity.usage,decls[i].identity.usageIndex);
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        }
+        semanticMask|=1u<<loc;
+    }
     /* Ensure buffer capacity for vertex declarations BEFORE starting render pass.
      * Size for the actual draw: offset + stride * maxVertexCount, in 64-bit
      * with overflow checks. The old code only covered 4096 vertices, so any
@@ -2988,11 +3000,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         m_vertexShaders[m_boundVS].inputLocationMask : m_defaultVsInputMask;
     uint32_t providedInputMask = 0;
     for (uint32_t i = 0; i < std::min(numDecls, SVGA3_MAX_VERTEX_DECLS); ++i) {
-        uint32_t loc = i;
-        if ((decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITION || decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT)) loc = 0;
-        else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_COLOR) loc = (decls[i].identity.usageIndex == 0) ? 1 : 7;
-        else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_TEXCOORD) loc = 2 + std::min(decls[i].identity.usageIndex, SVGA3_MAX_DECL_USAGE_INDEX);
-        else if (decls[i].identity.usage == SVGA3D_DECLUSAGE_NORMAL) loc = 6;
+        uint32_t loc = vertexSemanticLocation(decls[i].identity.usage,decls[i].identity.usageIndex);
         /* loc is guest-derived (usageIndex); shifting by >= 32 is UB. */
         if (loc < 32) {
             providedInputMask |= (1u << loc);

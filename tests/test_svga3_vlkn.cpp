@@ -156,12 +156,13 @@ static void TestDeviceLifecycleAndCaps() {
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
             const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
-            const bool disabled = dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
+            const bool disabled = dc.id == SVGA3D_DEVCAP_AUTOGENMIPMAPS || dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_CxV8U8 || dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
                 dc.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES || dc.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING ||
                 dc.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES || dc.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE ||
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
                 dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
-            const uint32_t expected = dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
+            const bool signedFormat = dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_V16U16;
+            const uint32_t expected = signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
