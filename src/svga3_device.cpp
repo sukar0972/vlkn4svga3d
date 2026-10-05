@@ -24,9 +24,9 @@ struct CapTableEntry {
 
 static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_3D, 1, true },
-    { SVGA3D_DEVCAP_MAX_LIGHTS, 8, true },
-    { SVGA3D_DEVCAP_MAX_TEXTURES, 8, true },
-    { SVGA3D_DEVCAP_MAX_CLIP_PLANES, 6, true },
+    { SVGA3D_DEVCAP_MAX_LIGHTS, 0, true },
+    { SVGA3D_DEVCAP_MAX_TEXTURES, 1, true },
+    { SVGA3D_DEVCAP_MAX_CLIP_PLANES, 0, true },
     { SVGA3D_DEVCAP_VERTEX_SHADER_VERSION, 0x300, true },
     { SVGA3D_DEVCAP_VERTEX_SHADER, 1, true },
     { SVGA3D_DEVCAP_FRAGMENT_SHADER_VERSION, 0x300, true },
@@ -54,7 +54,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_MAX_FRAGMENT_SHADER_INSTRUCTIONS, 4096, true },
     { SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEMPS, 32, true },
     { SVGA3D_DEVCAP_MAX_FRAGMENT_SHADER_TEMPS, 32, true },
-    { SVGA3D_DEVCAP_TEXTURE_OPS, 0x03ffffff, true },
+    { SVGA3D_DEVCAP_TEXTURE_OPS, 0x9, true },
     { SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8, 0x4f, true },
     { SVGA3D_DEVCAP_SURFACEFMT_A2R10G10B10, 0x4f, true },
