@@ -41,6 +41,23 @@ Individual targets:
 
 **`test-qemu` does not boot an actual QEMU guest.** Passing it is not proof of working Linux, Windows, or QNX graphics. Test names and success banners inherited from development should not be read as completeness claims.
 
+## Continuous integration
+
+Every push and pull request runs the oracle/mock, preload FIFO/fence, DX,
+ICD-free translator (with `spirv-val`), malformed-input, guest-memory,
+presentation and host QEMU integration suites. The last three use Mesa lavapipe
+with the Vulkan validation layer installed. Any suite failure fails the job.
+Shared FIFO framing regressions run in `make test`, including wrapped packets,
+unknown commands, semantic errors and failed fences. Core 2D execution implements
+UPDATE/UPDATE_VERBOSE notifications, RECT_COPY notifications, GMR2 and fences.
+Screen/GMRFB, cursor, annotation, RECT_FILL and FRONT_ROP_FILL commands are
+framed and skipped by the core; the lab preload retains its screen/GMRFB and
+VRAM rectangle implementations. These execution differences remain intentional.
+
+Real-driver, buffer-ordering, shader-execution and verified-rendering suites
+remain available locally through the harness loop. Piglit requires the live VM;
+CI checks its reporting logic only.
+
 ## Performance changes and correctness contracts
 
 The goal is higher end-to-end throughput with unchanged guest-visible accuracy.

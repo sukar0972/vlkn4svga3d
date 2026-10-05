@@ -8,6 +8,8 @@
 #include "vlkn_backend.h"
 #include "svga3_shader_translator.h"
 #include "svga3_surface.h"
+#include "svga3_guest_mem.h"
+#include "svga3_context.h"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -36,6 +38,43 @@ int main() {
     if (!dev) {
         std::cerr << "FAIL: Could not create mock Vulkan device!" << std::endl;
         return 1;
+    }
+
+    // GMR mappings must reject a whole invalid batch before changing pages.
+    {
+        auto &mem = *dev->guestMem;
+        uint8_t page[4096]{};
+        TEST_CHECK(mem.registerRamBlock(4096, page, sizeof(page)) == SVGA3_VLKN_SUCCESS, "Map sentinel RAM page");
+        TEST_CHECK(mem.defineGMR2(3, 2) == SVGA3_VLKN_SUCCESS, "Define boundary GMR");
+        uint64_t valid[] = {1, 1};
+        TEST_CHECK(mem.remapGMR2(3, SVGA_REMAP_GMR2_PPN64, 0, 2, valid, sizeof(valid)) == SVGA3_VLKN_SUCCESS, "Install valid GMR pages");
+        for (uint64_t ppn : {UINT64_MAX, UINT64_MAX >> 12, uint64_t(UINT32_MAX)}) {
+            uint32_t flags = SVGA_REMAP_GMR2_SINGLE_PPN | (ppn == UINT32_MAX ? 0 : SVGA_REMAP_GMR2_PPN64);
+            TEST_CHECK(mem.remapGMR2(3, flags, 0, 2, &ppn, sizeof(ppn)) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject wrapping/truncating SINGLE_PPN run");
+        }
+        uint64_t invalid[] = {2, (UINT64_MAX >> 12) + 1};
+        TEST_CHECK(mem.remapGMR2(3, SVGA_REMAP_GMR2_PPN64, 0, 2, invalid, sizeof(invalid)) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject unsafe PPN array atomically");
+        SVGAGuestPtr ptr{3, 0};
+        uint8_t value = 0x52, result = 0;
+        TEST_CHECK(mem.writeGuest(ptr, &value, 1) == SVGA3_VLKN_SUCCESS && page[0] == value, "Rejected remaps preserve original GPA");
+        ptr.offset = 1;
+        TEST_CHECK(mem.readGuest(ptr, &result, SIZE_MAX) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject overflowing read size");
+        TEST_CHECK(mem.writeGuest(ptr, &value, SIZE_MAX) == SVGA3_VLKN_ERROR_INVALID_PARAM && page[0] == value, "Reject overflowing write without RAM changes");
+        // VIA_GMR descriptors have the same GPA limits as inline arrays.
+        std::memcpy(page + 8, invalid, sizeof(invalid));
+        SVGAGuestPtr descriptors{3, 8};
+        TEST_CHECK(mem.remapGMR2(3, SVGA_REMAP_GMR2_PPN64 | SVGA_REMAP_GMR2_VIA_GMR, 0, 2, &descriptors, sizeof(descriptors)) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject unsafe VIA_GMR PPNs");
+        ptr.offset = 0;
+        TEST_CHECK(mem.readGuest(ptr, &result, 1) == SVGA3_VLKN_SUCCESS && result == value, "VIA_GMR failure preserves mapping");
+    }
+    {
+        TEST_CHECK(dev->contextMgr->createContext(8) == SVGA3_VLKN_SUCCESS, "Create state-validation context");
+        auto *ctx = dev->contextMgr->getContext(8);
+        float matrix[16]{};
+        for (uint32_t id : {uint32_t(SVGA3D_RS_MAX), 0x10000000u, UINT32_MAX})
+            TEST_CHECK(ctx->setRenderState(static_cast<SVGA3dRenderStateName>(id), 7) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject forged render state ID");
+        for (uint32_t id : {uint32_t(SVGA3D_TRANSFORM_MAX), 0x10000000u, UINT32_MAX})
+            TEST_CHECK(ctx->setTransform(static_cast<SVGA3dTransformType>(id), matrix) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject forged transform ID");
     }
 
     /* H5: ADD declaring 1 operand (needs dest + 2 src = 3).

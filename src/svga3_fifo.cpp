@@ -4,6 +4,7 @@
 
 #include "svga3_device.h"
 #include "svga3_dx.h"
+#include "svga3_fifo_framing.h"
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -805,6 +806,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             return st;
         }
 
+        case SVGA_CMD_UPDATE_VERBOSE:
         case SVGA_CMD_UPDATE: {
             if (payloadSize < sizeof(SVGAFifoCmdUpdate)) {
                 return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
@@ -814,7 +816,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             if (dev->guestMem) {
                 dev->guestMem->notifyDisplayUpdate(pCmd->x, pCmd->y, pCmd->width, pCmd->height);
             }
-            *bytesRead = sizeof(SVGAFifoCmdUpdate);
+            *bytesRead = payloadSize;
             return SVGA3_VLKN_SUCCESS;
         }
 
@@ -883,73 +885,48 @@ Svga3VlknStatus svga3_vlkn_fifo_execute(Svga3VlknDevice *dev,
                                         size_t bufferSizeBytes,
                                         size_t *bytesConsumed)
 {
-    if (!dev || !commandBuffer || bufferSizeBytes < sizeof(uint32_t)) {
+    if (bytesConsumed) *bytesConsumed = 0;
+    if (!dev || !commandBuffer || bufferSizeBytes < sizeof(uint32_t))
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    }
-
     std::lock_guard<std::mutex> lock(dev->mutex);
     const uint8_t *ptr = reinterpret_cast<const uint8_t*>(commandBuffer);
     size_t remaining = bufferSizeBytes;
     size_t totalConsumed = 0;
-
     while (remaining >= sizeof(uint32_t)) {
-        uint32_t cmd = *reinterpret_cast<const uint32_t*>(ptr);
-        ptr += sizeof(uint32_t);
-        remaining -= sizeof(uint32_t);
-        totalConsumed += sizeof(uint32_t);
-
-        bool hasCmdHeader = false;
-        size_t payloadSize = remaining;
-
-        /* Every 3D command carries an SVGA3dCmdHeader size word. The outer
-         * FIFO loop sizes the packet from that word, so it has to be
-         * consumed here too or the body is read one dword off. */
-        if (cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) {
-            if (remaining < sizeof(SVGA3dCmdHeader)) {
-                /* Truncated 3D packet: not even the full header is present. */
-                if (bytesConsumed) *bytesConsumed = totalConsumed;
-                return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
-            }
-            const auto *hdr = reinterpret_cast<const SVGA3dCmdHeader*>(ptr);
-            if (hdr->size > remaining - sizeof(SVGA3dCmdHeader)) {
-                /* Truncated 3D packet: the declared body extends past the
-                 * end of the buffer. Reject it instead of parsing the
-                 * header bytes as the command body. */
-                if (bytesConsumed) *bytesConsumed = totalConsumed;
-                return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
-            }
-            hasCmdHeader = true;
-            payloadSize = hdr->size;
-            ptr += sizeof(SVGA3dCmdHeader);
-            remaining -= sizeof(SVGA3dCmdHeader);
-            totalConsumed += sizeof(SVGA3dCmdHeader);
+        auto read = [&](uint64_t i) {
+            uint32_t value;
+            std::memcpy(&value, ptr + i * 4, sizeof(value));
+            return value;
+        };
+        uint64_t words = 0;
+        auto framing = svga3_vlkn::fifoFrame(remaining / 4, read, words);
+        if (framing != svga3_vlkn::FifoFrameStatus::Complete) {
+            if (bytesConsumed) *bytesConsumed = totalConsumed;
+            return framing == svga3_vlkn::FifoFrameStatus::Incomplete ?
+                SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER : SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND;
         }
-
+        uint32_t cmd = read(0);
+        bool is3D = cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX;
+        size_t headerBytes = is3D ? 8 : 4;
+        size_t payloadSize = is3D ? read(1) : words * 4 - headerBytes;
         size_t packetRead = 0;
         Svga3VlknStatus st = svga3_vlkn::processFifoPacket(
-            dev, cmd, ptr, payloadSize, &packetRead
-        );
-
-        size_t toAdvance = hasCmdHeader ? ((payloadSize + 3) & ~3) : packetRead;
-        if (!hasCmdHeader && toAdvance == 0) {
-            toAdvance = sizeof(uint32_t);
-        }
-        /* Clamp to what is left: dword rounding (up to +3 bytes) or the
-         * fallback above can otherwise exceed `remaining` — including the
-         * case remaining == 0 — and wrap it to SIZE_MAX, sending the loop
-         * past the end of the caller's buffer. The loop then exits cleanly. */
-        if (toAdvance > remaining) {
-            toAdvance = remaining;
-        }
-        ptr += toAdvance;
-        remaining -= toAdvance;
-        totalConsumed += toAdvance;
+            dev, cmd, ptr + headerBytes, payloadSize, &packetRead);
+        // Known, framed 2D commands with no core implementation are skipped.
+        // Unknown wire IDs were rejected above before advancing anything.
+        size_t packetBytes = words * 4;
+        ptr += packetBytes;
+        remaining -= packetBytes;
+        totalConsumed += packetBytes;
         dev->stats.totalCommandsProcessed++;
-
         if (st != SVGA3_VLKN_SUCCESS && st != SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND) {
             if (bytesConsumed) *bytesConsumed = totalConsumed;
             return st;
         }
+    }
+    if (remaining) {
+        if (bytesConsumed) *bytesConsumed = totalConsumed;
+        return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
     }
 
     if (bytesConsumed) *bytesConsumed = totalConsumed;

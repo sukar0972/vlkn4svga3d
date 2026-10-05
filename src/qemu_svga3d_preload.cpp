@@ -40,6 +40,7 @@
 
 #include "svga3_vlkn.h"
 #include "svga3_device.h"
+#include "svga3_fifo_framing.h"
 #include "svga3_guest_mem.h"
 #include "svga3d_tables.h"
 
@@ -656,62 +657,10 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
         uint32_t cmd=peek_word(fifo,stop,min,max,0);
         uint64_t words=0;
 #define P(i) peek_word(fifo,stop,min,max,(i))
-        if (cmd == SVGA_CMD_UPDATE || cmd == SVGA_CMD_UPDATE_VERBOSE) {
-            words = 5;
-        } else if (cmd == SVGA_CMD_RECT_FILL) {
-            words = 6;
-        } else if (cmd == SVGA_CMD_RECT_COPY) {
-            words = 7;
-        } else if (cmd == SVGA_CMD_FENCE) {
-            words = 2;
-        } else if (cmd == SVGA_CMD_ESCAPE) {
-            if (available < 3) goto done;
-            words = 3 + ((uint64_t)P(2) + 3) / 4;
-        } else if (cmd == 19) { /* DEFINE_CURSOR */
-            if (available < 8) goto done;
-            if (P(4)>256 || P(5)>256 || P(7)>32) goto unsupported;
-            words = 8 + (((uint64_t)P(4)+31)/32)*P(5) + (((uint64_t)P(4)*P(7)+31)/32)*P(5);
-        } else if (cmd == 22) { /* DEFINE_ALPHA_CURSOR */
-            if (available < 6) goto done;
-            if (P(4)>256 || P(5)>256) goto unsupported;
-            words = 6 + (uint64_t)P(4)*P(5);
-        } else if (cmd == SVGA_CMD_DEFINE_SCREEN) {
-            if (available < 2) goto done;
-            words = 1 + ((uint64_t)P(1) + 3) / 4;
-        } else if (cmd == SVGA_CMD_DESTROY_SCREEN) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdDestroyScreen) + 3) / 4;
-        } else if (cmd == SVGA_CMD_DEFINE_GMRFB) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdDefineGMRFB) + 3) / 4;
-        } else if (cmd == SVGA_CMD_BLIT_GMRFB_TO_SCREEN) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdBlitGMRFBToScreen) + 3) / 4;
-        } else if (cmd == SVGA_CMD_BLIT_SCREEN_TO_GMRFB) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdBlitScreenToGMRFB) + 3) / 4;
-        } else if (cmd == SVGA_CMD_ANNOTATION_FILL) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdAnnotationFill) + 3) / 4;
-        } else if (cmd == SVGA_CMD_ANNOTATION_COPY) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdAnnotationCopy) + 3) / 4;
-        } else if (cmd == SVGA_CMD_DEFINE_GMR2) {
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdDefineGMR2)) / 4;
-        } else if (cmd == SVGA_CMD_REMAP_GMR2) {
-            if (available < 5) goto done;
-            uint32_t flags = P(2);
-            uint32_t numPages = P(4);
-            size_t descBytes = 0;
-            if (flags & SVGA_REMAP_GMR2_VIA_GMR) {
-                descBytes = sizeof(SVGAGuestPtr);
-            } else if (flags & SVGA_REMAP_GMR2_SINGLE_PPN) {
-                descBytes = (flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t);
-            } else {
-                descBytes = (size_t)numPages * ((flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t));
-            }
-            words = (sizeof(uint32_t) + sizeof(SVGAFifoCmdRemapGMR2) + descBytes + 3) / 4;
-        } else if (cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) {
-            if (available < 2) goto done;
-            uint32_t payloadSizeBytes = P(1);
-            words = (sizeof(uint32_t) + sizeof(SVGA3dCmdHeader) + payloadSizeBytes + 3) / 4;
-        } else {
-            goto unsupported;
-        }
+        auto framing = svga3_vlkn::fifoFrame(available,
+            [&](uint64_t i) { return P(i); }, words);
+        if (framing == svga3_vlkn::FifoFrameStatus::Unsupported) goto unsupported;
+        if (framing == svga3_vlkn::FifoFrameStatus::Incomplete) goto done;
 
         if (words > (max-min)/4-1) goto unsupported;
         if (words > available) break; /* Incomplete packet; await more words */

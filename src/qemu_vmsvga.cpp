@@ -17,6 +17,7 @@
 #include "svga3_device.h"
 #include "svga3_guest_mem.h"
 #include "adapter/qemu_adapter.h"
+#include "svga3_fifo_framing.h"
 
 #include <iostream>
 #include <iomanip>
@@ -346,121 +347,40 @@ void QemuVmsvgaDevice::fifoRun()
     uint32_t stop = fifo[SVGA_FIFO_STOP];
     uint32_t nextCmd = fifo[SVGA_FIFO_NEXT_CMD];
 
-    if (max > m_fifoSize || min >= max || stop >= max || nextCmd >= max) {
-        std::cerr << "[QEMU VMSVGA] Malformed FIFO registers: min=" << min
-                  << " max=" << max << " stop=" << stop << " next=" << nextCmd << std::endl;
-        return;
-    }
+    if (max > m_fifoSize || min < 4 * (SVGA_FIFO_STOP + 1) || min >= max ||
+        stop < min || stop >= max || nextCmd < min || nextCmd >= max ||
+        ((min | max | stop | nextCmd) & 3)) return;
 
-    /*
-     * FIFO execution loop with wraparound handling:
-     * While stop != nextCmd, read packets.
-     * When stop reaches max, wrap to min.
-     */
-    while (stop != nextCmd) {
-        if (stop >= max) {
-            stop = min;
-            m_totalWraparoundsHandled++;
-            if (stop == nextCmd) break;
-        }
+    uint64_t available = (nextCmd >= stop ? nextCmd - stop : max - stop + nextCmd - min) / 4;
+    while (available) {
+        auto read = [&](uint64_t i) {
+            uint32_t value;
+            size_t offset = min + (uint64_t(stop) - min + i * 4) % (max - min);
+            std::memcpy(&value, m_fifoMem.data() + offset, sizeof(value));
+            return value;
+        };
+        uint64_t words = 0;
+        auto framing = svga3_vlkn::fifoFrame(available, read, words);
+        if (framing != svga3_vlkn::FifoFrameStatus::Complete) break;
 
-        /* Check if we have at least a command ID (4 bytes) before buffer end */
-        if (stop + sizeof(uint32_t) > max) {
-            /* Wraparound at the end of the buffer */
-            stop = min;
-            m_totalWraparoundsHandled++;
-            if (stop == nextCmd) break;
-        }
-
-        uint32_t cmd = *reinterpret_cast<const uint32_t*>(m_fifoMem.data() + stop);
-
-        /* Special handle for FENCE command */
-        if (cmd == SVGA_CMD_FENCE) {
-            stop += sizeof(uint32_t);
-            if (stop + sizeof(uint32_t) > max) {
-                stop = min;
-            }
-            uint32_t fenceValue = *reinterpret_cast<const uint32_t*>(m_fifoMem.data() + stop);
-            stop += sizeof(uint32_t);
-
-            if (m_vlknDev) {
-                if (m_vlknDev->contextMgr) m_vlknDev->contextMgr->endAllRenderPasses();
-                if (m_vlknDev->backend) m_vlknDev->backend->flushCommandBuffer();
-            }
-
-            fifo[SVGA_FIFO_FENCE] = fenceValue;
-            m_totalFencesProcessed++;
-            if (stop >= max) {
-                stop = min;
-                m_totalWraparoundsHandled++;
-            }
-            continue;
-        }
-
-        /* Handle INVALID_CMD (used by guest to pad end of buffer before wrap) */
-        if (cmd == SVGA_CMD_INVALID_CMD) {
-            stop = min;
-            m_totalWraparoundsHandled++;
-            continue;
-        }
-
-        /* Determine exact single packet length */
-        size_t packetLength = sizeof(uint32_t);
-        if (cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) {
-            if (stop + sizeof(uint32_t) + sizeof(SVGA3dCmdHeader) <= max) {
-                const auto *hdr = reinterpret_cast<const SVGA3dCmdHeader*>(m_fifoMem.data() + stop + sizeof(uint32_t));
-                packetLength = sizeof(uint32_t) + sizeof(SVGA3dCmdHeader) + hdr->size;
-            }
-        } else if (cmd == SVGA_CMD_DEFINE_GMR2) {
-            packetLength = sizeof(uint32_t) + sizeof(SVGAFifoCmdDefineGMR2);
-        } else if (cmd == SVGA_CMD_REMAP_GMR2) {
-            if (stop + sizeof(uint32_t) + sizeof(SVGAFifoCmdRemapGMR2) <= max) {
-                const auto *remapCmd = reinterpret_cast<const SVGAFifoCmdRemapGMR2*>(m_fifoMem.data() + stop + sizeof(uint32_t));
-                size_t descBytes = 0;
-                if (remapCmd->flags & SVGA_REMAP_GMR2_VIA_GMR) {
-                    descBytes = sizeof(SVGAGuestPtr);
-                } else if (remapCmd->flags & SVGA_REMAP_GMR2_SINGLE_PPN) {
-                    descBytes = (remapCmd->flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t);
-                } else {
-                    descBytes = static_cast<size_t>(remapCmd->numPages) *
-                        ((remapCmd->flags & SVGA_REMAP_GMR2_PPN64) ? sizeof(uint64_t) : sizeof(uint32_t));
-                }
-                packetLength = sizeof(uint32_t) + sizeof(SVGAFifoCmdRemapGMR2) + descBytes;
-            }
-        } else if (cmd == SVGA_CMD_UPDATE || cmd == SVGA_CMD_UPDATE_VERBOSE) {
-            packetLength = sizeof(uint32_t) + sizeof(SVGAFifoCmdUpdate);
-        } else if (cmd == SVGA_CMD_RECT_COPY) {
-            packetLength = sizeof(uint32_t) + sizeof(SVGAFifoCmdRectCopy);
-        } else if (cmd == SVGA_CMD_ESCAPE) {
-            if (stop + sizeof(uint32_t) + sizeof(SVGAFifoCmdEscape) <= max) {
-                const auto *escCmd = reinterpret_cast<const SVGAFifoCmdEscape*>(m_fifoMem.data() + stop + sizeof(uint32_t));
-                packetLength = sizeof(uint32_t) + sizeof(SVGAFifoCmdEscape) + ((static_cast<size_t>(escCmd->size) + 3) & ~3);
-            }
-        }
-
-        /* Ensure we don't read beyond nextCmd or max */
-        size_t maxContig = (nextCmd > stop) ? (nextCmd - stop) : (max - stop);
-        size_t toExecute = std::min(packetLength, maxContig);
-
+        std::vector<uint32_t> packet(words);
+        for (uint64_t i = 0; i < words; ++i) packet[i] = read(i);
         size_t bytesConsumed = 0;
         Svga3VlknStatus st = svga3_vlkn_fifo_execute(
-            m_vlknDev,
-            m_fifoMem.data() + stop,
-            toExecute,
-            &bytesConsumed
-        );
-
-        if (st != SVGA3_VLKN_SUCCESS || bytesConsumed == 0) {
-            /* Error or malformed packet: advance by at least 4 bytes to avoid infinite loop */
-            stop += sizeof(uint32_t);
-        } else {
-            stop += bytesConsumed;
+            m_vlknDev, packet.data(), words * 4, &bytesConsumed);
+        // A fence is acknowledged only after successful GPU completion.
+        // Leave a failed fence in place so a transient error can be retried.
+        if (packet[0] == SVGA_CMD_FENCE) {
+            if (st != SVGA3_VLKN_SUCCESS) break;
+            fifo[SVGA_FIFO_FENCE] = packet[1];
+            ++m_totalFencesProcessed;
         }
-
-        if (stop >= max) {
-            stop = min;
-            m_totalWraparoundsHandled++;
-        }
+        // Semantic failures still consume their fully framed packet. Unknown
+        // or incomplete framing leaves STOP unchanged, never skips a dword.
+        if (bytesConsumed == 0) break;
+        if (uint64_t(stop) + bytesConsumed >= max) ++m_totalWraparoundsHandled;
+        stop = min + (uint64_t(stop) - min + bytesConsumed) % (max - min);
+        available -= bytesConsumed / 4;
     }
 
     fifo[SVGA_FIFO_STOP] = stop;
@@ -629,30 +549,13 @@ bool GuestVmsvgaDriver::writeFifo(const void *data, size_t sizeBytes)
     uint32_t next = m_fifo[SVGA_FIFO_NEXT_CMD];
     uint8_t *fifoBytes = reinterpret_cast<uint8_t*>(m_fifo);
 
-    /*
-     * Check if packet fits before buffer end (max).
-     * If not, we trigger wraparound:
-     * - Write SVGA_CMD_INVALID_CMD if there is space for padding
-     * - Wrap next to min
-     */
-    if (next + alignedSize > max) {
-        if (next + sizeof(uint32_t) <= max) {
-            *reinterpret_cast<uint32_t*>(fifoBytes + next) = SVGA_CMD_INVALID_CMD;
-        }
-        next = min;
-        m_wraparounds++;
-    }
-
-    /* Copy packet data */
-    std::memcpy(fifoBytes + next, data, sizeBytes);
-    if (alignedSize > sizeBytes) {
-        std::memset(fifoBytes + next + sizeBytes, 0, alignedSize - sizeBytes);
-    }
-
-    next += static_cast<uint32_t>(alignedSize);
-    if (next >= max) {
-        next = min;
-        m_wraparounds++;
+    uint32_t stop = m_fifo[SVGA_FIFO_STOP];
+    size_t occupied = next >= stop ? next - stop : max - stop + next - min;
+    if (alignedSize > max - min - occupied - 4) return false;
+    const uint8_t *source = static_cast<const uint8_t *>(data);
+    for (size_t i = 0; i < alignedSize; ++i) {
+        fifoBytes[next++] = i < sizeBytes ? source[i] : 0;
+        if (next == max) { next = min; ++m_wraparounds; }
     }
 
     m_fifo[SVGA_FIFO_NEXT_CMD] = next;

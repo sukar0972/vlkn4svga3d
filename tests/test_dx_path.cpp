@@ -8,7 +8,7 @@ static unsigned failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 static Svga3VlknStatus packet(Svga3VlknDevice *d, uint32_t cmd,
                              const void *data, uint32_t size) {
-    std::vector<uint8_t> wire(8 + size);
+    std::vector<uint8_t> wire((8 + size + 3) & ~3u);
     memcpy(wire.data(), &cmd, 4);
     memcpy(wire.data() + 4, &size, 4);
     if (size) memcpy(wire.data() + 8, data, size);
