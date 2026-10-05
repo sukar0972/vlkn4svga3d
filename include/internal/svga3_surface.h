@@ -270,6 +270,8 @@ public:
 private:
     VlknBackend *m_backend;
     VlknContextManager *m_contextMgr = nullptr;
+    // Bounded, reusable CPU metadata; no framebuffer or GPU data is cached.
+    std::vector<SVGA3dCopyRect> m_presentationRects;
     std::unordered_map<uint32_t, std::unique_ptr<VlknSurface>> m_surfaces;
     mutable std::mutex m_mutex;
 };

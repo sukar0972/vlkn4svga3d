@@ -3,6 +3,8 @@
  */
 
 #include "vlkn_backend.h"
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <iostream>
@@ -54,6 +56,7 @@ VlknBackend::VlknBackend()
     , m_fallbackMemory(VK_NULL_HANDLE)
     , m_fallbackSize(0)
 {
+    m_measurePerformance = std::getenv("SVGA3_VLKN_PERF_COUNTERS") != nullptr;
     memset(&m_dispatch, 0, sizeof(m_dispatch));
     memset(&m_props, 0, sizeof(m_props));
     memset(&m_features, 0, sizeof(m_features));
@@ -104,6 +107,14 @@ Svga3VlknStatus VlknBackend::init(const Svga3VlknConfig *config) {
 
 void VlknBackend::shutdown() {
     waitIdle();
+    if (m_device && m_measurePerformance) {
+        const auto &c = m_performanceCounters;
+        log_msg("[libqemu_svga3d] Performance totals: presents=%llu readback_bytes=%llu copy_bytes=%llu copy_calls=%llu submissions=%llu queue_wait_ns=%llu identical_shaders=%llu\n",
+                (unsigned long long)c.presentationCalls, (unsigned long long)c.readbackBytes,
+                (unsigned long long)c.framebufferCopyBytes, (unsigned long long)c.framebufferCopyCalls,
+                (unsigned long long)c.queueSubmissions, (unsigned long long)c.queueWaitNanoseconds,
+                (unsigned long long)c.identicalShaderDefinitions);
+    }
     cleanupRetiredBuffers(true);
 
     for (auto &rp : m_renderPasses) {
@@ -876,7 +887,12 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
     }
     m_cmdBufferPending = true;
+    const auto waitStart = m_measurePerformance ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    if (m_measurePerformance) ++m_performanceCounters.queueSubmissions;
     res = m_dispatch.vkQueueWaitIdle(m_queue);
+    if (m_measurePerformance)
+        m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - waitStart).count();
     if (res != VK_SUCCESS) {
         log_msg("[libqemu_svga3d] vkQueueWaitIdle error: %d\n", res);
         /* The submit was accepted. Keep its buffer pending until waitIdle()

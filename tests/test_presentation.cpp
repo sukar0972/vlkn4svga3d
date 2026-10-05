@@ -69,6 +69,31 @@ struct DirtyRect {
     int32_t x, y, w, h;
 };
 
+// Notifications may be split, reordered or coalesced. Their union must cover
+// the requested visible pixels; over-notification is safe, missing damage is not.
+static bool damageCovers(const std::vector<DirtyRect> &damage,
+                         const std::vector<DirtyRect> &required,
+                         int32_t width, int32_t height) {
+    std::vector<bool> covered(size_t(width) * height, false);
+    for (const auto &r : damage) {
+        if (r.x < 0 || r.y < 0 || r.w <= 0 || r.h <= 0 ||
+            int64_t(r.x) + r.w > width || int64_t(r.y) + r.h > height)
+            return false;
+        for (int32_t y = r.y; y < r.y + r.h; ++y)
+            for (int32_t x = r.x; x < r.x + r.w; ++x)
+                covered[size_t(y) * width + x] = true;
+    }
+    for (const auto &r : required) {
+        if (r.x < 0 || r.y < 0 || r.w <= 0 || r.h <= 0 ||
+            int64_t(r.x) + r.w > width || int64_t(r.y) + r.h > height)
+            return false;
+        for (int32_t y = r.y; y < r.y + r.h; ++y)
+            for (int32_t x = r.x; x < r.x + r.w; ++x)
+                if (!covered[size_t(y) * width + x]) return false;
+    }
+    return true;
+}
+
 static std::vector<DirtyRect> g_dirtyRects;
 
 static void testDisplayUpdateCallback(void *opaque, int32_t x, int32_t y, int32_t w, int32_t h) {
@@ -104,6 +129,17 @@ int main() {
     std::cout << "======================================================================\n";
     std::cout << "SVGA3=VLKN Deliverable 5: Actual Presentation Acceptance Suite\n";
     std::cout << "======================================================================\n";
+
+    const std::vector<DirtyRect> requiredDamage{{1, 1, 4, 2}, {7, 4, 2, 2}};
+    TEST_CHECK(damageCovers({{0, 0, 10, 8}}, requiredDamage, 10, 8),
+               "Damage coverage accepts coalesced notifications");
+    TEST_CHECK(damageCovers({{7, 4, 2, 2}, {3, 1, 2, 2}, {1, 1, 2, 2}},
+                           requiredDamage, 10, 8),
+               "Damage coverage accepts split and reordered notifications");
+    TEST_CHECK_ERR(!damageCovers({{1, 1, 3, 2}, {7, 4, 2, 2}}, requiredDamage, 10, 8),
+                   "A one-pixel gap in damage coverage is rejected");
+    TEST_CHECK_ERR(!damageCovers({{0, 0, 11, 8}}, requiredDamage, 10, 8),
+                   "Out-of-bounds notification is rejected");
 
     /* Step 1: Initialize Real Vulkan Device (NO mock fallback) */
     Svga3VlknConfig cfg = {};
@@ -281,10 +317,15 @@ int main() {
     TEST_CHECK(pixelMatches(bl, 0, 0, 255, 255), "3D Rendered Surface BL is Blue (0, 0, 255)");
     TEST_CHECK(pixelMatches(br, 255, 255, 0, 255), "3D Rendered Surface BR is Yellow (255, 255, 0)");
 
-    /* Helper lambda to execute FIFO stream */
+    // Observe completed work, not the timing of FIFO decoding. One completion
+    // point per stream permits batching multiple presentation commands. This
+    // harness exercises the registered CPU framebuffer adapter, not GPU scanout.
     auto executeFifo = [&](const std::vector<uint8_t> &stream) -> Svga3VlknStatus {
         size_t consumed = 0;
-        return svga3_vlkn_fifo_execute(dev, stream.data(), stream.size(), &consumed);
+        const auto result = svga3_vlkn_fifo_execute(dev, stream.data(), stream.size(), &consumed);
+        if (result != SVGA3_VLKN_SUCCESS) return result;
+        TEST_CHECK(consumed == stream.size(), "Successful FIFO stream consumed completely");
+        return svga3_vlkn_device_wait_idle(dev);
     };
 
     /* =========================================================================
@@ -350,11 +391,8 @@ int main() {
     }
     TEST_CHECK(bottomUntouched, "Test 1: Pixels below [0..63, 64..119] are strictly preserved untouched");
 
-    /* Check dirty rect notification */
-    TEST_CHECK(!g_dirtyRects.empty(), "Test 1: Display update callback received dirty notifications");
-    TEST_CHECK(g_dirtyRects[0].x == 0 && g_dirtyRects[0].y == 0 &&
-               g_dirtyRects[0].w == (int32_t)RT_W && g_dirtyRects[0].h == (int32_t)RT_H,
-               "Test 1: Dirty rectangle notified as (0, 0, 64, 64)");
+    TEST_CHECK(damageCovers(g_dirtyRects, {{0, 0, int32_t(RT_W), int32_t(RT_H)}}, FB_W, FB_H),
+               "Test 1: Notifications cover the full presented surface");
 
     savePPM("artifacts/presentation_test1_full.ppm", qemuFb.data(), FB_W, FB_H);
 
@@ -422,12 +460,20 @@ int main() {
     TEST_CHECK(pixelsIdentical(qemuFb[10 * FB_W + 9], BASELINE_PIXEL), "Test 2: Pixel (9, 10) left of Rect 1 preserved");
     TEST_CHECK(pixelsIdentical(qemuFb[10 * FB_W + 30], BASELINE_PIXEL), "Test 2: Pixel (30, 10) right of Rect 1 preserved");
 
-    /* Verify notifications for both rects */
-    TEST_CHECK(g_dirtyRects.size() == 2, "Test 2: Received exactly 2 dirty rectangle notifications");
-    TEST_CHECK(g_dirtyRects[0].x == 10 && g_dirtyRects[0].y == 10 && g_dirtyRects[0].w == 20 && g_dirtyRects[0].h == 20,
-               "Test 2: Dirty rect 1 notified as (10, 10, 20, 20)");
-    TEST_CHECK(g_dirtyRects[1].x == 80 && g_dirtyRects[1].y == 50 && g_dirtyRects[1].w == 25 && g_dirtyRects[1].h == 25,
-               "Test 2: Dirty rect 2 notified as (80, 50, 25, 25)");
+    bool partialFrameMatches = true;
+    for (uint32_t y = 0; y < FB_H; ++y) {
+        for (uint32_t x = 0; x < FB_W; ++x) {
+            Pixel expected = BASELINE_PIXEL;
+            if (x >= 10 && x < 30 && y >= 10 && y < 30)
+                expected = renderedSurface[(y - 10) * RT_W + x - 10];
+            if (x >= 80 && x < 105 && y >= 50 && y < 75)
+                expected = renderedSurface[(y - 50 + 39) * RT_W + x - 80 + 39];
+            partialFrameMatches &= pixelsIdentical(qemuFb[y * FB_W + x], expected);
+        }
+    }
+    TEST_CHECK(partialFrameMatches, "Test 2: Every framebuffer pixel matches, including all untouched pixels");
+    TEST_CHECK(damageCovers(g_dirtyRects, {{10, 10, 20, 20}, {80, 50, 25, 25}}, FB_W, FB_H),
+               "Test 2: Notifications cover both presented rectangles regardless of batching");
 
     savePPM("artifacts/presentation_test2_partial.ppm", qemuFb.data(), FB_W, FB_H);
 
@@ -664,6 +710,33 @@ int main() {
     status = svga3_vlkn_surface_dma_upload(dev, SID_LARGE, 0, &tileBox, tile.data(), 8 * sizeof(Pixel));
     TEST_CHECK(status == SVGA3_VLKN_SUCCESS, "Upload offset tile for partial presentation");
 
+    resetFramebuffer();
+    dev->backend->enablePerformanceCounters(true);
+    dev->backend->resetPerformanceCounters();
+    const SVGA3dCopyRect outside{FB_W + 1, 0, 4, 4, 200, 201};
+    status = svga3_vlkn_surface_present(dev, SID_LARGE, &outside, 1);
+    TEST_CHECK(status == SVGA3_VLKN_SUCCESS && dev->backend->cmdBufferRecording() &&
+               dev->backend->performanceCounters()->queueSubmissions == 0 &&
+               dev->backend->performanceCounters()->readbackBytes == 0 && g_dirtyRects.empty() &&
+               std::all_of(qemuFb.begin(), qemuFb.end(), [&](const Pixel &p) { return pixelsIdentical(p, BASELINE_PIXEL); }),
+               "Fully clipped PRESENT leaves pending uploads queued and framebuffer unchanged");
+    const SVGA3dCopyRect visibleTile{17, 19, 8, 8, 200, 201};
+    status = svga3_vlkn_surface_present(dev, SID_LARGE, &visibleTile, 1);
+    if (status == SVGA3_VLKN_SUCCESS) status = svga3_vlkn_device_wait_idle(dev);
+    bool tilePresentMatches = status == SVGA3_VLKN_SUCCESS;
+    for (uint32_t y = 0; y < FB_H; ++y) {
+        for (uint32_t x = 0; x < FB_W; ++x) {
+            const bool visible = x >= 17 && x < 25 && y >= 19 && y < 27;
+            const Pixel expected = visible ? tile[(y - 19) * 8 + x - 17] : BASELINE_PIXEL;
+            tilePresentMatches &= pixelsIdentical(qemuFb[y * FB_W + x], expected);
+        }
+    }
+    TEST_CHECK(tilePresentMatches && dev->backend->performanceCounters()->readbackBytes == tile.size() * sizeof(Pixel),
+               "Partial PRESENT of an oversized image reads only its tile, including the queued upload");
+    TEST_CHECK(damageCovers(g_dirtyRects, {{17, 19, 8, 8}}, FB_W, FB_H),
+               "Partial PRESENT notifies every visible tile pixel");
+    dev->backend->enablePerformanceCounters(false);
+
     auto executeBlit = [&](const SVGA3dCmdBlitSurfaceToScreen &command,
                            const std::vector<SVGASignedRect> &clips) {
         const size_t payloadBytes = sizeof(command) + clips.size() * sizeof(SVGASignedRect);
@@ -750,11 +823,62 @@ int main() {
                        "Presenting nonexistent surface ID fails safely with error code");
     }
 
+    resetFramebuffer();
+    const SVGA3dCopyRect differentMappings[]{{10, 10, 20, 20, 0, 0}, {20, 20, 20, 20, 40, 40}};
+    status = svga3_vlkn_surface_present(dev, SID_RT, differentMappings, 2);
+    if (status == SVGA3_VLKN_SUCCESS) status = svga3_vlkn_device_wait_idle(dev);
+    bool mappedOrderMatches = status == SVGA3_VLKN_SUCCESS;
+    for (uint32_t y = 0; y < FB_H; ++y) {
+        for (uint32_t x = 0; x < FB_W; ++x) {
+            Pixel expected = BASELINE_PIXEL;
+            for (const auto &r : differentMappings)
+                if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+                    expected = renderedSurface[(y - r.y + r.srcy) * RT_W + x - r.x + r.srcx];
+            mappedOrderMatches &= pixelsIdentical(qemuFb[y * FB_W + x], expected);
+        }
+    }
+    TEST_CHECK(mappedOrderMatches, "Overlapping PRESENT rectangles with different source mappings preserve write order");
+
+    // Two overlapping commands are submitted together and observed only after
+    // completion. The later command must win without corrupting its neighbors.
+    resetFramebuffer();
+    std::vector<uint8_t> orderedStream;
+    const SVGA3dCopyRect orderedRects[] = {{10, 10, 20, 20, 0, 0}, {20, 20, 20, 20, 40, 40}};
+    for (const auto &rect : orderedRects) {
+        const SVGA3dCmdHeader header{sizeof(SVGA3dCmdPresent) + sizeof(SVGA3dCopyRect)};
+        const SVGA3dCmdPresent present{SID_RT};
+        auto append = [&](const void *data, size_t size) {
+            const auto *bytes = static_cast<const uint8_t *>(data);
+            orderedStream.insert(orderedStream.end(), bytes, bytes + size);
+        };
+        append(&cmdPresent, sizeof(cmdPresent));
+        append(&header, sizeof(header));
+        append(&present, sizeof(present));
+        append(&rect, sizeof(rect));
+    }
+    status = executeFifo(orderedStream);
+    TEST_CHECK(status == SVGA3_VLKN_SUCCESS, "Complete two queued overlapping PRESENT commands");
+    bool orderedFrameMatches = true;
+    for (uint32_t y = 0; y < FB_H; ++y) {
+        for (uint32_t x = 0; x < FB_W; ++x) {
+            Pixel expected = BASELINE_PIXEL;
+            for (const auto &rect : orderedRects) {
+                if (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h)
+                    expected = renderedSurface[(y - rect.y + rect.srcy) * RT_W + x - rect.x + rect.srcx];
+            }
+            orderedFrameMatches &= pixelsIdentical(qemuFb[y * FB_W + x], expected);
+        }
+    }
+    TEST_CHECK(orderedFrameMatches, "Queued presentation preserves command order and every untouched pixel");
+    TEST_CHECK(damageCovers(g_dirtyRects, {{10, 10, 20, 20}, {20, 20, 20, 20}}, FB_W, FB_H),
+               "Queued presentation notifications cover both updates");
+
     /* A legitimate all-black image must replace the previous framebuffer contents. */
     std::vector<Pixel> blackPixels(RT_W * RT_H, Pixel{0, 0, 0, 255});
     SVGA3dBox fullRt = {0, 0, 0, RT_W, RT_H, 1};
     status = svga3_vlkn_surface_dma_upload(dev, SID_RT, 0, &fullRt, blackPixels.data(), RT_W * sizeof(Pixel));
     if (status == SVGA3_VLKN_SUCCESS) status = svga3_vlkn_surface_present(dev, SID_RT, nullptr, 0);
+    if (status == SVGA3_VLKN_SUCCESS) status = svga3_vlkn_device_wait_idle(dev);
     TEST_CHECK_ERR(status == SVGA3_VLKN_SUCCESS && qemuFb[0].r == 0 && qemuFb[0].g == 0 && qemuFb[0].b == 0,
                    "Presenting a black frame clears old framebuffer pixels");
 
