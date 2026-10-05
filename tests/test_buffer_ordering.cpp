@@ -162,6 +162,27 @@ static bool robust_index_regression() {
     if (pixels[5]!=(op==SVGA3D_TC_MODULATE ? 0xff400000u : 0xff40bf80u)) printf("combiner op=%u pixel=%08x\n",op,pixels[5]);
     ok &= pixels[5]==(op==SVGA3D_TC_MODULATE ? 0xff400000u : 0xff40bf80u);
   }
+  const uint32_t runtimePS[]{0xffff0300,
+    1u|(2u<<24),DST(0,0),SRC(2,1),
+    27u|(2u<<24),DST(15,0),SRC(7,0),
+    2u|(3u<<24),DST(0,0),SRC(0,0),SRC(2,0),29,
+    40u|(1u<<24),SRC(14,0),
+    1u|(2u<<24),DST(8,0),SRC(0,0),42,
+    1u|(2u<<24),DST(8,0),SRC(2,2),43,0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,13,SVGA3D_SHADERTYPE_PS,runtimePS,sizeof(runtimePS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,13)==SVGA3_VLKN_SUCCESS;
+  const float loopColors[3][4]{{.25f,0,0,0},{0,0,0,1},{0,0,1,1}};
+  for (unsigned i=0;i<3;++i) ok &= svga3_vlkn_context_set_shader_const(d,1,i,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(loopColors[i]))==SVGA3_VLKN_SUCCESS;
+  for (unsigned attempt=0;attempt<3;++attempt) {
+    uint32_t parameters[4]{attempt==2?2u:3u,0,1,0},boolean[4]{attempt==1?0u:1u,0,0,0};
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_INT,parameters)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_BOOL,boolean)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    uint32_t expected[]{0xffbf0000,0xff0000ff,0xff800000};
+    if (pixels[5]!=expected[attempt]) printf("runtime int/bool attempt=%u pixel=%08x\n",attempt,pixels[5]);
+    ok &= pixels[5]==expected[attempt];
+  }
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();

@@ -276,7 +276,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
      * completed queue submission. */
     VkDeviceSize alignment = m_backend->properties().limits.minUniformBufferOffsetAlignment;
     if (alignment == 0) alignment = 1;
-    m_constantRingStride = (4096 + alignment - 1) / alignment * alignment;
+    m_constantRingStride = (kShaderConstantBytes + alignment - 1) / alignment * alignment;
     m_constantRingSize -= m_constantRingSize % (m_constantRingStride * 2);
     m_backend->createBuffer(
         m_constantRingSize,
@@ -2725,11 +2725,11 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         VkDescriptorBufferInfo vsBufInfo = {};
         vsBufInfo.buffer = m_constantRingBuffer;
         vsBufInfo.offset = 0;
-        vsBufInfo.range = sizeof(m_vsConsts.floatConsts);
+        vsBufInfo.range = kShaderConstantBytes;
         VkDescriptorBufferInfo psBufInfo = {};
         psBufInfo.buffer = m_constantRingBuffer;
         psBufInfo.offset = 0;
-        psBufInfo.range = sizeof(m_psConsts.floatConsts);
+        psBufInfo.range = kShaderConstantBytes;
 
         VkWriteDescriptorSet writes[2 + SVGA3_MAX_TEXTURE_STAGES] = {};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -2850,6 +2850,15 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                 m_vsConstsUploadedForFf = false;
             }
             memcpy(mapped + psOffset, m_psConsts.floatConsts, sizeof(m_psConsts.floatConsts));
+            auto uploadIntegerBanks=[&](size_t offset,const ShaderConstantBank &bank) {
+                memcpy(mapped+offset+kShaderIntOffset*16,bank.intConsts,sizeof(bank.intConsts));
+                for (unsigned reg=0;reg<16;++reg) {
+                    uint32_t enabled=(bank.boolConsts>>reg)&1;
+                    uint32_t vector[4]{enabled,enabled,enabled,enabled};
+                    memcpy(mapped+offset+(kShaderBoolOffset+reg)*16,vector,sizeof(vector));
+                }
+            };
+            uploadIntegerBanks(vsOffset,m_vsConsts); uploadIntegerBanks(psOffset,m_psConsts);
             m_vsConstDynamicOffset = static_cast<uint32_t>(vsOffset);
             m_psConstDynamicOffset = static_cast<uint32_t>(psOffset);
             m_constantRingCursor += slotSize;

@@ -847,8 +847,12 @@ int main() {
             (29), // ENDLOOP
             0x0000FFFF
         };
-        TEST_CHECK(rejected(loopNoDefi, sizeof(loopNoDefi)/sizeof(uint32_t), SVGA3D_SHADERTYPE_VS),
-                   "LOOP over an undefined DEFI register is rejected");
+        std::vector<uint32_t> runtimeSpirv; std::string runtimeError;
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,loopNoDefi,sizeof(loopNoDefi)/4,runtimeSpirv,runtimeError)==SVGA3_VLKN_SUCCESS,
+                   "LOOP can read the runtime integer constant bank");
+        TEST_CHECK_SPIRV(runtimeSpirv,"runtime_loop","Runtime LOOP passes spirv-val");
+        const uint32_t invalidDefi[]{0xfffe0300,48u|(5u<<24),D3D9_DST(7,16,15),1,0,1,0,0xffff};
+        TEST_CHECK(rejected(invalidDefi,sizeof(invalidDefi)/4,SVGA3D_SHADERTYPE_VS),"DEFI i16 is rejected");
         const uint32_t loopUnclosed[] = {
             0xFFFE0300,
             (48) | (5 << 24), // DEFI i0 = (1, 0, 1, 0)

@@ -11,6 +11,10 @@
 #include <string>
 
 namespace svga3_vlkn {
+constexpr uint32_t kShaderIntOffset=256;
+constexpr uint32_t kShaderBoolOffset=272;
+constexpr uint32_t kShaderConstantVectors=288;
+constexpr size_t kShaderConstantBytes=kShaderConstantVectors*16;
 
 /*
  * Translates guest D3D9/SVGA3D shader bytecode to standard Vulkan GLSL450 SPIR-V binary.
