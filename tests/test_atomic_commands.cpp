@@ -6,6 +6,9 @@
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static unsigned barriers, imageCopies, bufferCopies;
+static VkImage narrowImage;
+static unsigned narrowBarriers;
+static bool narrowRanges=true;
 static void VKAPI_CALL noBlitProperties(VkPhysicalDevice,VkFormat,VkFormatProperties *out) { *out={}; out->optimalTilingFeatures=VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT; }
 static void VKAPI_CALL noFormatProperties(VkPhysicalDevice,VkFormat,VkFormatProperties *out) { *out={}; }
 static PFN_vkCreateSampler savedSampler;
@@ -20,7 +23,12 @@ static VkResult VKAPI_CALL captureSampler(VkDevice device,const VkSamplerCreateI
 static VkImageAspectFlags clearAspect;
 static void VKAPI_CALL captureClear(VkCommandBuffer, uint32_t count, const VkClearAttachment *attachments, uint32_t, const VkClearRect *) { clearAspect = count ? attachments[count-1].aspectMask : 0; }
 static VkIndexType boundIndexType = VK_INDEX_TYPE_UINT32;
-static void VKAPI_CALL countBarriers(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier *, uint32_t, const VkBufferMemoryBarrier *, uint32_t, const VkImageMemoryBarrier *) { ++barriers; }
+static void VKAPI_CALL countBarriers(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier *, uint32_t, const VkBufferMemoryBarrier *, uint32_t count, const VkImageMemoryBarrier *images) { ++barriers;
+    for (uint32_t i=0;i<count;++i) if (images[i].image==narrowImage && narrowImage) {
+        ++narrowBarriers; auto &r=images[i].subresourceRange;
+        narrowRanges &= r.baseMipLevel==1 && r.levelCount==1 && r.baseArrayLayer==3 && r.layerCount==1;
+    }
+}
 static void VKAPI_CALL countImageCopies(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLayout, uint32_t, const VkImageCopy *) { ++imageCopies; }
 static void VKAPI_CALL countBufferCopies(VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, const VkBufferCopy *) { ++bufferCopies; }
 static void VKAPI_CALL captureIndex(VkCommandBuffer, VkBuffer, VkDeviceSize, VkIndexType type) { boundIndexType = type; }
@@ -204,6 +212,21 @@ int main() {
         CHECK(ctx->clear(static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_DEPTH|SVGA3D_CLEAR_STENCIL),0,1,3,nullptr,0) == SVGA3_VLKN_SUCCESS);
         CHECK(clearAspect == (format == SVGA3D_Z_D16 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT));
     }
+    dev->contextMgr->endAllRenderPasses();
+    SVGA3dSize cubeMips[12];
+    for (unsigned i=0;i<12;++i) cubeMips[i]={i%2 ? 2u : 4u,i%2 ? 2u : 4u,1};
+    CHECK(dev->surfaceMgr->defineSurface(700,SVGA3D_SURFACE_CUBEMAP,SVGA3D_A8R8G8B8,cubeMips,12)==SVGA3_VLKN_SUCCESS);
+    auto *cube=dev->surfaceMgr->getSurface(700); narrowImage=cube->image();
+    SVGA3dBox tile{0,0,0,2,2,1}; uint32_t data[4]={1,2,3,4};
+    CHECK(cube->dmaUpload(1,&tile,data,8,false,3)==SVGA3_VLKN_SUCCESS);
+    const void *mapped=nullptr; size_t pitch=0;
+    { std::unique_lock<std::mutex> lock;
+      CHECK(cube->dmaDownloadToStaging(1,&tile,&mapped,&pitch,lock,3)==SVGA3_VLKN_SUCCESS); }
+    CHECK(narrowRanges && narrowBarriers==3);
+    CHECK(cube->subresourceLayout(0,0)==VK_IMAGE_LAYOUT_UNDEFINED && cube->subresourceLayout(1,3)==VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    narrowImage=VK_NULL_HANDLE;
+    cube->transitionLayout(dev->backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    CHECK(cube->currentLayout()==VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     dispatch.vkCmdClearAttachments = savedClear;
     dispatch.vkCmdPipelineBarrier = savedBarrier; dispatch.vkCmdCopyImage = savedImageCopy;
     dispatch.vkCmdCopyBuffer = savedBufferCopy; dispatch.vkCmdBindIndexBuffer = savedIndex;

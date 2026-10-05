@@ -321,7 +321,7 @@ Svga3VlknStatus VlknSurface::allocate() {
         m_image = VK_NULL_HANDLE;
         m_memory = VK_NULL_HANDLE;
         m_imageView = VK_NULL_HANDLE;
-        m_currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        setLayout(VK_IMAGE_LAYOUT_UNDEFINED);
         size_t mip0Bytes = m_mips.empty() ? m_width : m_mips[0].totalBytes;
         /* Cap buffer size: a 1D surface with width 2^30 would otherwise
          * allocate 1GB+ of host memory (H3). 256MB is generous for
@@ -460,7 +460,7 @@ Svga3VlknStatus VlknSurface::allocate() {
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
 
-    m_currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    setLayout(VK_IMAGE_LAYOUT_UNDEFINED);
 
     /* Images only need a second buffer when used as vertex/index data.
      * Linear DMA can allocate it lazily through ensureBufferSize(). */
@@ -494,6 +494,7 @@ Svga3VlknStatus VlknSurface::allocate() {
 Svga3VlknStatus VlknSurface::ensureVolumeImage() {
     if (m_depth > 1 || m_volumeImage) return SVGA3_VLKN_SUCCESS;
     if (!m_image || m_isCubeMap || m_buffer) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    transitionLayout(m_backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_GENERAL);
     auto status = m_backend->flushCommandBuffer();
     if (status != SVGA3_VLKN_SUCCESS) return status;
     VkImage oldImage = m_image;
@@ -558,25 +559,24 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
     return status;
 }
 
-/* The tracker describes the entire image, so every transition covers every
- * mip and face. Transfer regions still select the requested subresource. */
+// Uniform images use one barrier; mixed layouts transition each mip/face
+// from its tracked layout before publishing a uniform layout to consumers.
 void VlknSurface::transitionLayout(VkCommandBuffer cb, VkImageLayout layout) {
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = m_currentLayout;
-    barrier.newLayout = layout;
-    barrier.srcAccessMask = m_currentLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 :
-        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = m_image;
-    barrier.subresourceRange.aspectMask = nativeAspectMask();
-    barrier.subresourceRange.levelCount = m_mipLevels;
-    barrier.subresourceRange.layerCount = m_arrayLayers;
-    m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
-    m_currentLayout = layout;
+    auto transition=[&](VkImageLayout old,uint32_t mip,uint32_t levels,uint32_t face,uint32_t layers) {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout=old; barrier.newLayout=layout;
+        barrier.srcAccessMask=old==VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
+        barrier.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
+        barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+        barrier.image=m_image;
+        barrier.subresourceRange={nativeAspectMask(),mip,levels,face,layers};
+        m_backend->dispatch().vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&barrier);
+    };
+    if (m_subresourceLayouts.empty()) transition(m_currentLayout,0,m_mipLevels,0,m_arrayLayers);
+    else for (uint32_t face=0;face<m_arrayLayers;++face) for (uint32_t mip=0;mip<m_mipLevels;++mip)
+        transition(subresourceLayout(mip,face),mip,1,face,1);
+    setLayout(layout);
 }
 
 Svga3VlknStatus VlknSurface::ensureBufferSize(size_t requiredSize) {
@@ -891,14 +891,14 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = m_currentLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.srcAccessMask = subresourceLayout(mipLevel,face) == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
     barrier.dstAccessMask = upload ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = m_currentLayout;
+    barrier.oldLayout = subresourceLayout(mipLevel,face);
     barrier.newLayout = transferLayout;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = m_image;
-    barrier.subresourceRange = {aspects, 0, m_mipLevels, 0, m_arrayLayers};
+    barrier.subresourceRange = {aspects, mipLevel, 1, face, 1};
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     VkBufferImageCopy regions[2] = {};
@@ -917,7 +917,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
-    m_currentLayout = barrier.newLayout;
+    setSubresourceLayout(mipLevel,face,barrier.newLayout);
     if (!upload) m_backend->recordHostReadBarrier(cb, buffer, 0, bytes);
     st = m_backend->flushCommandBuffer();
     if (st == SVGA3_VLKN_SUCCESS && !upload) {
@@ -1061,7 +1061,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
 
     /* Validate the linear shadow-copy range BEFORE recording anything: a
      * failure here must not leave a half-recorded barrier in the open
-     * command buffer with m_currentLayout unchanged. */
+     * command buffer with subresourceLayout(mipLevel,face) unchanged. */
     const bool doLinearShadowCopy = (mipLevel == 0 && m_buffer && m_bufferMemory && !compressed);
     if (doLinearShadowCopy) {
         /* 64-bit: (bx+bw) wrapped in 32-bit, undersizing the buffer. */
@@ -1204,16 +1204,16 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
 
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = m_currentLayout == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+    barrier.srcAccessMask = subresourceLayout(mipLevel,face) == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.oldLayout = m_currentLayout;
+    barrier.oldLayout = subresourceLayout(mipLevel,face);
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.image = m_image;
     barrier.subresourceRange.aspectMask = nativeAspectMask();
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = m_mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = m_arrayLayers;
+    barrier.subresourceRange.baseMipLevel = mipLevel;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = face;
+    barrier.subresourceRange.layerCount = 1;
 
     m_backend->dispatch().vkCmdPipelineBarrier(
         cb,
@@ -1255,7 +1255,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
         0, 0, nullptr, 0, nullptr, 1, &barrier
     );
 
-    m_currentLayout = barrier.newLayout;
+    setSubresourceLayout(mipLevel,face,barrier.newLayout);
     if (!usingPersistentStaging) {
         /* Temporary buffer: must complete before it can be destroyed. */
         Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
@@ -1341,18 +1341,18 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = m_currentLayout;
+    barrier.oldLayout = subresourceLayout(mipLevel,face);
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.image = m_image;
     barrier.subresourceRange.aspectMask = nativeAspectMask();
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = m_mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = m_arrayLayers;
+    barrier.subresourceRange.baseMipLevel = mipLevel;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = face;
+    barrier.subresourceRange.layerCount = 1;
 
     // A prior transfer-source layout has only readers since its last
     // transition. Preserve every write-to-read dependency on other layouts.
-    if (m_currentLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+    if (subresourceLayout(mipLevel,face) != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
         m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     }
@@ -1388,9 +1388,9 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
         m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
-        m_currentLayout = barrier.newLayout;
+        setSubresourceLayout(mipLevel,face,barrier.newLayout);
     } else {
-        m_currentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        setSubresourceLayout(mipLevel,face,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     }
     m_backend->recordHostReadBarrier(cb, m_backend->stagingBuffer(), stagingOffset, totalBytes);
     Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
@@ -1529,14 +1529,14 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.oldLayout = m_currentLayout;
+    barrier.oldLayout = subresourceLayout(mipLevel,face);
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.image = m_image;
     barrier.subresourceRange.aspectMask = nativeAspectMask();
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = m_mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = m_arrayLayers;
+    barrier.subresourceRange.baseMipLevel = mipLevel;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = face;
+    barrier.subresourceRange.layerCount = 1;
 
     m_backend->dispatch().vkCmdPipelineBarrier(
         cb,
@@ -1577,7 +1577,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
         0, 0, nullptr, 0, nullptr, 1, &barrier
     );
 
-    m_currentLayout = barrier.newLayout;
+    setSubresourceLayout(mipLevel,face,barrier.newLayout);
     m_backend->recordHostReadBarrier(cb, stagingBuf, 0, totalBytes);
     Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
     if (flushSt != SVGA3_VLKN_SUCCESS) {
