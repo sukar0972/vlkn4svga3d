@@ -106,7 +106,12 @@ Svga3VlknStatus VlknBackend::init(const Svga3VlknConfig *config) {
 }
 
 void VlknBackend::shutdown() {
-    waitIdle();
+    if (waitIdle() != SVGA3_VLKN_SUCCESS) {
+        // Completion is unknown: retain allocations until a later reset or process exit.
+        log_msg("[libqemu_svga3d] Retaining Vulkan resources after failed shutdown idle\n");
+        return;
+    }
+    cleanupRetiredImages();
     if (m_device && m_measurePerformance) {
         const auto &c = m_performanceCounters;
         log_msg("[libqemu_svga3d] Performance totals: presents=%llu readback_bytes=%llu copy_bytes=%llu copy_calls=%llu submissions=%llu queue_wait_ns=%llu identical_shaders=%llu\n",
@@ -183,6 +188,11 @@ Svga3VlknStatus VlknBackend::waitIdle() {
         if (res != VK_SUCCESS) {
             log_msg("[libqemu_svga3d] vkDeviceWaitIdle error: %d\n", res);
             return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        }
+        if (!m_cmdBufferRecording) {
+            m_completedSubmissionSerial = m_recordingSerial;
+            cleanupRetiredImages();
+            cleanupRetiredBuffers(false);
         }
         if (m_cmdBufferPending) {
             m_completedSubmissionSerial = m_recordingSerial;
@@ -793,6 +803,22 @@ void VlknBackend::retireBuffer(VkBuffer buffer, VkDeviceMemory memory, void *map
     m_retiredBuffers.push_back({buffer, memory, mapped, serial, budgetBytes});
 }
 
+void VlknBackend::retireImage(VkImage image, VkDeviceMemory memory, std::vector<VkImageView> views) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_retiredImages.push_back({image,memory,std::move(views),m_recordingSerial});
+}
+
+void VlknBackend::cleanupRetiredImages() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto it=m_retiredImages.begin();it!=m_retiredImages.end();) {
+        if (it->serial > m_completedSubmissionSerial) { ++it; continue; }
+        for (auto view:it->views) if (view) m_dispatch.vkDestroyImageView(m_device,view,nullptr);
+        if (it->image) m_dispatch.vkDestroyImage(m_device,it->image,nullptr);
+        if (it->memory) m_dispatch.vkFreeMemory(m_device,it->memory,nullptr);
+        it=m_retiredImages.erase(it);
+    }
+}
+
 void VlknBackend::cleanupRetiredBuffers(bool forceAll) {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (auto it = m_retiredBuffers.begin(); it != m_retiredBuffers.end(); ) {
@@ -909,6 +935,7 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     /* The wait above retired every recorded staging range. */
     m_stagingBump = 0;
     cleanupRetiredBuffers(false);
+    cleanupRetiredImages();
     res = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
     if (res != VK_SUCCESS) {
         log_msg("[libqemu_svga3d] vkResetCommandBuffer error: %d\n", res);

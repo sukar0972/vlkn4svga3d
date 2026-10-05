@@ -535,9 +535,20 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
         }
     }
     status = m_backend->flushCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) {
+        std::vector<VkImageView> views{oldView};
+        for (auto &view:m_rtViews) views.push_back(view.second);
+        views.insert(views.end(),m_previousSampledViews.begin(),m_previousSampledViews.end());
+        m_rtViews.clear(); m_previousSampledViews.clear();
+        m_backend->retireImage(oldImage,oldMemory,std::move(views));
+        invalidateReadback();
+        return status;
+    }
     m_backend->dispatch().vkDestroyImageView(m_backend->device(), oldView, nullptr);
     for (auto &view : m_rtViews) m_backend->dispatch().vkDestroyImageView(m_backend->device(), view.second, nullptr);
     m_rtViews.clear();
+    for (auto view:m_previousSampledViews) m_backend->dispatch().vkDestroyImageView(m_backend->device(),view,nullptr);
+    m_previousSampledViews.clear();
     m_backend->dispatch().vkDestroyImage(m_backend->device(), oldImage, nullptr);
     m_backend->freeMemory(oldMemory);
     invalidateReadback();
@@ -729,8 +740,17 @@ bool VlknSurface::ensureViewMipLevels(uint32_t levels) {
 }
 
 void VlknSurface::destroy() {
-    if (m_backend) {
-        m_backend->flushCommandBuffer();
+    if (m_backend && m_backend->flushCommandBuffer() != SVGA3_VLKN_SUCCESS) {
+        std::vector<VkImageView> views;
+        if (m_imageView) views.push_back(m_imageView);
+        for (auto &view:m_rtViews) views.push_back(view.second);
+        views.insert(views.end(),m_previousSampledViews.begin(),m_previousSampledViews.end());
+        if (m_image || m_memory || !views.empty()) m_backend->retireImage(m_image,m_memory,std::move(views));
+        m_backend->retireBuffer(m_buffer,m_bufferMemory,m_bufferMapped,m_backend->recordingSerial(),0);
+        m_rtViews.clear(); m_previousSampledViews.clear();
+        m_image=VK_NULL_HANDLE; m_imageView=VK_NULL_HANDLE; m_memory=VK_NULL_HANDLE;
+        m_buffer=VK_NULL_HANDLE; m_bufferMemory=VK_NULL_HANDLE; m_bufferMapped=nullptr; m_bufferSize=0;
+        return;
     }
 
     if (m_bufferMapped && m_bufferMemory) {
