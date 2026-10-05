@@ -41,6 +41,15 @@ Individual targets:
 
 **`test-qemu` does not boot an actual QEMU guest.** Passing it is not proof of working Linux, Windows, or QNX graphics. Test names and success banners inherited from development should not be read as completeness claims.
 
+## Unsupported capabilities
+
+The core and lab preload report zero for MSAA, alpha-to-coverage, supersampling,
+fixed-function vertex blending, vertex texture sampling and gradient sampling.
+Multisample surfaces, non-disabled vertex blend state, VS texture instructions
+and instancing divisors are rejected. Unknown and unmapped surface formats,
+including packed/planar YUV, fail definition instead of being replaced with BGRA.
+Stencil clears are ignored on attachments with no stencil aspect.
+
 ## Query failure policy
 
 Queries require a successfully created Vulkan query pool. BEGIN, END and WAIT

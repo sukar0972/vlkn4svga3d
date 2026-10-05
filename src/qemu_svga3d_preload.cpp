@@ -586,8 +586,11 @@ static uint32_t advertised_devcap(const DevCapInfo &cap) {
         return SVGA3DFORMAT_OP_ZSTENCIL
             | SVGA3DFORMAT_OP_ZSTENCIL_WITH_ARBITRARY_COLOR_DEPTH
             | SVGA3DFORMAT_OP_TEXTURE;
-    default:
-        return cap.expectedValue;
+    default: {
+        uint32_t value = 0;
+        svga3_vlkn_query_cap(g_vlknDev, cap.id, &value);
+        return value;
+    }
     }
 }
 

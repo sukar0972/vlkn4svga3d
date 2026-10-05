@@ -768,6 +768,10 @@ void VlknContext::initDefaultRenderStates() {
 
 Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_t value) {
     if ((uint32_t)state >= SVGA3D_RS_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if ((state == SVGA3D_RS_VERTEXBLEND || state == SVGA3D_RS_INDEXEDVERTEXBLENDENABLE) && value) {
+        log_msg("[libqemu_svga3d] Fixed-function vertex blending is unsupported\n");
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND;
+    }
     m_renderStates[(uint32_t)state] = value;
     return SVGA3_VLKN_SUCCESS;
 }
@@ -1718,6 +1722,9 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
     bool haveDepth = m_depthStencilTarget.sid != SVGA3D_INVALID_ID && m_depthStencilTarget.sid != 0;
     if (wantColor && !haveColor) flags = (SVGA3dClearFlag)(flags & ~SVGA3D_CLEAR_COLOR);
     if (wantDepth && !haveDepth) flags = (SVGA3dClearFlag)(flags & ~(SVGA3D_CLEAR_DEPTH | SVGA3D_CLEAR_STENCIL));
+    auto *depthTarget = m_surfaceMgr->getSurface(m_depthStencilTarget.sid);
+    if (!depthTarget || !(depthTarget->nativeAspectMask() & VK_IMAGE_ASPECT_STENCIL_BIT))
+        flags = static_cast<SVGA3dClearFlag>(flags & ~SVGA3D_CLEAR_STENCIL);
     if (flags == 0) return SVGA3_VLKN_SUCCESS;
 
     Svga3VlknStatus rpStatus = ensureRenderPassActive();

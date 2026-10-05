@@ -45,16 +45,16 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 ## Capability, surface-format and feature honesty
 
-- [ ] [#98](https://github.com/sukar0972/vlkn4svga3d/issues/98) — Medium: Unknown SVGA format silent B8G8R8A8 fallback
-- [ ] [#93](https://github.com/sukar0972/vlkn4svga3d/issues/93) — High: YUV (etc.) advertised, mapped to BGRA + wrong bpp
-- [ ] [#92](https://github.com/sukar0972/vlkn4svga3d/issues/92) — High: MSAA/A2C/supersample caps advertised, pipelines always 1×
+- [x] [#98](https://github.com/sukar0972/vlkn4svga3d/issues/98) — Medium: Unknown SVGA format silent B8G8R8A8 fallback
+- [x] [#93](https://github.com/sukar0972/vlkn4svga3d/issues/93) — High: YUV (etc.) advertised, mapped to BGRA + wrong bpp
+- [x] [#92](https://github.com/sukar0972/vlkn4svga3d/issues/92) — High: MSAA/A2C/supersample caps advertised, pipelines always 1×
 - [ ] [#153](https://github.com/sukar0972/vlkn4svga3d/issues/153) — Medium: Depth-stencil format honesty (has_stencil vs Vk vs aspect)
-- [ ] [#152](https://github.com/sukar0972/vlkn4svga3d/issues/152) — Medium: clear() applies STENCIL aspect without format check
+- [x] [#152](https://github.com/sukar0972/vlkn4svga3d/issues/152) — Medium: clear() applies STENCIL aspect without format check
 - [ ] [#121](https://github.com/sukar0972/vlkn4svga3d/issues/121) — Medium: Signed bump/normal formats mapped as UNORM (advertised)
 - [ ] [#120](https://github.com/sukar0972/vlkn4svga3d/issues/120) — Medium-High: GENERATE_MIPMAPS blits without format blit support (AUTOGEN advertised)
-- [ ] [#119](https://github.com/sukar0972/vlkn4svga3d/issues/119) — Medium: MAX_FIXED_VERTEXBLEND=4 advertised, unimplemented
-- [ ] [#138](https://github.com/sukar0972/vlkn4svga3d/issues/138) — Medium: MAX_VERTEX_SHADER_TEXTURES=4 advertised; VS has no sampler interface
-- [ ] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
+- [x] [#119](https://github.com/sukar0972/vlkn4svga3d/issues/119) — Medium: MAX_FIXED_VERTEXBLEND=4 advertised, unimplemented
+- [x] [#138](https://github.com/sukar0972/vlkn4svga3d/issues/138) — Medium: MAX_VERTEX_SHADER_TEXTURES=4 advertised; VS has no sampler interface
+- [x] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
 - [ ] [#129](https://github.com/sukar0972/vlkn4svga3d/issues/129) — Medium: Fixed-function texture combiner advertised but not implemented
 - [ ] [#123](https://github.com/sukar0972/vlkn4svga3d/issues/123) — Medium: Wireframe/point fill without fillModeNonSolid
 - [ ] [#122](https://github.com/sukar0972/vlkn4svga3d/issues/122) — Medium: Anisotropy enabled without feature gate / limit clamp
@@ -63,7 +63,7 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [ ] [#162](https://github.com/sukar0972/vlkn4svga3d/issues/162) — Medium: Relative const addressing rejected while SM3 advertised
 - [x] [#161](https://github.com/sukar0972/vlkn4svga3d/issues/161) — Medium: ps_1_x accepted but wrong (white output; _x2/_x4/_d2 dropped)
 - [x] [#151](https://github.com/sukar0972/vlkn4svga3d/issues/151) — Medium: DEVCAP shader temps=32 but translator only r0–r15
-- [ ] [#160](https://github.com/sukar0972/vlkn4svga3d/issues/160) — Medium: Geometry instancing (vertex divisors) silently ignored
+- [x] [#160](https://github.com/sukar0972/vlkn4svga3d/issues/160) — Medium: Geometry instancing (vertex divisors) silently ignored
 
 ## Shader and vertex-input correctness
 

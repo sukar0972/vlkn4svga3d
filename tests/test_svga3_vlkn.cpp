@@ -138,7 +138,7 @@ static void TestDeviceLifecycleAndCaps() {
     TEST_CHECK(sup == 1 && val == 16, "SVGA3D_DEVCAP_MAX_TEXTURE_ANISOTROPY == 16");
 
     sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_ALPHATOCOVERAGE, &val);
-    TEST_CHECK(sup == 1 && val == 1, "SVGA3D_DEVCAP_ALPHATOCOVERAGE == 1");
+    TEST_CHECK(sup == 1 && val == 0, "SVGA3D_DEVCAP_ALPHATOCOVERAGE is disabled");
 
     /* Verify rejected capabilities match Oracle */
     sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_S23E8_TEXTURES, &val);
@@ -156,7 +156,12 @@ static void TestDeviceLifecycleAndCaps() {
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
             const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
-            const uint32_t expected = compressedFormat ?
+            const bool disabled = dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
+                dc.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES || dc.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING ||
+                dc.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES || dc.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE ||
+                dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
+                dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
+            const uint32_t expected = disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
@@ -323,8 +328,8 @@ static void TestSurfaceLifecycle(Svga3VlknDevice *dev) {
     /* 5. Define V2 surface with MSAA and autogen filter */
     SVGA3dSize msaaSize = { 128, 128, 1 };
     st = svga3_vlkn_surface_define_v2(dev, 5, 0, SVGA3D_A8R8G8B8, 4, SVGA3D_TEX_FILTER_LINEAR, &msaaSize, 1);
-    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Define MSAA surface v2 (sid=5)");
-    TEST_CHECK(svga3_vlkn_surface_exists(dev, 5), "Surface exists (sid=5)");
+    TEST_CHECK(st == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject unsupported MSAA surface v2 (sid=5)");
+    TEST_CHECK(!svga3_vlkn_surface_exists(dev, 5), "Rejected MSAA surface absent (sid=5)");
 
     /* 6. Active state toggle */
     st = svga3_vlkn_surface_set_active(dev, 1, false);
@@ -346,7 +351,7 @@ static void TestSurfaceLifecycle(Svga3VlknDevice *dev) {
     TEST_CHECK(!svga3_vlkn_surface_exists(dev, 4), "Surface destroyed (sid=4)");
 
     st = svga3_vlkn_surface_destroy(dev, 5);
-    TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Destroy MSAA surface (sid=5)");
+    TEST_CHECK(st == SVGA3_VLKN_ERROR_NOT_FOUND, "Rejected MSAA surface cannot be destroyed (sid=5)");
     TEST_CHECK(!svga3_vlkn_surface_exists(dev, 5), "Surface destroyed (sid=5)");
 
     /* Destroying nonexistent surface -> NOT_FOUND */
@@ -1205,6 +1210,10 @@ static void TestRenderStatesExhaustive(Svga3VlknDevice *dev) {
             else if (rsi.id == SVGA3D_RS_ZFUNC) testVal = (sweep % 2 == 0) ? SVGA3D_CMP_LESSEQUAL : SVGA3D_CMP_ALWAYS;
 
             Svga3VlknStatus st = svga3_vlkn_context_set_render_state(dev, cid, (SVGA3dRenderStateName)rsi.id, testVal);
+            if ((rsi.id == SVGA3D_RS_VERTEXBLEND || rsi.id == SVGA3D_RS_INDEXEDVERTEXBLENDENABLE) && testVal) {
+                TEST_CHECK(st == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND, "Unsupported vertex blending rejected");
+                continue;
+            }
             TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Set RS " + std::string(rsi.name) + " s" + std::to_string(sweep));
 
             uint32_t readBack = 0;

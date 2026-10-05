@@ -174,9 +174,6 @@ VlknSurface::VlknSurface(VlknBackend *backend,
     , m_readbackPitch(0)
 {
     m_vkFormat = (VkFormat)svga3d_to_vk_format((uint32_t)format);
-    if (m_vkFormat == VK_FORMAT_UNDEFINED) {
-        m_vkFormat = VK_FORMAT_B8G8R8A8_UNORM; /* Fallback for unrecognized formats */
-    }
 
     m_isDepthStencil = svga3_format_is_depth_stencil(format);
     m_isCubeMap = (surfaceFlags & SVGA3D_SURFACE_CUBEMAP) != 0;
@@ -307,6 +304,14 @@ size_t VlknSurface::estimatedBytes() const {
 }
 
 Svga3VlknStatus VlknSurface::allocate() {
+    if (m_svgaFormat != SVGA3D_BUFFER && m_vkFormat == VK_FORMAT_UNDEFINED) {
+        log_msg("[libqemu_svga3d] Unsupported surface format %u for sid=%u\n", m_svgaFormat, m_sid);
+        return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
+    }
+    if (m_multisampleCount > 1) {
+        log_msg("[libqemu_svga3d] Multisample surfaces are unsupported (sid=%u samples=%u)\n",m_sid,m_multisampleCount);
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
     const bool compressed = svga3_format_is_compressed(m_svgaFormat);
     if (compressed && (m_flags & SVGA3D_SURFACE_HINT_RENDERTARGET))
         return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;

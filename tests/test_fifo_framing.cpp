@@ -71,6 +71,20 @@ int main() {
     CHECK(!run(incomplete, true) && fifo[SVGA_FIFO_STOP] == max - 4);
     CHECK(svga3_vlkn_fifo_execute(dev, incomplete.data(), incomplete.size()*4, &consumed) == SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER && consumed == 0);
 
+    CHECK(dev->contextMgr->createContext(2) == SVGA3_VLKN_SUCCESS);
+    SVGA3dCmdDrawPrimitives draw{2,1,0};
+    SVGA3dVertexDecl declaration{};
+    std::vector<uint32_t> instanceWire(2 + (sizeof(draw)+sizeof(declaration)+4)/4);
+    instanceWire[0]=SVGA_3D_CMD_DRAW_PRIMITIVES; instanceWire[1]=(instanceWire.size()-2)*4;
+    std::memcpy(instanceWire.data()+2,&draw,sizeof(draw));
+    std::memcpy(reinterpret_cast<uint8_t*>(instanceWire.data()+2)+sizeof(draw),&declaration,sizeof(declaration));
+    for (uint32_t divisor : {0x40000002u,0x80000001u,2u}) {
+        instanceWire.back()=divisor;
+        CHECK(svga3_vlkn_fifo_execute(dev,instanceWire.data(),instanceWire.size()*4,&consumed) == SVGA3_VLKN_ERROR_INVALID_PARAM);
+        CHECK(consumed == instanceWire.size()*4);
+    }
+    instanceWire.back()=1;
+    CHECK(svga3_vlkn_fifo_execute(dev,instanceWire.data(),instanceWire.size()*4,&consumed) == SVGA3_VLKN_SUCCESS && consumed == instanceWire.size()*4);
     auto savedSubmit = dev->backend->dispatch().vkQueueSubmit;
     dev->backend->getActiveCommandBuffer();
     dev->backend->dispatch().vkQueueSubmit = failSubmit;
