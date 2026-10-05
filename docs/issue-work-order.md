@@ -1,6 +1,6 @@
 # Issue work order
 
-Snapshot: 2026-10-05, 78 open issues at revision `852de75`.
+Snapshot: 2026-10-05, 77 open issues at revision `852de75`.
 
 Fix the command boundary and validation coverage first, then prevent unsafe guest
 memory access and partial GPU recording. Query state and resource lifetimes precede
@@ -24,15 +24,15 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 - [x] [#84](https://github.com/sukar0972/vlkn4svga3d/issues/84) — High: GMR2 SINGLE_PPN wrap and guest GPA shift overflow
 - [x] [#159](https://github.com/sukar0972/vlkn4svga3d/issues/159) — Medium: Render-state and transform maps grow without limit
-- [ ] [#104](https://github.com/sukar0972/vlkn4svga3d/issues/104) — Medium: Vertex reads can OOB (no robustBufferAccess)
-- [ ] [#131](https://github.com/sukar0972/vlkn4svga3d/issues/131) — High: Surface redefine destroys old surface before allocate; failure orphans sid
+- [x] [#104](https://github.com/sukar0972/vlkn4svga3d/issues/104) — Medium: Vertex reads can OOB (no robustBufferAccess)
+- [x] [#131](https://github.com/sukar0972/vlkn4svga3d/issues/131) — High: Surface redefine destroys old surface before allocate; failure orphans sid
 - [ ] [#158](https://github.com/sukar0972/vlkn4svga3d/issues/158) — Medium: Pipeline cache unbounded; stencil ref in key (not dynamic)
 - [ ] [#140](https://github.com/sukar0972/vlkn4svga3d/issues/140) — Medium: Svga3VlknConfig capacity fields dead; DEVCAP vs SVGA3_MAX_* drift
 
 ## Submission, query and device-loss recovery
 
-- [ ] [#90](https://github.com/sukar0972/vlkn4svga3d/issues/90) — High: SURFACE_COPY records Vk cmds then returns mid-loop
-- [ ] [#91](https://github.com/sukar0972/vlkn4svga3d/issues/91) — High: Draw records texture barriers then fails late
+- [x] [#90](https://github.com/sukar0972/vlkn4svga3d/issues/90) — High: SURFACE_COPY records Vk cmds then returns mid-loop
+- [x] [#91](https://github.com/sukar0972/vlkn4svga3d/issues/91) — High: Draw records texture barriers then fails late
 - [x] [#95](https://github.com/sukar0972/vlkn4svga3d/issues/95) — Medium: endQuery flush failure leaves query FSM inconsistent
 - [x] [#94](https://github.com/sukar0972/vlkn4svga3d/issues/94) — Medium: END_QUERY never writes guestResult PENDING
 - [x] [#132](https://github.com/sukar0972/vlkn4svga3d/issues/132) — Medium: WAIT_FOR_QUERY returns SUCCESS after ignored writeGuest failure
@@ -72,8 +72,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [ ] [#125](https://github.com/sukar0972/vlkn4svga3d/issues/125) — High: ps_2_x shaders read texture coordinates from wrong input (dcl t#/v# collision)
 - [ ] [#127](https://github.com/sukar0972/vlkn4svga3d/issues/127) — Medium: SM3 non-COLOR/TEXCOORD I/O lands in wrong slot (overwrites TEXCOORD0)
 - [ ] [#107](https://github.com/sukar0972/vlkn4svga3d/issues/107) — Medium: Vertex attribute locations disagree (context vs translator)
-- [ ] [#130](https://github.com/sukar0972/vlkn4svga3d/issues/130) — Medium: Unknown vertex types silently become float4 (size/OOB risk)
-- [ ] [#124](https://github.com/sukar0972/vlkn4svga3d/issues/124) — Medium: Indexed draw uses stride for VkIndexType, ignores indexWidth
+- [x] [#130](https://github.com/sukar0972/vlkn4svga3d/issues/130) — Medium: Unknown vertex types silently become float4 (size/OOB risk)
+- [x] [#124](https://github.com/sukar0972/vlkn4svga3d/issues/124) — Medium: Indexed draw uses stride for VkIndexType, ignores indexWidth
 - [ ] [#128](https://github.com/sukar0972/vlkn4svga3d/issues/128) — Medium: RSQ and POW skip abs required by D3D9
 - [ ] [#126](https://github.com/sukar0972/vlkn4svga3d/issues/126) — Medium: SM2 SINCOS (3-source) rejected; only SM3 form accepted
 - [ ] [#110](https://github.com/sukar0972/vlkn4svga3d/issues/110) — Low: Int/bool shader consts stored never uploaded

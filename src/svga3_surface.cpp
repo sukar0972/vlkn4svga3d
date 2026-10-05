@@ -1635,38 +1635,29 @@ Svga3VlknStatus VlknSurfaceManager::defineSurface(uint32_t sid,
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_surfaces.find(sid);
-    if (it != m_surfaces.end()) {
-        if (m_contextMgr) m_contextMgr->invalidateSurface(sid);
-        /* Redefine replaces the old surface: release its budget first so
-         * the new reservation is not charged on top of the old one. */
-        m_backend->resourceBudgets().releaseSurfaceBytes(it->second->budgetedBytes());
-        m_surfaces.erase(it);
-    } else {
-        /* Cap surfaces: each holds a Vulkan image/buffer, so an unbounded
-         * count exhausts host and device memory. */
-        if (m_surfaces.size() >= SVGA3_MAX_SURFACES) {
-            log_msg("[libqemu_svga3d] defineSurface error: surface limit %u reached\n",
-                    SVGA3_MAX_SURFACES);
-            return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
-        }
-    }
+    const size_t oldBytes = it == m_surfaces.end() ? 0 : it->second->budgetedBytes();
+    if (it == m_surfaces.end() && m_surfaces.size() >= SVGA3_MAX_SURFACES)
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
 
     auto surf = std::make_unique<VlknSurface>(m_backend, sid, surfaceFlags, format, sizes, numSizes);
     /* Aggregate device budget: reject before touching the host allocator,
      * so a guest cannot exhaust host memory with many per-object-legal
      * surfaces. */
     size_t needBytes = surf->budgetedBytes();
-    if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(needBytes)) {
+    const size_t extraBytes = needBytes > oldBytes ? needBytes - oldBytes : 0;
+    if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(extraBytes)) {
         log_msg("[libqemu_svga3d] defineSurface error: aggregate surface budget exhausted (%zu bytes, sid=%u)\n",
                 needBytes, sid);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
     Svga3VlknStatus st = surf->allocate();
     if (st != SVGA3_VLKN_SUCCESS) {
-        m_backend->resourceBudgets().releaseSurfaceBytes(needBytes);
+        m_backend->resourceBudgets().releaseSurfaceBytes(extraBytes);
         return st;
     }
 
+    if (it != m_surfaces.end() && m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (oldBytes > needBytes) m_backend->resourceBudgets().releaseSurfaceBytes(oldBytes - needBytes);
     m_surfaces[sid] = std::move(surf);
     return SVGA3_VLKN_SUCCESS;
 }
@@ -1753,6 +1744,33 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
         log_msg("[libqemu_svga3d] copy error: mip/face out of range (src mip=%u face=%u, dst mip=%u face=%u)\n",
                 srcMip, srcFace, dstMip, dstFace);
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+
+    if (numBoxes && !boxes) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (src->image() && dst->image() && src->vkFormat() != dst->vkFormat())
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    for (uint32_t i = 0; i < numBoxes; ++i) {
+        const auto &b = boxes[i];
+        if (src->buffer() && dst->buffer()) {
+            size_t bytes = b.w;
+            if (src->image()) {
+                if (__builtin_mul_overflow(bytes, size_t(b.h ? b.h : 1), &bytes) ||
+                    __builtin_mul_overflow(bytes, size_t(b.d ? b.d : 1), &bytes) ||
+                    __builtin_mul_overflow(bytes, svga3_format_bytes_per_pixel(src->svgaFormat()), &bytes))
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            }
+            if (b.srcx > src->bufferSize() || bytes > src->bufferSize() - b.srcx ||
+                b.x > dst->bufferSize() || bytes > dst->bufferSize() - b.x)
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        }
+        if (src->image() && dst->image() &&
+            (uint64_t(b.srcx) + b.w > srcMipInfo->width ||
+             uint64_t(b.srcy) + (b.h ? b.h : 1) > srcMipInfo->height ||
+             uint64_t(b.srcz) + (b.d ? b.d : 1) > srcMipInfo->depth ||
+             uint64_t(b.x) + b.w > dstMipInfo->width ||
+             uint64_t(b.y) + (b.h ? b.h : 1) > dstMipInfo->height ||
+             uint64_t(b.z) + (b.d ? b.d : 1) > dstMipInfo->depth))
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
@@ -1854,25 +1872,26 @@ Svga3VlknStatus VlknSurfaceManager::defineSurfaceV2(uint32_t sid,
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_surfaces.find(sid);
-    if (it != m_surfaces.end()) {
-        if (m_contextMgr) m_contextMgr->invalidateSurface(sid);
-        m_backend->resourceBudgets().releaseSurfaceBytes(it->second->budgetedBytes());
-        m_surfaces.erase(it);
-    }
+    const size_t oldBytes = it == m_surfaces.end() ? 0 : it->second->budgetedBytes();
+    if (it == m_surfaces.end() && m_surfaces.size() >= SVGA3_MAX_SURFACES)
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
 
     auto surf = std::make_unique<VlknSurface>(m_backend, sid, surfaceFlags, format, sizes, numSizes, multisampleCount, autogenFilter);
     size_t needBytes = surf->budgetedBytes();
-    if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(needBytes)) {
+    const size_t extraBytes = needBytes > oldBytes ? needBytes - oldBytes : 0;
+    if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(extraBytes)) {
         log_msg("[libqemu_svga3d] defineSurfaceV2 error: aggregate surface budget exhausted (%zu bytes, sid=%u)\n",
                 needBytes, sid);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
     Svga3VlknStatus st = surf->allocate();
     if (st != SVGA3_VLKN_SUCCESS) {
-        m_backend->resourceBudgets().releaseSurfaceBytes(needBytes);
+        m_backend->resourceBudgets().releaseSurfaceBytes(extraBytes);
         return st;
     }
 
+    if (it != m_surfaces.end() && m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (oldBytes > needBytes) m_backend->resourceBudgets().releaseSurfaceBytes(oldBytes - needBytes);
     m_surfaces[sid] = std::move(surf);
     return SVGA3_VLKN_SUCCESS;
 }
