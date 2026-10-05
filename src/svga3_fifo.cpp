@@ -122,7 +122,8 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             const auto *pCmd = reinterpret_cast<const SVGA3dCmdSurfaceStretchBlt*>(payload);
             if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
             Svga3VlknStatus st = dev->surfaceMgr->stretchBlt(
-                pCmd->src.sid, pCmd->dest.sid, pCmd->boxSrc, pCmd->boxDest, pCmd->mode
+                pCmd->src.sid, pCmd->dest.sid, pCmd->boxSrc, pCmd->boxDest, pCmd->mode,
+                pCmd->src.mipmap,pCmd->src.face,pCmd->dest.mipmap,pCmd->dest.face
             );
             *bytesRead = sizeof(SVGA3dCmdSurfaceStretchBlt);
             return st;

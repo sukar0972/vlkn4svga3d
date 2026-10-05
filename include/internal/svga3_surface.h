@@ -234,7 +234,9 @@ public:
                                uint32_t dstSid,
                                const SVGA3dBox &boxSrc,
                                const SVGA3dBox &boxDest,
-                               SVGA3dStretchBltMode mode);
+                               SVGA3dStretchBltMode mode,
+                               uint32_t srcMip = 0, uint32_t srcFace = 0,
+                               uint32_t dstMip = 0, uint32_t dstFace = 0);
 
     Svga3VlknStatus surfaceDMA(const SVGA3dGuestImage &guest,
                                const SVGA3dSurfaceImageId &host,
