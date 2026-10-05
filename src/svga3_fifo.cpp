@@ -458,6 +458,19 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             const auto *ranges = reinterpret_cast<const SVGA3dPrimitiveRange*>(payload + offset);
             offset += rangesBytes;
 
+            size_t divisorBytes = payloadSize - offset;
+            if (divisorBytes) {
+                if (divisorBytes != pCmd->numVertexDecls * sizeof(SVGA3dVertexDivisor))
+                    return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
+                const auto *divisors = reinterpret_cast<const SVGA3dVertexDivisor *>(payload + offset);
+                for (uint32_t i = 0; i < pCmd->numVertexDecls; ++i) {
+                    if (divisors[i].s.instanceData || divisors[i].s.indexedData || divisors[i].s.count > 1) {
+                        log_msg("[libqemu_svga3d] Geometry instancing is unsupported\n");
+                        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                    }
+                }
+                offset += divisorBytes;
+            }
             /* Default primitive type: TriangleList */
             SVGA3dPrimitiveType primType = SVGA3D_PRIMITIVE_TRIANGLELIST;
             if (pCmd->numRanges > 0) {

@@ -275,6 +275,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             continue;
         }
 
+        if (isVS && op == D3DSIO_TEX) {
+            outError = "Vertex shader texture sampling is unsupported";
+            return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;
+        }
         if ((instToken & (1u << 28)) && op != D3DSIO_MOV) {
             outError = "Predication is supported only for MOV";
             return SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER;

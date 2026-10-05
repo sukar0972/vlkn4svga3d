@@ -18,6 +18,16 @@ static const unsigned char kGoodBuildId[20] = {
 };
 
 int main() {
+    for (const auto &cap : g_DevCaps) {
+        if (cap.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND || cap.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES ||
+            cap.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING || cap.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES ||
+            cap.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE || cap.id == SVGA3D_DEVCAP_SUPERSAMPLE ||
+            cap.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY || cap.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 ||
+            cap.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || cap.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV) {
+            if (advertised_devcap(cap) != 0) return 1;
+        }
+    }
+
     // 1. Build-id allowlist: exact match only.
     CHECK(preload_build_id_allowed(kGoodBuildId, sizeof(kGoodBuildId)));
     unsigned char flipped[20];

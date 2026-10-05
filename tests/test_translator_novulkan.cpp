@@ -364,6 +364,12 @@ static int module_builtin_count(const std::vector<uint32_t>& spirv, uint32_t bui
 int main() {
     std::cout << "ICD-free D3D9->SPIR-V translator tests (issue #9)..." << std::endl;
 
+    {
+        const uint32_t shader[]{0xfffe0300,66|(3<<24),D3D9_DST(0,0,15),D3D9_SRC(1,0,0xe4),D3D9_SRC(10,0,0xe4),0xffff};
+        std::vector<uint32_t> spirv; std::string error;
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,shader,6,spirv,error) == SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER,
+            "Vertex texture sampling rejected with zero VTF cap");
+    }
     // Shader model and operand contracts fail before emitting SPIR-V.
     for (uint32_t version : {0xffff0101u,0xffff0104u,0xfffe0101u,0xffff0400u}) {
         const uint32_t shader[]{version,0xffff};

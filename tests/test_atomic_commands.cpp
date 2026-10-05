@@ -6,6 +6,8 @@
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static unsigned barriers, imageCopies, bufferCopies;
+static VkImageAspectFlags clearAspect;
+static void VKAPI_CALL captureClear(VkCommandBuffer, uint32_t count, const VkClearAttachment *attachments, uint32_t, const VkClearRect *) { clearAspect = count ? attachments[count-1].aspectMask : 0; }
 static VkIndexType boundIndexType = VK_INDEX_TYPE_UINT32;
 static void VKAPI_CALL countBarriers(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier *, uint32_t, const VkBufferMemoryBarrier *, uint32_t, const VkImageMemoryBarrier *) { ++barriers; }
 static void VKAPI_CALL countImageCopies(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLayout, uint32_t, const VkImageCopy *) { ++imageCopies; }
@@ -20,6 +22,9 @@ int main() {
     for (unsigned sid : {1u,2u,3u}) CHECK(dev->surfaceMgr->defineSurface(sid,0,SVGA3D_A8R8G8B8,&imageSize,1) == SVGA3_VLKN_SUCCESS);
     CHECK(dev->surfaceMgr->defineSurface(4,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&bufferSize,1) == SVGA3_VLKN_SUCCESS);
     CHECK(dev->surfaceMgr->defineSurface(5,SVGA3D_SURFACE_HINT_INDEXBUFFER,SVGA3D_BUFFER,&bufferSize,1) == SVGA3_VLKN_SUCCESS);
+    for (auto format : {SVGA3D_UYVY,SVGA3D_YUY2,SVGA3D_NV12,SVGA3D_AYUV,static_cast<SVGA3dSurfaceFormat>(UINT32_MAX)})
+        CHECK(dev->surfaceMgr->defineSurface(99,0,format,&imageSize,1) == SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT && !dev->surfaceMgr->getSurface(99));
+    CHECK(dev->surfaceMgr->defineSurfaceV2(99,0,SVGA3D_A8R8G8B8,4,SVGA3D_TEX_FILTER_NONE,&imageSize,1) != SVGA3_VLKN_SUCCESS && !dev->surfaceMgr->getSurface(99));
     auto *old = dev->surfaceMgr->getSurface(1);
     auto oldImage = old->image();
     size_t budget = dev->backend->resourceBudgets().surfaceBytes();
@@ -63,6 +68,16 @@ int main() {
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_ERROR_INVALID_PARAM && !barriers);
     range.indexArray.stride = 0;
     CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS && boundIndexType == VK_INDEX_TYPE_UINT16);
+    auto savedClear = dispatch.vkCmdClearAttachments;
+    dispatch.vkCmdClearAttachments = captureClear;
+    for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24S8}) {
+        CHECK(dev->surfaceMgr->defineSurface(6,SVGA3D_SURFACE_HINT_DEPTHSTENCIL,format,&imageSize,1) == SVGA3_VLKN_SUCCESS);
+        CHECK(ctx->setRenderTarget(SVGA3D_RT_DEPTH,6,0,0) == SVGA3_VLKN_SUCCESS);
+        clearAspect = 0;
+        CHECK(ctx->clear(static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_DEPTH|SVGA3D_CLEAR_STENCIL),0,1,3,nullptr,0) == SVGA3_VLKN_SUCCESS);
+        CHECK(clearAspect == (format == SVGA3D_Z_D16 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_DEPTH_BIT|VK_IMAGE_ASPECT_STENCIL_BIT));
+    }
+    dispatch.vkCmdClearAttachments = savedClear;
     dispatch.vkCmdPipelineBarrier = savedBarrier; dispatch.vkCmdCopyImage = savedImageCopy;
     dispatch.vkCmdCopyBuffer = savedBufferCopy; dispatch.vkCmdBindIndexBuffer = savedIndex;
     svga3_vlkn_device_destroy(dev);
