@@ -35,6 +35,22 @@ static bool robust_index_regression() {
   ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1) == SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
   ok &= pixels[5] == 0xffffffff;
+  SVGA3dRect scissor{1,1,2,2};
+  ok &= svga3_vlkn_context_set_scissor_rect(d,1,&scissor)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_SCISSORTESTENABLE,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_clear(d,1,SVGA3D_CLEAR_COLOR,0xffff0000,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+  for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x)
+    ok &= pixels[y*4+x]==(x>=1 && x<3 && y>=1 && y<3 ? 0xffff0000u : 0xffffffffu);
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_SCISSORTESTENABLE,0)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_clear(d,1,SVGA3D_CLEAR_COLOR,0xff0000ff,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+  for (auto pixel:pixels) ok &= pixel==0xff0000ff;
+  SVGA3dZRange depthRange{0.25f,0.75f};
+  ok &= svga3_vlkn_context_set_zrange(d,1,&depthRange)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_viewport(d,1,&vp)==SVGA3_VLKN_SUCCESS;
+  auto viewport=d->contextMgr->getContext(1)->getViewport();
+  ok &= viewport.minDepth==0.25f && viewport.maxDepth==0.75f;
   // D3D9 RSQ/POW take abs(base), including negative bases with fractional powers.
   for (uint32_t op : {7u,32u}) {
     std::vector<uint32_t> shader{0xffff0300,op | ((op==7?2u:3u)<<24),DST(0,31),SRC(2,0)};

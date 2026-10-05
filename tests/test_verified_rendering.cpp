@@ -1024,6 +1024,7 @@ int main() {
         const uint8_t source[] = {200, 100, 50, 128};
         for (uint32_t factor : factors) {
             for (bool destinationFactor : {false, true}) {
+                svga3_vlkn_context_set_render_state(dev, CID, SVGA3D_RS_SCISSORTESTENABLE, 0);
                 TEST_CHECK(svga3_vlkn_context_clear(dev, CID, SVGA3D_CLEAR_COLOR,
                     0xFF505050, 1.0f, 0, nullptr, 0) == SVGA3_VLKN_SUCCESS,
                     "Constant blend clear succeeds");

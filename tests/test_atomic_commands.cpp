@@ -18,6 +18,30 @@ int main() {
     auto *dev = svga3_vlkn_device_create(&cfg); CHECK(dev);
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
     auto *ctx = dev->contextMgr->getContext(1);
+    SVGA3dPrimitiveRange noTargetRange{};
+    noTargetRange.primType=SVGA3D_PRIMITIVE_TRIANGLELIST; noTargetRange.primitiveCount=1;
+    noTargetRange.indexArray.surfaceId=SVGA3D_INVALID_ID;
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,nullptr,0,&noTargetRange,1)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setRenderTarget(SVGA3D_RT_DEPTH,9999,0,0)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->clear(SVGA3D_CLEAR_DEPTH,0,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setRenderTarget(SVGA3D_RT_DEPTH,SVGA3D_INVALID_ID,0,0)==SVGA3_VLKN_SUCCESS);
+    for (uint32_t factor : {uint32_t(SVGA3D_BLENDOP_SRC1COLOR),uint32_t(SVGA3D_BLENDOP_INVSRC1COLOR),
+        uint32_t(SVGA3D_BLENDOP_SRC1ALPHA),uint32_t(SVGA3D_BLENDOP_INVSRC1ALPHA),UINT32_MAX})
+        CHECK(ctx->setRenderState(SVGA3D_RS_SRCBLEND,factor)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    auto &features=const_cast<VkPhysicalDeviceFeatures &>(dev->backend->features());
+    auto savedFeatures=features;
+    features.fillModeNonSolid=features.independentBlend=VK_FALSE;
+    CHECK(ctx->setRenderState(SVGA3D_RS_FILLMODE,SVGA3D_FILLMODE_LINE)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    uint32_t maxTargets=0;
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_RENDER_TARGETS,&maxTargets) && maxTargets==1);
+    CHECK(ctx->setRenderTarget(SVGA3D_RT_COLOR1,1,0,0)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    features=savedFeatures;
+    SVGA3dZRange depthRange{0.25f,0.75f};
+    CHECK(ctx->setZRange(&depthRange)==SVGA3_VLKN_SUCCESS);
+    SVGA3dRect firstViewport{0,0,4,4}; CHECK(ctx->setViewport(&firstViewport)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->getZRange().min==0.25f && ctx->getZRange().max==0.75f);
+    depthRange={-1,2}; CHECK(ctx->setZRange(&depthRange)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->getZRange().min==0 && ctx->getZRange().max==1);
     SVGA3dSize imageSize{4,4,1}, bufferSize{256,1,1};
     for (unsigned sid : {1u,2u,3u}) CHECK(dev->surfaceMgr->defineSurface(sid,0,SVGA3D_A8R8G8B8,&imageSize,1) == SVGA3_VLKN_SUCCESS);
     CHECK(dev->surfaceMgr->defineSurface(4,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&bufferSize,1) == SVGA3_VLKN_SUCCESS);
