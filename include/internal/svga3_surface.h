@@ -198,7 +198,7 @@ private:
 
 class VlknSurfaceManager {
 public:
-    explicit VlknSurfaceManager(VlknBackend *backend);
+    explicit VlknSurfaceManager(VlknBackend *backend, uint32_t capacity = SVGA3_MAX_SURFACES);
     ~VlknSurfaceManager();
 
     Svga3VlknStatus defineSurface(uint32_t sid,
@@ -266,10 +266,12 @@ public:
 
 
     size_t count() const;
+    uint32_t capacity() const { return m_capacity; }
 
 private:
     VlknBackend *m_backend;
     VlknContextManager *m_contextMgr = nullptr;
+    uint32_t m_capacity;
     // Bounded, reusable CPU metadata; no framebuffer or GPU data is cached.
     std::vector<SVGA3dCopyRect> m_presentationRects;
     std::unordered_map<uint32_t, std::unique_ptr<VlknSurface>> m_surfaces;

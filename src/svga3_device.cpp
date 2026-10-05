@@ -100,7 +100,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_SURFACEFMT_NV12, 0, true },
     { SVGA3D_DEVCAP_SURFACEFMT_AYUV, 0, true },
     { SVGA3D_DEVCAP_MAX_CONTEXT_IDS, 64, true },
-    { SVGA3D_DEVCAP_MAX_SURFACE_IDS, 1024, true },
+    { SVGA3D_DEVCAP_MAX_SURFACE_IDS, svga3_vlkn::SVGA3_MAX_SURFACES, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Z_DF16, 0x10, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Z_DF24, 0x10, true },
     { SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT, 0x10, true },
@@ -125,14 +125,14 @@ Svga3VlknDevice *svga3_vlkn_device_create(const Svga3VlknConfig *config)
         cfg.stagingBufferSize = 64 * 1024 * 1024;
     }
 
-    dev->dxContextLimit = cfg.maxContexts ? cfg.maxContexts : 256;
+    dev->dxContextLimit = std::min(cfg.maxContexts ? cfg.maxContexts : svga3_vlkn::SVGA3_MAX_CONTEXTS, svga3_vlkn::SVGA3_MAX_CONTEXTS);
     Svga3VlknStatus st = dev->backend->init(&cfg);
     if (st != SVGA3_VLKN_SUCCESS) {
         return nullptr;
     }
 
-    dev->surfaceMgr = std::make_unique<svga3_vlkn::VlknSurfaceManager>(dev->backend.get());
-    dev->contextMgr = std::make_unique<svga3_vlkn::VlknContextManager>(dev->backend.get(), dev->surfaceMgr.get());
+    dev->surfaceMgr = std::make_unique<svga3_vlkn::VlknSurfaceManager>(dev->backend.get(), cfg.maxSurfaces ? cfg.maxSurfaces : svga3_vlkn::SVGA3_MAX_SURFACES);
+    dev->contextMgr = std::make_unique<svga3_vlkn::VlknContextManager>(dev->backend.get(), dev->surfaceMgr.get(), dev->dxContextLimit);
     dev->guestMem   = std::make_unique<svga3_vlkn::GuestMemoryManager>();
 
     dev->surfaceMgr->setContextManager(dev->contextMgr.get());
@@ -216,6 +216,12 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
              * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough.
              * (Mirrors advertised_devcap in qemu_svga3d_preload.cpp.) */
             switch (capIndex) {
+            case SVGA3D_DEVCAP_MAX_CONTEXT_IDS:
+                if (dev && dev->contextMgr) val = dev->contextMgr->capacity();
+                break;
+            case SVGA3D_DEVCAP_MAX_SURFACE_IDS:
+                if (dev && dev->surfaceMgr) val = dev->surfaceMgr->capacity();
+                break;
             case SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4:
                 /* Some hardware can render to native 4444 but cannot blend.
                  * Let Mesa choose a blend-capable fallback for GL_RGBA4. */

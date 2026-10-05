@@ -161,7 +161,7 @@ static void TestDeviceLifecycleAndCaps() {
                 dc.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES || dc.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE ||
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
                 dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
-            const uint32_t expected = disabled ? 0 : compressedFormat ?
+            const uint32_t expected = dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {

@@ -1624,8 +1624,8 @@ void VlknSurface::storeReadback(uint32_t w, uint32_t h, size_t pitch, const void
     m_readbackValid = true;
 }
 
-VlknSurfaceManager::VlknSurfaceManager(VlknBackend *backend)
-    : m_backend(backend)
+VlknSurfaceManager::VlknSurfaceManager(VlknBackend *backend, uint32_t capacity)
+    : m_backend(backend), m_capacity(std::min(capacity, SVGA3_MAX_SURFACES))
 {}
 
 VlknSurfaceManager::~VlknSurfaceManager() {
@@ -1641,7 +1641,7 @@ Svga3VlknStatus VlknSurfaceManager::defineSurface(uint32_t sid,
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_surfaces.find(sid);
     const size_t oldBytes = it == m_surfaces.end() ? 0 : it->second->budgetedBytes();
-    if (it == m_surfaces.end() && m_surfaces.size() >= SVGA3_MAX_SURFACES)
+    if (it == m_surfaces.end() && m_surfaces.size() >= m_capacity)
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
 
     auto surf = std::make_unique<VlknSurface>(m_backend, sid, surfaceFlags, format, sizes, numSizes);
@@ -1878,7 +1878,7 @@ Svga3VlknStatus VlknSurfaceManager::defineSurfaceV2(uint32_t sid,
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_surfaces.find(sid);
     const size_t oldBytes = it == m_surfaces.end() ? 0 : it->second->budgetedBytes();
-    if (it == m_surfaces.end() && m_surfaces.size() >= SVGA3_MAX_SURFACES)
+    if (it == m_surfaces.end() && m_surfaces.size() >= m_capacity)
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
 
     auto surf = std::make_unique<VlknSurface>(m_backend, sid, surfaceFlags, format, sizes, numSizes, multisampleCount, autogenFilter);

@@ -79,7 +79,7 @@ LIB_QEMU_SVGA3D = $(LIB_DIR)/libqemu_svga3d.so
 
 .PHONY: preload-lab all clean test test-oracle test-vlkn test-real-vulkan test-shader-translation test-shader test-guest-mem test-verified-rendering test-presentation test-qemu test-piglit harness-loop acceptance dump
 
-all: $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence $(BIN_DIR)/test_buffer_ordering $(ORACLE_TARGET) $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(VLKN_TEST_TARGET) $(REAL_VULKAN_TEST_TARGET) $(SHADER_TRANSLATION_TEST_TARGET) $(TRANSLATOR_NOVULKAN_TEST_TARGET) $(SHADER_TEST_TARGET) $(GUEST_MEM_TEST_TARGET) $(VERIFIED_RENDERING_TEST_TARGET) $(PRESENTATION_TEST_TARGET) $(QEMU_TEST_TARGET) $(MALFORMED_INPUT_TEST_TARGET)
+all: $(BIN_DIR)/test_resource_limits $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence $(BIN_DIR)/test_buffer_ordering $(ORACLE_TARGET) $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(VLKN_TEST_TARGET) $(REAL_VULKAN_TEST_TARGET) $(SHADER_TRANSLATION_TEST_TARGET) $(TRANSLATOR_NOVULKAN_TEST_TARGET) $(SHADER_TEST_TARGET) $(GUEST_MEM_TEST_TARGET) $(VERIFIED_RENDERING_TEST_TARGET) $(PRESENTATION_TEST_TARGET) $(QEMU_TEST_TARGET) $(MALFORMED_INPUT_TEST_TARGET)
 
 # Oracle Binary
 $(ORACLE_TARGET): $(ORACLE_OBJS) | $(BIN_DIR) $(DATA_DIR)
@@ -227,7 +227,7 @@ $(LIB_DIR):
 $(DATA_DIR):
 	mkdir -p $(DATA_DIR)
 
-test: $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(ORACLE_TARGET) $(VLKN_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence
+test: $(BIN_DIR)/test_resource_limits $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(ORACLE_TARGET) $(VLKN_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence
 	@echo "=== Running Oracle Reference Verification ==="
 	./$(ORACLE_TARGET) --test
 	@echo "\n=== Running SVGA3=VLKN Product Verification ==="
@@ -238,6 +238,7 @@ test: $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/tes
 	./$(BIN_DIR)/test_fifo_framing
 	./$(BIN_DIR)/test_query_state
 	./$(BIN_DIR)/test_atomic_commands
+	./$(BIN_DIR)/test_resource_limits
 
 test-oracle: $(ORACLE_TARGET)
 	./$(ORACLE_TARGET) --test
@@ -286,4 +287,7 @@ $(BIN_DIR)/test_query_state: tests/test_query_state.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
 
 $(BIN_DIR)/test_atomic_commands: tests/test_atomic_commands.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+$(BIN_DIR)/test_resource_limits: tests/test_resource_limits.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
