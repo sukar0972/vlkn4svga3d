@@ -1205,7 +1205,7 @@ static void TestRenderStatesExhaustive(Svga3VlknDevice *dev) {
             if (rsi.id == SVGA3D_RS_FILLMODE) testVal = (sweep % 2 == 0) ? SVGA3D_FILLMODE_FILL : SVGA3D_FILLMODE_LINE;
             else if (rsi.id == SVGA3D_RS_SHADEMODE) testVal = (sweep % 2 == 0) ? SVGA3D_SHADEMODE_SMOOTH : SVGA3D_SHADEMODE_FLAT;
             else if (rsi.id == SVGA3D_RS_CULLMODE) testVal = (sweep % 2 == 0) ? SVGA3D_FACE_BACK : SVGA3D_FACE_FRONT;
-            else if (rsi.id == SVGA3D_RS_SRCBLEND || rsi.id == SVGA3D_RS_DSTBLEND) testVal = (sweep % 2 == 0) ? SVGA3D_BLENDOP_SRCALPHA : SVGA3D_BLENDOP_INVSRCALPHA;
+            else if (rsi.id == SVGA3D_RS_SRCBLEND || rsi.id == SVGA3D_RS_DSTBLEND || rsi.id == SVGA3D_RS_SRCBLENDALPHA || rsi.id == SVGA3D_RS_DSTBLENDALPHA) testVal = (sweep % 2 == 0) ? SVGA3D_BLENDOP_SRCALPHA : SVGA3D_BLENDOP_INVSRCALPHA;
             else if (rsi.id == SVGA3D_RS_BLENDEQUATION) testVal = (sweep % 2 == 0) ? SVGA3D_BLENDEQ_ADD : SVGA3D_BLENDEQ_SUBTRACT;
             else if (rsi.id == SVGA3D_RS_ZFUNC) testVal = (sweep % 2 == 0) ? SVGA3D_CMP_LESSEQUAL : SVGA3D_CMP_ALWAYS;
 

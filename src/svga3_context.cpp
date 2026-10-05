@@ -7,6 +7,7 @@
 #include "svga3_spirv_builder.h"
 #include "../data/svga3d_reference.h"
 #include <cstring>
+#include <cmath>
 #include <algorithm>
 #include <iostream>
 #include <cstdlib>
@@ -79,7 +80,7 @@ VkBlendFactor svga3_blend_factor_to_vk(SVGA3dBlendOp factor) {
         case SVGA3D_BLENDOP_INVBLENDFACTOR:  return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
         case SVGA3D_BLENDOP_BLENDFACTORALPHA: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
         case SVGA3D_BLENDOP_INVBLENDFACTORALPHA: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
-        default:                             return VK_BLEND_FACTOR_ONE;
+        default:                             return VK_BLEND_FACTOR_MAX_ENUM;
     }
 }
 
@@ -772,6 +773,16 @@ Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_
         log_msg("[libqemu_svga3d] Fixed-function vertex blending is unsupported\n");
         return SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND;
     }
+    if ((state == SVGA3D_RS_SRCBLEND || state == SVGA3D_RS_DSTBLEND ||
+         state == SVGA3D_RS_SRCBLENDALPHA || state == SVGA3D_RS_DSTBLENDALPHA) &&
+        ::svga3_blend_factor_to_vk(static_cast<SVGA3dBlendOp>(value)) == VK_BLEND_FACTOR_MAX_ENUM) {
+        log_msg("[libqemu_svga3d] Unsupported blend factor %u\n", value);
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+    if (state == SVGA3D_RS_FILLMODE && !m_backend->features().fillModeNonSolid) {
+        SVGA3dFillMode fill{}; fill.uintValue = value;
+        if (fill.s.mode != SVGA3D_FILLMODE_FILL) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
     m_renderStates[(uint32_t)state] = value;
     return SVGA3_VLKN_SUCCESS;
 }
@@ -787,6 +798,8 @@ Svga3VlknStatus VlknContext::getRenderState(SVGA3dRenderStateName state, uint32_
 }
 
 Svga3VlknStatus VlknContext::setRenderTarget(SVGA3dRenderTargetType type, uint32_t sid, uint32_t face, uint32_t mipmap) {
+    if (type > SVGA3D_RT_COLOR0 && type <= SVGA3D_RT_COLOR3 && !m_backend->features().independentBlend &&
+        sid != SVGA3D_INVALID_ID && sid != 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     endRenderPassIfActive();
 
     if (type >= SVGA3D_RT_COLOR0 && type <= SVGA3D_RT_COLOR3) {
@@ -922,8 +935,8 @@ Svga3VlknStatus VlknContext::setViewport(const SVGA3dRect *rect) {
     m_viewport.y = (float)(int32_t)rect->y;
     m_viewport.width = (float)rect->w;
     m_viewport.height = (float)rect->h;
-    m_viewport.minDepth = 0.0f;
-    m_viewport.maxDepth = 1.0f;
+    m_viewport.minDepth = m_zRange.min;
+    m_viewport.maxDepth = m_zRange.max;
     if (!m_scissorExplicit && !m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) {
         m_scissor.offset.x = rect->x;
         m_scissor.offset.y = rect->y;
@@ -991,10 +1004,10 @@ static std::array<float, 16> multiplyMatrix4x4(const std::array<float, 16> &a, c
 }
 
 Svga3VlknStatus VlknContext::setZRange(const SVGA3dZRange *zRange) {
-    if (!zRange) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    m_zRange = *zRange;
-    m_viewport.minDepth = zRange->min;
-    m_viewport.maxDepth = zRange->max;
+    if (!zRange || !std::isfinite(zRange->min) || !std::isfinite(zRange->max)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    m_zRange = {std::clamp(zRange->min,0.0f,1.0f), std::clamp(zRange->max,0.0f,1.0f)};
+    m_viewport.minDepth = m_zRange.min;
+    m_viewport.maxDepth = m_zRange.max;
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -1461,7 +1474,7 @@ Svga3VlknStatus VlknContext::ensureRenderPassActive() {
     VkFormat depthFmt = depthSurf ? depthSurf->vkFormat() : VK_FORMAT_UNDEFINED;
 
     if (!anyColor && depthFmt == VK_FORMAT_UNDEFINED) {
-        colorFormats[0] = VK_FORMAT_B8G8R8A8_UNORM; /* Default fallback target */
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
     m_activeRenderPass = m_backend->getOrCreateRenderPass(colorFormats, depthFmt);
@@ -1718,8 +1731,12 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
     bool wantColor = (flags & SVGA3D_CLEAR_COLOR) != 0;
     bool wantDepth = (flags & (SVGA3D_CLEAR_DEPTH | SVGA3D_CLEAR_STENCIL)) != 0;
     bool haveColor = false;
-    for (auto &rt : m_renderTargets) haveColor |= rt.sid != SVGA3D_INVALID_ID && rt.sid != 0;
-    bool haveDepth = m_depthStencilTarget.sid != SVGA3D_INVALID_ID && m_depthStencilTarget.sid != 0;
+    for (auto &rt : m_renderTargets) {
+        auto *surface = m_surfaceMgr->getSurface(rt.sid);
+        haveColor |= surface && surface->image() && !surface->isDepthStencil();
+    }
+    auto *resolvedDepth = m_surfaceMgr->getSurface(m_depthStencilTarget.sid);
+    bool haveDepth = resolvedDepth && resolvedDepth->image() && resolvedDepth->isDepthStencil();
     if (wantColor && !haveColor) flags = (SVGA3dClearFlag)(flags & ~SVGA3D_CLEAR_COLOR);
     if (wantDepth && !haveDepth) flags = (SVGA3dClearFlag)(flags & ~(SVGA3D_CLEAR_DEPTH | SVGA3D_CLEAR_STENCIL));
     auto *depthTarget = m_surfaceMgr->getSurface(m_depthStencilTarget.sid);
@@ -1761,6 +1778,16 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         a.clearValue.depthStencil.stencil = stencil;
     }
 
+    auto clippedClearRect = [&](VkRect2D rect) {
+        rect = clipToFramebuffer(rect,m_fbWidth,m_fbHeight);
+        if (!m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) return rect;
+        auto scissor = clipToFramebuffer(m_scissor,m_fbWidth,m_fbHeight);
+        int64_t left = std::max(rect.offset.x, scissor.offset.x);
+        int64_t top = std::max(rect.offset.y, scissor.offset.y);
+        int64_t right = std::min(int64_t(rect.offset.x)+rect.extent.width,int64_t(scissor.offset.x)+scissor.extent.width);
+        int64_t bottom = std::min(int64_t(rect.offset.y)+rect.extent.height,int64_t(scissor.offset.y)+scissor.extent.height);
+        return VkRect2D{{int32_t(left),int32_t(top)},{uint32_t(std::max<int64_t>(0,right-left)),uint32_t(std::max<int64_t>(0,bottom-top))}};
+    };
     std::vector<VkClearRect> clearRects;
     if (numRects > 0 && rects) {
         for (uint32_t i = 0; i < numRects; ++i) {
@@ -1771,7 +1798,7 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
             r.rect.extent.height = rects[i].h;
             r.baseArrayLayer = 0;
             r.layerCount = 1;
-            r.rect = clipToFramebuffer(r.rect, m_fbWidth, m_fbHeight);
+            r.rect = clippedClearRect(r.rect);
             if (r.rect.extent.width && r.rect.extent.height) clearRects.push_back(r);
         }
     } else {
@@ -1782,7 +1809,7 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         r.rect.extent.height = (uint32_t)m_viewport.height;
         r.baseArrayLayer = 0;
         r.layerCount = 1;
-        r.rect = clipToFramebuffer(r.rect, m_fbWidth, m_fbHeight);
+        r.rect = clippedClearRect(r.rect);
         if (r.rect.extent.width && r.rect.extent.height) clearRects.push_back(r);
     }
 
@@ -1815,7 +1842,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
 
     SVGA3dFillMode fm;
     fm.uintValue = m_renderStates[SVGA3D_RS_FILLMODE];
-    key.fillMode = fm.s.mode;
+    key.fillMode = m_backend->features().fillModeNonSolid ? fm.s.mode : uint32_t(SVGA3D_FILLMODE_FILL);
 
     bool hasDepthAttachment = (m_depthStencilTarget.sid != SVGA3D_INVALID_ID && m_depthStencilTarget.sid != 0);
     key.cullMode = m_renderStates[SVGA3D_RS_CULLMODE];
@@ -2343,6 +2370,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
                                  const SVGA3dPrimitiveRange *ranges,
                                  uint32_t numRanges)
 {
+    if (!numRanges) return SVGA3_VLKN_SUCCESS;
     // Tracing is configured when the process starts; avoid walking the
     // environment on every command/draw when tracing is disabled.
     static const bool traceFifo = std::getenv("SVGA3_VLKN_TRACE_FIFO") != nullptr;

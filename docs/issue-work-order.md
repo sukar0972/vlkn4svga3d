@@ -56,10 +56,10 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#138](https://github.com/sukar0972/vlkn4svga3d/issues/138) — Medium: MAX_VERTEX_SHADER_TEXTURES=4 advertised; VS has no sampler interface
 - [x] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
 - [ ] [#129](https://github.com/sukar0972/vlkn4svga3d/issues/129) — Medium: Fixed-function texture combiner advertised but not implemented
-- [ ] [#123](https://github.com/sukar0972/vlkn4svga3d/issues/123) — Medium: Wireframe/point fill without fillModeNonSolid
+- [x] [#123](https://github.com/sukar0972/vlkn4svga3d/issues/123) — Medium: Wireframe/point fill without fillModeNonSolid
 - [ ] [#122](https://github.com/sukar0972/vlkn4svga3d/issues/122) — Medium: Anisotropy enabled without feature gate / limit clamp
 - [ ] [#116](https://github.com/sukar0972/vlkn4svga3d/issues/116) — Medium: MIRRORONCE without samplerMirrorClampToEdge
-- [ ] [#114](https://github.com/sukar0972/vlkn4svga3d/issues/114) — Medium: Dual-source blend factors (SRC1*) silently map to ONE
+- [x] [#114](https://github.com/sukar0972/vlkn4svga3d/issues/114) — Medium: Dual-source blend factors (SRC1*) silently map to ONE
 - [ ] [#162](https://github.com/sukar0972/vlkn4svga3d/issues/162) — Medium: Relative const addressing rejected while SM3 advertised
 - [x] [#161](https://github.com/sukar0972/vlkn4svga3d/issues/161) — Medium: ps_1_x accepted but wrong (white output; _x2/_x4/_d2 dropped)
 - [x] [#151](https://github.com/sukar0972/vlkn4svga3d/issues/151) — Medium: DEVCAP shader temps=32 but translator only r0–r15
@@ -81,14 +81,14 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 ## Render-state and fixed-function correctness
 
-- [ ] [#157](https://github.com/sukar0972/vlkn4svga3d/issues/157) — Medium: Draw with no RT: framebuffer vs render-pass attachment mismatch
-- [ ] [#105](https://github.com/sukar0972/vlkn4svga3d/issues/105) — Medium: SETVIEWPORT wipes depth range
-- [ ] [#117](https://github.com/sukar0972/vlkn4svga3d/issues/117) — Medium: clear() ignores SCISSORTESTENABLE
+- [x] [#157](https://github.com/sukar0972/vlkn4svga3d/issues/157) — Medium: Draw with no RT: framebuffer vs render-pass attachment mismatch
+- [x] [#105](https://github.com/sukar0972/vlkn4svga3d/issues/105) — Medium: SETVIEWPORT wipes depth range
+- [x] [#117](https://github.com/sukar0972/vlkn4svga3d/issues/117) — Medium: clear() ignores SCISSORTESTENABLE
 - [ ] [#101](https://github.com/sukar0972/vlkn4svga3d/issues/101) — High: Depth bias / polygon offset ignored
 - [ ] [#100](https://github.com/sukar0972/vlkn4svga3d/issues/100) — High: Point size and point sprites ignored
 - [ ] [#103](https://github.com/sukar0972/vlkn4svga3d/issues/103) — Medium-High: Anisotropic filter maps to NEAREST
 - [ ] [#102](https://github.com/sukar0972/vlkn4svga3d/issues/102) — Medium-High: sRGB sampled/written without gamma
-- [ ] [#143](https://github.com/sukar0972/vlkn4svga3d/issues/143) — Medium: MRT blend attachments diverge without independentBlend gate
+- [x] [#143](https://github.com/sukar0972/vlkn4svga3d/issues/143) — Medium: MRT blend attachments diverge without independentBlend gate
 - [ ] [#144](https://github.com/sukar0972/vlkn4svga3d/issues/144) — Medium: SVGA3D_RS_CLIPPING ignored (depthClampEnable never set)
 - [ ] [#145](https://github.com/sukar0972/vlkn4svga3d/issues/145) — Medium: SVGA3D_RS_LINEWIDTH ignored (always 1.0)
 - [ ] [#146](https://github.com/sukar0972/vlkn4svga3d/issues/146) — Medium: SVGA3D_TS_TEXTURE_MIPMAP_LEVEL silently dropped
