@@ -111,10 +111,10 @@ static void TestDeviceLifecycleAndCaps() {
     TEST_CHECK(sup == 1 && val == 1, "SVGA3D_DEVCAP_3D is enabled");
 
     sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_MAX_TEXTURES, &val);
-    TEST_CHECK(sup == 1 && val == 8, "SVGA3D_DEVCAP_MAX_TEXTURES == 8");
+    TEST_CHECK(sup == 1 && val == 1, "One fixed-function texture stage advertised");
 
     sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_MAX_CLIP_PLANES, &val);
-    TEST_CHECK(sup == 1 && val == 6, "SVGA3D_DEVCAP_MAX_CLIP_PLANES == 6");
+    TEST_CHECK(sup == 1 && val == 0, "User clip planes are unadvertised");
 
     sup = svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_VERTEX_SHADER_VERSION, &val);
     TEST_CHECK(sup == 1 && val == 0x300, "SVGA3D_DEVCAP_VERTEX_SHADER_VERSION == VS 3.0 (768)");
@@ -156,13 +156,13 @@ static void TestDeviceLifecycleAndCaps() {
         if (dc.expectedRc == 0) {
             TEST_CHECK(supported == 1, "Supported cap " + std::string(dc.name));
             const bool compressedFormat = dc.id >= SVGA3D_DEVCAP_SURFACEFMT_DXT1 && dc.id <= SVGA3D_DEVCAP_SURFACEFMT_DXT5;
-            const bool disabled = dc.id == SVGA3D_DEVCAP_AUTOGENMIPMAPS || dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_CxV8U8 || dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
+            const bool disabled = dc.id == SVGA3D_DEVCAP_MAX_LIGHTS || dc.id == SVGA3D_DEVCAP_MAX_CLIP_PLANES || dc.id == SVGA3D_DEVCAP_AUTOGENMIPMAPS || dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_CxV8U8 || dc.id == SVGA3D_DEVCAP_MAX_FIXED_VERTEXBLEND ||
                 dc.id == SVGA3D_DEVCAP_MAX_VERTEX_SHADER_TEXTURES || dc.id == SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING ||
                 dc.id == SVGA3D_DEVCAP_MULTISAMPLE_MASKABLESAMPLES || dc.id == SVGA3D_DEVCAP_ALPHATOCOVERAGE ||
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
                 dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
             const bool signedFormat = dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_V16U16;
-            const uint32_t expected = signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
+            const uint32_t expected = dc.id == SVGA3D_DEVCAP_MAX_TEXTURES ? 1 : dc.id == SVGA3D_DEVCAP_TEXTURE_OPS ? 9 : signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
@@ -832,7 +832,7 @@ static void TestFifoExecution(Svga3VlknDevice *dev) {
     SVGA3dCmdSetLightEnabled lightEnCmd;
     lightEnCmd.cid = 200;
     lightEnCmd.index = 0;
-    lightEnCmd.enabled = 1;
+    lightEnCmd.enabled = 0;
     appendCmd(SVGA_3D_CMD_SETLIGHTENABLED, &lightEnCmd, sizeof(lightEnCmd));
 
     /* 14. CMD_SETTEXTURESTATE */
@@ -1094,7 +1094,7 @@ static void TestMaterialsAndLights(Svga3VlknDevice *dev) {
         TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Set light (Point) " + std::to_string(lightIdx));
 
         st = svga3_vlkn_context_set_light_enabled(dev, cid, lightIdx, 1);
-        TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Enable light " + std::to_string(lightIdx));
+        TEST_CHECK(st == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject unsupported light " + std::to_string(lightIdx));
 
         light.type = SVGA3D_LIGHTTYPE_DIRECTIONAL;
         light.direction[0] = 0.0f; light.direction[1] = -1.0f; light.direction[2] = 0.0f;
@@ -1155,19 +1155,19 @@ static void TestTextureStageStates(Svga3VlknDevice *dev) {
             Svga3VlknStatus st = svga3_vlkn_context_set_texture_stage_state(
                 dev, cid, stage, SVGA3D_TS_COLOROP, tc.id
             );
-            TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Stage " + std::to_string(stage) + " COLOROP: " + tc.name);
+            TEST_CHECK(st == ((tc.id==SVGA3D_TC_DISABLE || (stage==0 && tc.id==SVGA3D_TC_MODULATE)) ? SVGA3_VLKN_SUCCESS : SVGA3_VLKN_ERROR_INVALID_PARAM), "Stage " + std::to_string(stage) + " COLOROP: " + tc.name);
         }
 
         /* ALPHAOP */
         Svga3VlknStatus st = svga3_vlkn_context_set_texture_stage_state(
-            dev, cid, stage, SVGA3D_TS_ALPHAOP, SVGA3D_TC_SELECTARG1
+            dev, cid, stage, SVGA3D_TS_ALPHAOP, stage==0 ? SVGA3D_TC_MODULATE : SVGA3D_TC_DISABLE
         );
         TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Stage " + std::to_string(stage) + " ALPHAOP");
 
         /* COLORARG1 / COLORARG2 */
-        st = svga3_vlkn_context_set_texture_stage_state(dev, cid, stage, SVGA3D_TS_COLORARG1, D3DTA_TEXTURE);
+        st = svga3_vlkn_context_set_texture_stage_state(dev, cid, stage, SVGA3D_TS_COLORARG1, SVGA3D_TA_TEXTURE);
         TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Stage " + std::to_string(stage) + " COLORARG1");
-        st = svga3_vlkn_context_set_texture_stage_state(dev, cid, stage, SVGA3D_TS_COLORARG2, D3DTA_DIFFUSE);
+        st = svga3_vlkn_context_set_texture_stage_state(dev, cid, stage, SVGA3D_TS_COLORARG2, SVGA3D_TA_DIFFUSE);
         TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Stage " + std::to_string(stage) + " COLORARG2");
 
         /* ADDRESSU / ADDRESSV / ADDRESSW */
@@ -1211,6 +1211,10 @@ static void TestRenderStatesExhaustive(Svga3VlknDevice *dev) {
             else if (rsi.id == SVGA3D_RS_ZFUNC) testVal = (sweep % 2 == 0) ? SVGA3D_CMP_LESSEQUAL : SVGA3D_CMP_ALWAYS;
 
             Svga3VlknStatus st = svga3_vlkn_context_set_render_state(dev, cid, (SVGA3dRenderStateName)rsi.id, testVal);
+            if ((rsi.id==SVGA3D_RS_LIGHTINGENABLE || rsi.id==SVGA3D_RS_CLIPPLANEENABLE) && testVal) {
+                TEST_CHECK(st==SVGA3_VLKN_ERROR_INVALID_PARAM,"Unsupported lighting and clip planes rejected");
+                continue;
+            }
             if ((rsi.id == SVGA3D_RS_VERTEXBLEND || rsi.id == SVGA3D_RS_INDEXEDVERTEXBLENDENABLE) && testVal) {
                 TEST_CHECK(st == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND, "Unsupported vertex blending rejected");
                 continue;

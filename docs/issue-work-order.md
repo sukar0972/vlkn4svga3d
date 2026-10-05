@@ -55,7 +55,7 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#119](https://github.com/sukar0972/vlkn4svga3d/issues/119) — Medium: MAX_FIXED_VERTEXBLEND=4 advertised, unimplemented
 - [x] [#138](https://github.com/sukar0972/vlkn4svga3d/issues/138) — Medium: MAX_VERTEX_SHADER_TEXTURES=4 advertised; VS has no sampler interface
 - [x] [#139](https://github.com/sukar0972/vlkn4svga3d/issues/139) — Medium: TEXTURE_GRADIENT_SAMPLING=1 while DSX/DSY/TEXLDD fail-closed
-- [ ] [#129](https://github.com/sukar0972/vlkn4svga3d/issues/129) — Medium: Fixed-function texture combiner advertised but not implemented
+- [x] [#129](https://github.com/sukar0972/vlkn4svga3d/issues/129) — Medium: Fixed-function texture combiner advertised but not implemented
 - [x] [#123](https://github.com/sukar0972/vlkn4svga3d/issues/123) — Medium: Wireframe/point fill without fillModeNonSolid
 - [x] [#122](https://github.com/sukar0972/vlkn4svga3d/issues/122) — Medium: Anisotropy enabled without feature gate / limit clamp
 - [x] [#116](https://github.com/sukar0972/vlkn4svga3d/issues/116) — Medium: MIRRORONCE without samplerMirrorClampToEdge
@@ -92,8 +92,8 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 - [x] [#144](https://github.com/sukar0972/vlkn4svga3d/issues/144) — Medium: SVGA3D_RS_CLIPPING ignored (depthClampEnable never set)
 - [x] [#145](https://github.com/sukar0972/vlkn4svga3d/issues/145) — Medium: SVGA3D_RS_LINEWIDTH ignored (always 1.0)
 - [x] [#146](https://github.com/sukar0972/vlkn4svga3d/issues/146) — Medium: SVGA3D_TS_TEXTURE_MIPMAP_LEVEL silently dropped
-- [ ] [#156](https://github.com/sukar0972/vlkn4svga3d/issues/156) — Medium: FF texture transforms stored but never applied
-- [ ] [#99](https://github.com/sukar0972/vlkn4svga3d/issues/99) — Low/Medium: Fixed-function lights/clip planes stored, never applied
+- [x] [#156](https://github.com/sukar0972/vlkn4svga3d/issues/156) — Medium: FF texture transforms stored but never applied
+- [x] [#99](https://github.com/sukar0972/vlkn4svga3d/issues/99) — Low/Medium: Fixed-function lights/clip planes stored, never applied
 
 ## Presentation, adapter policy and cleanup
 
@@ -141,3 +141,9 @@ the preload, with rate-limited diagnostics. The binary-patch adapter supports
 exactly one build/layout; adding a second entry is a compile-time error until
 all address, object-offset and instruction-probe tables become per-build. IO
 function pointers and the sync-call target are checked before any patch.
+
+Fixed function: one texture stage supports DISABLE or MODULATE with TEXTURE
+and DIFFUSE arguments. Shader samplers remain independent. Multi-stage combiners,
+lighting and user clip-plane activation are unsupported and fail explicitly; light
+and clip capabilities are zero. Texture matrices may be stored for state queries,
+but are logged as inactive and nonzero texture-transform flags are rejected.

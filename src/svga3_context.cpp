@@ -198,6 +198,7 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
     memset(m_stages, 0, sizeof(m_stages));
     for (uint32_t i = 0; i < SVGA3_MAX_TEXTURE_STAGES; ++i) {
         m_stages[i].sid = SVGA3D_INVALID_ID;
+        m_stages[i].combinerEnabled = i==0;
         m_boundImageViews[i] = VK_NULL_HANDLE;
         m_boundSamplers[i] = VK_NULL_HANDLE;
     }
@@ -752,7 +753,7 @@ void VlknContext::initDefaultRenderStates() {
     m_renderStates[SVGA3D_RS_TEXTUREFACTOR] = 0xFFFFFFFF;
     m_renderStates[SVGA3D_RS_CLIPPING] = 1;
     m_renderStates[SVGA3D_RS_LINEWIDTH] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_LIGHTINGENABLE] = 1;
+    m_renderStates[SVGA3D_RS_LIGHTINGENABLE] = 0;
     m_renderStates[SVGA3D_RS_AMBIENT] = 0;
     m_renderStates[SVGA3D_RS_COLORWRITEENABLE] = 0xF; /* RGBA */
     m_renderStates[SVGA3D_RS_BLENDEQUATION] = SVGA3D_BLENDEQ_ADD;
@@ -794,6 +795,10 @@ Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_
         auto &limits=m_backend->properties().limits;
         width=m_backend->features().wideLines ? std::clamp(width,limits.lineWidthRange[0],limits.lineWidthRange[1]) : 1.0f;
         memcpy(&value,&width,sizeof(value));
+    }
+    if ((state==SVGA3D_RS_LIGHTINGENABLE || state==SVGA3D_RS_CLIPPLANEENABLE) && value) {
+        log_msg("[libqemu_svga3d] Fixed-function lighting and user clip planes are unsupported\n");
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
     m_renderStates[(uint32_t)state] = value;
     return SVGA3_VLKN_SUCCESS;
@@ -904,6 +909,31 @@ Svga3VlknStatus VlknContext::setTextureStageState(uint32_t stage, SVGA3dTextureS
     TextureStageState &s = m_stages[stage];
     m_descriptorSetDirty = true;
     switch (name) {
+        case SVGA3D_TS_COLOROP:
+            if (value==SVGA3D_TC_DISABLE || (stage==0 && value==SVGA3D_TC_MODULATE)) {
+                s.combinerEnabled=value!=SVGA3D_TC_DISABLE;
+                break;
+            }
+            log_msg("[libqemu_svga3d] Unsupported fixed-function texture combiner stage=%u op=%u\n",stage,value);
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        case SVGA3D_TS_ALPHAOP:
+            if ((stage==0 && value==SVGA3D_TC_MODULATE) || (stage>0 && value==SVGA3D_TC_DISABLE)) break;
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        case SVGA3D_TS_COLORARG1: case SVGA3D_TS_ALPHAARG1:
+            if (value!=SVGA3D_TA_TEXTURE) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            break;
+        case SVGA3D_TS_COLORARG2: case SVGA3D_TS_ALPHAARG2:
+            if (value!=SVGA3D_TA_DIFFUSE) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            break;
+        case SVGA3D_TS_TEXCOORDINDEX:
+            if (stage==0 && value) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            break;
+        case SVGA3D_TS_TEXTURETRANSFORMFLAGS:
+            if (value) {
+                log_msg("[libqemu_svga3d] Fixed-function texture transforms are unsupported\n");
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            }
+            break;
         case SVGA3D_TS_BORDERCOLOR:
             s.borderColor = value;
             s.samplerDirty = true;
@@ -983,6 +1013,8 @@ Svga3VlknStatus VlknContext::setScissorRect(const SVGA3dRect *rect) {
 
 Svga3VlknStatus VlknContext::setTransform(SVGA3dTransformType type, const float matrix[16]) {
     if (!matrix || (uint32_t)type >= SVGA3D_TRANSFORM_MAX) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (type>=SVGA3D_TRANSFORM_TEXTURE0 && type<=SVGA3D_TRANSFORM_TEXTURE7)
+        log_msg("[libqemu_svga3d] Texture matrix stored inactive; enabling FF texture transforms is unsupported\n");
     std::array<float, 16> mat;
     std::copy(matrix, matrix + 16, mat.begin());
     m_transforms[(uint32_t)type] = mat;
@@ -1073,6 +1105,10 @@ Svga3VlknStatus VlknContext::setLightData(uint32_t index, const SVGA3dLightData 
 
 Svga3VlknStatus VlknContext::setLightEnabled(uint32_t index, uint32_t enabled) {
     if (index >= 8) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    if (enabled) {
+        log_msg("[libqemu_svga3d] Fixed-function lights are unsupported\n");
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
     m_lights[index].enabled = (enabled != 0);
     return SVGA3_VLKN_SUCCESS;
 }
@@ -1983,7 +2019,7 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             }
         }
     }
-    bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
+    bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].combinerEnabled && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
     bool hasVertexColor = false;
     if (useFfTex && numDecls > 0 && decls) {
         for (uint32_t i = 0; i < numDecls; ++i) {
@@ -2831,7 +2867,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     }();
     bool shouldLogDraw = traceDraws && (m_drawCount<20 || (m_drawCount%300)==0);
     if (shouldLogDraw) {
-        bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
+        bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].combinerEnabled && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
         log_msg("[libqemu_svga3d] ctx::draw #%u (cid=%u): boundVS=%u, boundPS=%u, useFfTex=%d, stage0.sid=%u, rtSid=%u, cull=%u, vp=(%.1f,%.1f %.1fx%.1f)\n",
                 m_drawCount + 1, m_cid, m_boundVS, m_boundPS, (int)useFfTex, m_stages[0].sid, m_renderTargets[0].sid, m_renderStates[SVGA3D_RS_CULLMODE],
                 m_viewport.x, m_viewport.y, m_viewport.width, m_viewport.height);

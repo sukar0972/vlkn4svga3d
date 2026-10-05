@@ -66,6 +66,17 @@ int main() {
     auto *dev = svga3_vlkn_device_create(&cfg); CHECK(dev);
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
     auto *ctx = dev->contextMgr->getContext(1);
+    uint32_t ffCap=1;
+    for (auto cap : {SVGA3D_DEVCAP_MAX_LIGHTS,SVGA3D_DEVCAP_MAX_CLIP_PLANES})
+        CHECK(svga3_vlkn_query_cap(dev,cap,&ffCap) && ffCap==0);
+    CHECK(ctx->setRenderState(SVGA3D_RS_LIGHTINGENABLE,1)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setRenderState(SVGA3D_RS_CLIPPLANEENABLE,1)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setLightEnabled(0,1)==SVGA3_VLKN_ERROR_INVALID_PARAM && !ctx->isLightEnabled(0));
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_TEXTURETRANSFORMFLAGS,2)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setTextureStageState(1,SVGA3D_TS_COLOROP,SVGA3D_TC_MODULATE)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_COLOROP,SVGA3D_TC_ADD)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_COLOROP,SVGA3D_TC_MODULATE)==SVGA3_VLKN_SUCCESS);
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_TEXTURES,&ffCap) && ffCap==1);
     SVGA3dPrimitiveRange noTargetRange{};
     noTargetRange.primType=SVGA3D_PRIMITIVE_TRIANGLELIST; noTargetRange.primitiveCount=1;
     noTargetRange.indexArray.surfaceId=SVGA3D_INVALID_ID;

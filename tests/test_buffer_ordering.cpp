@@ -146,6 +146,22 @@ static bool robust_index_regression() {
   tangentDecls[1].array={4,0,16};
   ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS && pixels[5]==0xff40bf80;
+  SVGA3dSize textureSize{1,1,1}; uint32_t red=0xffff0000;
+  ok &= svga3_vlkn_surface_define(d,5,SVGA3D_SURFACE_HINT_TEXTURE,SVGA3D_A8R8G8B8,&textureSize,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_upload(d,5,0,nullptr,&red,4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_texture(d,1,0,5)==SVGA3_VLKN_SUCCESS;
+  std::vector<uint32_t> colorVS(std::begin(tangentVS),std::end(tangentVS)); colorVS[5]=0x8000000au;
+  ok &= svga3_vlkn_context_define_shader(d,1,12,SVGA3D_SHADERTYPE_VS,colorVS.data(),colorVS.size())==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,12)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,SVGA3D_INVALID_ID)==SVGA3_VLKN_SUCCESS;
+  tangentDecls[1].identity.usage=SVGA3D_DECLUSAGE_COLOR;
+  for (uint32_t op : {uint32_t(SVGA3D_TC_MODULATE),uint32_t(SVGA3D_TC_DISABLE)}) {
+    ok &= svga3_vlkn_context_set_texture_stage_state(d,1,0,SVGA3D_TS_COLOROP,op)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    if (pixels[5]!=(op==SVGA3D_TC_MODULATE ? 0xff400000u : 0xff40bf80u)) printf("combiner op=%u pixel=%08x\n",op,pixels[5]);
+    ok &= pixels[5]==(op==SVGA3D_TC_MODULATE ? 0xff400000u : 0xff40bf80u);
+  }
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();

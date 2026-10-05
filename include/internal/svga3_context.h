@@ -47,6 +47,7 @@ struct TextureStageState {
     uint32_t mipFilter;
     uint32_t maxAnisotropy;
     uint32_t minMipLevel;
+    bool combinerEnabled;
     uint32_t borderColor;
     float    mipLodBias;
     VkSampler sampler;
