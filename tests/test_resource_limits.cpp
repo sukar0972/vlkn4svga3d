@@ -9,7 +9,9 @@ static PFN_vkCreateGraphicsPipelines savedCreate;
 static PFN_vkDestroyPipeline savedDestroy;
 static unsigned created, live, peak;
 static uint32_t stencilReference;
+static VkPipelineRasterizationStateCreateInfo raster;
 static VkResult VKAPI_CALL countCreate(VkDevice device,VkPipelineCache cache,uint32_t count,const VkGraphicsPipelineCreateInfo *info,const VkAllocationCallbacks *alloc,VkPipeline *out) {
+    raster=*info->pRasterizationState;
     auto result = savedCreate(device,cache,count,info,alloc,out);
     if (result==VK_SUCCESS) { created+=count; live+=count; peak=std::max(peak,live); }
     return result;
@@ -49,6 +51,19 @@ int main() {
         CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,nullptr,0,&range,1)==SVGA3_VLKN_SUCCESS && stencilReference==i);
     }
     CHECK(created==1 && live==1);
+    CHECK(ctx->setRenderState(SVGA3D_RS_CLIPPING,0)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setRenderState(SVGA3D_RS_LINEWIDTH,0x40200000)==SVGA3_VLKN_SUCCESS); // 2.5f
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,nullptr,0,&range,1)==SVGA3_VLKN_SUCCESS);
+    CHECK(created==2 && raster.depthClampEnable && raster.lineWidth==2.5f);
+    auto &features=const_cast<VkPhysicalDeviceFeatures &>(dev->backend->features()); auto savedFeatures=features;
+    features.depthClamp=features.wideLines=VK_FALSE;
+    CHECK(ctx->setRenderState(SVGA3D_RS_CLIPPING,0)==SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setRenderState(SVGA3D_RS_CLIPPING,1)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setRenderState(SVGA3D_RS_LINEWIDTH,0x40200000)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setRenderState(SVGA3D_RS_CULLMODE,SVGA3D_FACE_FRONT_BACK)==SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->draw(SVGA3D_PRIMITIVE_TRIANGLELIST,nullptr,0,&range,1)==SVGA3_VLKN_SUCCESS);
+    CHECK(!raster.depthClampEnable && raster.lineWidth==1);
+    features=savedFeatures;
     CHECK(ctx->setRenderState(SVGA3D_RS_ALPHATESTENABLE,1)==SVGA3_VLKN_SUCCESS);
     for (unsigned i=0;i<600;++i) {
         CHECK(ctx->setRenderState(SVGA3D_RS_ALPHAREF,i)==SVGA3_VLKN_SUCCESS);

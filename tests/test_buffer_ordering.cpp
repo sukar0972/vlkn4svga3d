@@ -65,6 +65,36 @@ static bool robust_index_regression() {
     ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16) == SVGA3_VLKN_SUCCESS;
     ok &= pixels[5] == 0x80808080;
   }
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,SVGA3D_INVALID_ID)==SVGA3_VLKN_SUCCESS;
+  if (d->backend->features().depthClamp) {
+    float outside[9]; memcpy(outside,positions,sizeof(outside));
+    outside[2]=outside[5]=outside[8]=2;
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,outside,36)==SVGA3_VLKN_SUCCESS;
+    for (uint32_t clip : {1u,0u}) {
+      ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CLIPPING,clip)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_context_clear(d,1,SVGA3D_CLEAR_COLOR,0xff000000,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+      ok &= pixels[5]==(clip?0xff000000u:0xffffffffu);
+    }
+    ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CLIPPING,1)==SVGA3_VLKN_SUCCESS;
+  }
+  if (d->backend->features().wideLines) {
+    const float line[]{-.25f,-1,0,-.25f,1,0,0,0,0};
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,line,36)==SVGA3_VLKN_SUCCESS;
+    range.primType=SVGA3D_PRIMITIVE_LINELIST;
+    unsigned narrow=0,wide=0;
+    for (float width : {1.0f,3.0f}) {
+      uint32_t bits; memcpy(&bits,&width,4);
+      ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_LINEWIDTH,bits)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_context_clear(d,1,SVGA3D_CLEAR_COLOR,0xff000000,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_LINELIST,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+      unsigned count=0; for (auto pixel:pixels) count+=pixel!=0xff000000;
+      (width==1?narrow:wide)=count;
+    }
+    ok &= narrow>0 && wide>narrow;
+  }
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
