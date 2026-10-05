@@ -33,12 +33,12 @@ fixes. Guest Piglit and sustained-load claims require live guest runs.
 
 - [ ] [#90](https://github.com/sukar0972/vlkn4svga3d/issues/90) — High: SURFACE_COPY records Vk cmds then returns mid-loop
 - [ ] [#91](https://github.com/sukar0972/vlkn4svga3d/issues/91) — High: Draw records texture barriers then fails late
-- [ ] [#95](https://github.com/sukar0972/vlkn4svga3d/issues/95) — Medium: endQuery flush failure leaves query FSM inconsistent
-- [ ] [#94](https://github.com/sukar0972/vlkn4svga3d/issues/94) — Medium: END_QUERY never writes guestResult PENDING
-- [ ] [#132](https://github.com/sukar0972/vlkn4svga3d/issues/132) — Medium: WAIT_FOR_QUERY returns SUCCESS after ignored writeGuest failure
-- [ ] [#133](https://github.com/sukar0972/vlkn4svga3d/issues/133) — Medium: waitForQuery accepts unended query and leaves m_queryActive stuck
-- [ ] [#134](https://github.com/sukar0972/vlkn4svga3d/issues/134) — Medium: Mock GetQueryPoolResults ignores readiness (hides query FSM bugs)
-- [ ] [#155](https://github.com/sukar0972/vlkn4svga3d/issues/155) — Medium: Query pool create failure fabricates occlusion results
+- [x] [#95](https://github.com/sukar0972/vlkn4svga3d/issues/95) — Medium: endQuery flush failure leaves query FSM inconsistent
+- [x] [#94](https://github.com/sukar0972/vlkn4svga3d/issues/94) — Medium: END_QUERY never writes guestResult PENDING
+- [x] [#132](https://github.com/sukar0972/vlkn4svga3d/issues/132) — Medium: WAIT_FOR_QUERY returns SUCCESS after ignored writeGuest failure
+- [x] [#133](https://github.com/sukar0972/vlkn4svga3d/issues/133) — Medium: waitForQuery accepts unended query and leaves m_queryActive stuck
+- [x] [#134](https://github.com/sukar0972/vlkn4svga3d/issues/134) — Medium: Mock GetQueryPoolResults ignores readiness (hides query FSM bugs)
+- [x] [#155](https://github.com/sukar0972/vlkn4svga3d/issues/155) — Medium: Query pool create failure fabricates occlusion results
 - [ ] [#96](https://github.com/sukar0972/vlkn4svga3d/issues/96) — Medium: Destroy VkImage after failed/ignored flush
 - [ ] [#106](https://github.com/sukar0972/vlkn4svga3d/issues/106) — Medium: Failed flush at fence wedges FIFO forever
 - [ ] [#113](https://github.com/sukar0972/vlkn4svga3d/issues/113) — High: Host / device-lost recovery incomplete (umbrella)

@@ -521,6 +521,13 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
 
             Svga3VlknStatus st = ctx->endQuery(pCmd->type);
+            if (dev->guestMem && pCmd->guestResult.gmrId != SVGA_GMR_NULL) {
+                SVGA3dQueryResult result{};
+                result.totalSize = sizeof(result);
+                result.state = st == SVGA3_VLKN_SUCCESS ? SVGA3D_QUERYSTATE_PENDING : SVGA3D_QUERYSTATE_FAILED;
+                auto writeStatus = dev->guestMem->writeGuest(pCmd->guestResult, &result, sizeof(result));
+                if (writeStatus != SVGA3_VLKN_SUCCESS) st = writeStatus;
+            }
             *bytesRead = sizeof(SVGA3dCmdEndQuery);
             return st;
         }
@@ -535,12 +542,13 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
 
             uint32_t result = 0;
             Svga3VlknStatus st = ctx->waitForQuery(pCmd->type, &result);
-            if (st == SVGA3_VLKN_SUCCESS && dev->guestMem && pCmd->guestResult.gmrId != SVGA_GMR_NULL) {
+            if (dev->guestMem && pCmd->guestResult.gmrId != SVGA_GMR_NULL) {
                 SVGA3dQueryResult res = {};
                 res.totalSize = sizeof(SVGA3dQueryResult);
-                res.state = SVGA3D_QUERYSTATE_SUCCEEDED;
+                res.state = st == SVGA3_VLKN_SUCCESS ? SVGA3D_QUERYSTATE_SUCCEEDED : SVGA3D_QUERYSTATE_FAILED;
                 res.result32 = result;
-                dev->guestMem->writeGuest(pCmd->guestResult, &res, sizeof(res));
+                auto writeStatus = dev->guestMem->writeGuest(pCmd->guestResult, &res, sizeof(res));
+                if (writeStatus != SVGA3_VLKN_SUCCESS) st = writeStatus;
             }
             *bytesRead = sizeof(SVGA3dCmdWaitForQuery);
             return st;
