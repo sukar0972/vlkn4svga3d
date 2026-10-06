@@ -3,8 +3,105 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <limits>
 #define DST(t, n) (0x800f0000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 #define SRC(t, n) (0x80e40000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
+static uint32_t floatBits(float value) { uint32_t bits; memcpy(&bits,&value,4); return bits; }
+static bool gamma_and_relative_regression() {
+  Svga3VlknConfig cfg{}; cfg.enableValidationLayers = true;
+  auto *d=svga3_vlkn_device_create(&cfg); if (!d) return false;
+  bool ok=svga3_vlkn_context_create(d,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dSize target{4,4,1}, vertices{36,1,1}, texture{1,1,1};
+  ok &= svga3_vlkn_surface_define(d,1,0,SVGA3D_A8R8G8B8,&target,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,2,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&vertices,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,3,SVGA3D_SURFACE_HINT_TEXTURE,SVGA3D_A8R8G8B8,&texture,1)==SVGA3_VLKN_SUCCESS;
+  float positions[]{-1,-1,0,3,-1,0,-1,3,0}; uint32_t texel=0xff808080;
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_upload(d,3,0,nullptr,&texel,4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_COLOR0,1,0,0)==SVGA3_VLKN_SUCCESS;
+  SVGA3dRect vp{0,0,4,4};
+  ok &= svga3_vlkn_context_set_viewport(d,1,&vp)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CULLMODE,SVGA3D_FACE_NONE)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_texture(d,1,0,3)==SVGA3_VLKN_SUCCESS;
+  SVGA3dVertexDecl decl{}; decl.identity.type=SVGA3D_DECLTYPE_FLOAT3; decl.identity.usage=SVGA3D_DECLUSAGE_POSITION; decl.array={2,0,12};
+  SVGA3dPrimitiveRange range{}; range.primType=SVGA3D_PRIMITIVE_TRIANGLELIST; range.primitiveCount=1; range.indexArray.surfaceId=SVGA3D_INVALID_ID;
+  const uint32_t samplePS[]{0xffff0300,31u|(2u<<24),0x80000005,DST(1,0),
+    31u|(2u<<24),0x90000000,DST(10,0),66u|(3u<<24),DST(0,0),SRC(1,0),SRC(10,0),
+    1u|(2u<<24),DST(8,0),SRC(0,0),0xffff};
+  const uint32_t constantPS[]{0xffff0300,1u|(2u<<24),DST(8,0),SRC(2,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,1,SVGA3D_SHADERTYPE_PS,samplePS,sizeof(samplePS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_define_shader(d,1,2,SVGA3D_SHADERTYPE_PS,constantPS,sizeof(constantPS)/4)==SVGA3_VLKN_SUCCESS;
+  uint32_t half[]{floatBits(.5f),floatBits(.5f),floatBits(.5f),floatBits(1)};
+  ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,half)==SVGA3_VLKN_SUCCESS;
+  uint32_t pixels[16]{};
+  for (unsigned mode=0;mode<4;++mode) {
+    bool sample=mode!=1, inputGamma=mode==0 || mode==2, outputGamma=mode==1 || mode==2;
+    ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,sample?1:2)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_texture_stage_state(d,1,0,SVGA3D_TS_GAMMA,floatBits(inputGamma?2.2f:1.0f))==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_OUTPUTGAMMA,floatBits(outputGamma?2.2f:1.0f))==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    unsigned expected=mode==0?55:mode==1?188:128;
+    bool correct=(pixels[5]>>24)==255;
+    for (unsigned shift : {0u,8u,16u}) correct &= std::abs(int((pixels[5]>>shift)&255)-int(expected))<=1;
+    if (!correct) printf("gamma mode=%u pixel=%08x expected channel=%u\n",mode,pixels[5],expected);
+    ok &= correct;
+  }
+  // X8 surfaces must retain the forced-one alpha swizzle in their sRGB views.
+  ok &= svga3_vlkn_surface_define(d,4,SVGA3D_SURFACE_HINT_TEXTURE,SVGA3D_X8R8G8B8,&texture,1)==SVGA3_VLKN_SUCCESS;
+  texel=0x00808080;
+  ok &= svga3_vlkn_surface_dma_upload(d,4,0,nullptr,&texel,4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_texture(d,1,0,4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_texture_stage_state(d,1,0,SVGA3D_TS_GAMMA,floatBits(2.2f))==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+  ok &= pixels[5]==0xff373737;
+  const uint32_t colorPS[]{0xffff0300,31u|(2u<<24),0x8000000a,DST(1,0),1u|(2u<<24),DST(8,0),SRC(1,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,3,SVGA3D_SHADERTYPE_PS,colorPS,sizeof(colorPS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,3)==SVGA3_VLKN_SUCCESS;
+  const uint32_t relativeVS[]{0xfffe0300,31u|(2u<<24),0x80000000,DST(1,0),
+    31u|(2u<<24),0x80000000,DST(6,0),31u|(2u<<24),0x8000000a,DST(6,1),
+    46u|(2u<<24),0xb0010000,SRC(2,0),
+    1u|(3u<<24),DST(6,1),SRC(2,1)|(1u<<13),0xb0000000,
+    1u|(2u<<24),DST(6,0),SRC(1,0),
+    81u|(5u<<24),DST(2,2),0,0x3f800000,0,0x3f800000,0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,4,SVGA3D_SHADERTYPE_VS,relativeVS,sizeof(relativeVS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,4)==SVGA3_VLKN_SUCCESS;
+  uint32_t red[]{floatBits(1),0,0,floatBits(1)},blue[]{0,0,floatBits(1),floatBits(1)};
+  ok &= svga3_vlkn_context_set_shader_const(d,1,2,SVGA3D_SHADERTYPE_VS,SVGA3D_CONST_TYPE_FLOAT,red)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader_const(d,1,3,SVGA3D_SHADERTYPE_VS,SVGA3D_CONST_TYPE_FLOAT,blue)==SVGA3_VLKN_SUCCESS;
+  for (float offset : {1.2f,1.8f,-4.0f,65536.0f}) {
+    uint32_t address[]{floatBits(offset),0,0,0};
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_VS,SVGA3D_CONST_TYPE_FLOAT,address)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    uint32_t expected=offset==1.2f?0xff00ff00u:offset==1.8f?0xff0000ffu:0;
+    if (pixels[5]!=expected) printf("relative offset=%g pixel=%08x expected=%08x\n",offset,pixels[5],expected);
+    ok &= pixels[5]==expected;
+  }
+  // Pixel shader aL uses runtime loop parameters, including nonzero start and step.
+  const uint32_t loopPS[]{0xffff0300,27u|(2u<<24),DST(15,0),SRC(7,0),
+    1u|(3u<<24),DST(8,0),SRC(2,1)|(1u<<13),0xf0000800,29,0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,5,SVGA3D_SHADERTYPE_PS,loopPS,sizeof(loopPS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,5)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader_const(d,1,2,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,red)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader_const(d,1,3,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,blue)==SVGA3_VLKN_SUCCESS;
+  for (uint32_t start : {1u,2u}) {
+    uint32_t loop[]{1,start,1,0};
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_INT,loop)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    uint32_t expected=start==1?0xffff0000u:0xff0000ffu;
+    if (pixels[5]!=expected) printf("relative loop start=%u pixel=%08x expected=%08x\n",start,pixels[5],expected);
+    ok &= pixels[5]==expected;
+  }
+  ok &= d->backend->flushCommandBuffer()==SVGA3_VLKN_SUCCESS;
+  ok &= d->backend->validationErrors()==0 && d->backend->validationWarnings()==0;
+  svga3_vlkn_device_destroy(d);
+  printf("sRGB gamma and relative constant pixel regressions: %s\n",ok?"PASS":"FAIL");
+  return ok;
+}
+
 static bool robust_index_regression() {
   Svga3VlknConfig cfg{}; cfg.enableValidationLayers = true;
   auto *d = svga3_vlkn_device_create(&cfg);
@@ -183,6 +280,90 @@ static bool robust_index_regression() {
     if (pixels[5]!=expected[attempt]) printf("runtime int/bool attempt=%u pixel=%08x\n",attempt,pixels[5]);
     ok &= pixels[5]==expected[attempt];
   }
+  const uint32_t biasPS[]{0xffff0300,1u|(2u<<24),DST(8,0),SRC(2,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,14,SVGA3D_SHADERTYPE_PS,biasPS,sizeof(biasPS)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,14)==SVGA3_VLKN_SUCCESS;
+  SVGA3dZRange fullDepth{0,1};
+  ok &= svga3_vlkn_context_set_zrange(d,1,&fullDepth)==SVGA3_VLKN_SUCCESS;
+  const float coplanar[]{-1,-1,.5f,3,-1,.5f,-1,3,.5f};
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,coplanar,sizeof(coplanar))==SVGA3_VLKN_SUCCESS;
+  auto setBias=[&](SVGA3dRenderStateName state,float value) { uint32_t bits; memcpy(&bits,&value,4); return svga3_vlkn_context_set_render_state(d,1,state,bits)==SVGA3_VLKN_SUCCESS; };
+  for (auto state:{SVGA3D_RS_DEPTHBIAS,SVGA3D_RS_SLOPESCALEDEPTHBIAS}) {
+    ok &= setBias(state,0);
+    for (float invalid:{std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
+      uint32_t bits; memcpy(&bits,&invalid,sizeof(bits));
+      ok &= svga3_vlkn_context_set_render_state(d,1,state,bits)==SVGA3_VLKN_ERROR_INVALID_PARAM;
+      uint32_t retained=1;
+      ok &= d->contextMgr->getContext(1)->getRenderState(state,&retained)==SVGA3_VLKN_SUCCESS && retained==0;
+    }
+  }
+  for (auto format:{SVGA3D_Z_D16,SVGA3D_Z_D24S8}) {
+    ok &= svga3_vlkn_surface_define(d,15,SVGA3D_SURFACE_HINT_DEPTHSTENCIL,format,&target,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_DEPTH,15,0,0)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_ZENABLE,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_ZWRITEENABLE,1)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_ZFUNC,SVGA3D_CMP_LESS)==SVGA3_VLKN_SUCCESS;
+    ok &= setBias(SVGA3D_RS_DEPTHBIAS,0);
+    ok &= setBias(SVGA3D_RS_SLOPESCALEDEPTHBIAS,0);
+    ok &= svga3_vlkn_context_clear(d,1,static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_COLOR|SVGA3D_CLEAR_DEPTH),0,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+    const float biases[]{0,0,-.001f,.001f,0,-.002f};
+    for (unsigned attempt=0;attempt<6;++attempt) {
+      float color[4]{attempt==0?1.f:0.f,0,attempt==0?0.f:1.f,1};
+      ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<uint32_t*>(color))==SVGA3_VLKN_SUCCESS;
+      ok &= setBias(SVGA3D_RS_DEPTHBIAS,biases[attempt]);
+      ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+      uint32_t expected=attempt>=2?0xff0000ffu:0xffff0000u;
+      if (pixels[5]!=expected) printf("depth bias format=%u attempt=%u pixel=%08x\n",format,attempt,pixels[5]);
+      ok &= pixels[5]==expected;
+    }
+    // Both draws remain queued: the first, larger negative offset must win.
+    ok &= svga3_vlkn_context_clear(d,1,static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_COLOR|SVGA3D_CLEAR_DEPTH),0,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+    for (unsigned attempt=0;attempt<2;++attempt) {
+      float color[4]{attempt==0?1.f:0.f,0,attempt==0?0.f:1.f,1};
+      ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<uint32_t*>(color))==SVGA3_VLKN_SUCCESS;
+      ok &= setBias(SVGA3D_RS_DEPTHBIAS,attempt==0?-.002f:-.001f);
+      ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+    }
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS && pixels[5]==0xffff0000u;
+    // Verify the normalized offset's magnitude by reading actual stored depth.
+    uint32_t depthPixels[16]{};
+    ok &= svga3_vlkn_surface_dma_download(d,15,0,nullptr,depthPixels,format==SVGA3D_Z_D16?8:16)==SVGA3_VLKN_SUCCESS;
+    float storedDepth=format==SVGA3D_Z_D16 ? reinterpret_cast<uint16_t*>(depthPixels)[5]/65535.f : (depthPixels[5]>>8)/16777215.f;
+    if (!(storedDepth>.4979f && storedDepth<.4981f)) printf("normalized depth bias format=%u depth=%g expected=.498\n",format,storedDepth);
+    ok &= storedDepth>.4979f && storedDepth<.4981f;
+    // A sloping triangle exercises positive and negative slope factors.
+    const float sloped[]{-1,-1,.25f,3,-1,1.25f,-1,3,.25f};
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,sloped,sizeof(sloped))==SVGA3_VLKN_SUCCESS;
+    ok &= setBias(SVGA3D_RS_DEPTHBIAS,0);
+    ok &= svga3_vlkn_context_clear(d,1,static_cast<SVGA3dClearFlag>(SVGA3D_CLEAR_COLOR|SVGA3D_CLEAR_DEPTH),0,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+    for (unsigned attempt=0;attempt<3;++attempt) {
+      float color[4]{attempt==0?1.f:0.f,0,attempt==0?0.f:1.f,1};
+      ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<uint32_t*>(color))==SVGA3_VLKN_SUCCESS;
+      ok &= setBias(SVGA3D_RS_SLOPESCALEDEPTHBIAS,attempt==0?0.f:attempt==1?1.f:-1.f);
+      ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+      ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+      ok &= pixels[5]==(attempt==2?0xff0000ffu:0xffff0000u);
+    }
+    ok &= setBias(SVGA3D_RS_SLOPESCALEDEPTHBIAS,0);
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,coplanar,sizeof(coplanar))==SVGA3_VLKN_SUCCESS;
+    ok &= setBias(SVGA3D_RS_DEPTHBIAS,std::numeric_limits<float>::max());
+    ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM;
+    ok &= setBias(SVGA3D_RS_DEPTHBIAS,0);
+  }
+  ok &= svga3_vlkn_surface_define(d,15,SVGA3D_SURFACE_HINT_DEPTHSTENCIL,SVGA3D_Z_D32,&target,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_DEPTH,15,0,0)==SVGA3_VLKN_SUCCESS;
+  ok &= setBias(SVGA3D_RS_DEPTHBIAS,-.001f);
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_ERROR_INVALID_PARAM;
+  ok &= setBias(SVGA3D_RS_DEPTHBIAS,0);
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+  // Without a depth attachment, a nonzero bias must not prevent color draws.
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_DEPTH,SVGA3D_INVALID_ID,0,0)==SVGA3_VLKN_SUCCESS;
+  ok &= setBias(SVGA3D_RS_DEPTHBIAS,-.001f);
+  ok &= setBias(SVGA3D_RS_SLOPESCALEDEPTHBIAS,-1.f);
+  ok &= svga3_vlkn_context_clear(d,1,SVGA3D_CLEAR_COLOR,0,1,0,nullptr,0)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_draw(d,1,SVGA3D_PRIMITIVE_TRIANGLELIST,tangentDecls,2,&range,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS && pixels[5]==0xff0000ffu;
   d->contextMgr->clear(); d->surfaceMgr->clear();
   d->backend->shutdown();
   ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
@@ -236,6 +417,7 @@ static bool staging_wrap_regression() {
   return ok;
 }
 int main() {
+  if (!gamma_and_relative_regression()) return 1;
   Svga3VlknConfig cfg{};
   cfg.apiVersion = VK_API_VERSION_1_1;
   cfg.enableValidationLayers = true;

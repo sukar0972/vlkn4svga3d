@@ -371,6 +371,27 @@ int main() {
         TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,shader,6,spirv,error) == SVGA3_VLKN_ERROR_UNSUPPORTED_SHADER,
             "Vertex texture sampling rejected with zero VTF cap");
     }
+    // Relative addressing must produce valid dynamic UBO access, including DEF overrides.
+    for (bool loop : {false, true}) {
+        std::vector<uint32_t> shader{0xfffe0300};
+        if (loop) shader.insert(shader.end(), {27u | (2u<<24), D3D9_DST(15,0,15), D3D9_SRC(7,0,0xe4)});
+        else shader.insert(shader.end(), {46u | (2u<<24), D3D9_DST(3,0,1), D3D9_SRC(2,0,0)});
+        shader.insert(shader.end(), {1u | (3u<<24), D3D9_DST(6,0,15),
+            D3D9_SRC(2,1,0xe4) | (1u<<13), D3D9_SRC(loop ? 15 : 3,0,0)});
+        if (loop) shader.push_back(29);
+        shader.insert(shader.end(), {81u | (5u<<24), D3D9_DST(2,2,15), 0,0,0,0x3f800000,0xffff});
+        std::vector<uint32_t> spirv; std::string error;
+        auto result = svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,shader.data(),shader.size(),spirv,error);
+        if (result != SVGA3_VLKN_SUCCESS) std::cerr << error << std::endl;
+        TEST_CHECK(result == SVGA3_VLKN_SUCCESS, "Relative source constants translate with a0/aL");
+        TEST_CHECK_SPIRV(spirv, "relative_constants", "Relative constant SPIR-V validates");
+        // Missing extension and non-address registers must fail closed.
+        auto invalid = shader;
+        unsigned operand = 7;
+        invalid[operand] = D3D9_SRC(0,0,0);
+        TEST_CHECK(svga3_translate_shader_d3d9(SVGA3D_SHADERTYPE_VS,invalid.data(),invalid.size(),spirv,error) != SVGA3_VLKN_SUCCESS,
+            "Invalid relative address register rejected");
+    }
     // Shader model and operand contracts fail before emitting SPIR-V.
     for (uint32_t version : {0xffff0101u,0xffff0104u,0xfffe0101u,0xffff0400u}) {
         const uint32_t shader[]{version,0xffff};

@@ -56,6 +56,7 @@ enum SpvOp {
     SpvOpImageSampleImplicitLod = 87,
     SpvOpImageSampleDrefImplicitLod = 89,
     SpvOpCompositeInsert = 82,
+    SpvOpConvertFToS = 110,
     SpvOpFNegate = 127,
     SpvOpIAdd = 128,
     SpvOpFAdd = 129,
@@ -150,6 +151,7 @@ enum SpvDim {
 };
 
 enum GLSLstd450 {
+    GLSLstd450RoundEven = 2,
     GLSLstd450FAbs = 4,
     GLSLstd450FSign = 6,
     GLSLstd450Floor = 8,
@@ -167,6 +169,7 @@ enum GLSLstd450 {
     GLSLstd450FMin = 37,
     GLSLstd450FMax = 40,
     GLSLstd450FClamp = 43,
+    GLSLstd450SClamp = 45,
     GLSLstd450FMix = 46,
     GLSLstd450Normalize = 69,
     GLSLstd450Cross = 70

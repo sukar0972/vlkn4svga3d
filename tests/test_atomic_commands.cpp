@@ -68,12 +68,69 @@ static int checkDeferredImages() {
     svga3_vlkn_device_destroy(dev);
     return 0;
 }
+static unsigned lossSubmitCalls, lossResetCalls;
+static PFN_vkQueueSubmit realLossSubmit;
+static PFN_vkResetCommandBuffer realLossReset;
+static VkResult VKAPI_CALL countLossSubmit(VkQueue q,uint32_t n,const VkSubmitInfo *info,VkFence fence) {
+    ++lossSubmitCalls; return realLossSubmit(q,n,info,fence);
+}
+static VkResult VKAPI_CALL countLossReset(VkCommandBuffer cb,VkCommandBufferResetFlags flags) {
+    ++lossResetCalls; return realLossReset(cb,flags);
+}
+static VkResult VKAPI_CALL loseQueueWait(VkQueue) { return VK_ERROR_DEVICE_LOST; }
+static VkResult VKAPI_CALL loseDeviceWait(VkDevice) { return VK_ERROR_DEVICE_LOST; }
+static VkResult VKAPI_CALL loseBegin(VkCommandBuffer,const VkCommandBufferBeginInfo *) { return VK_ERROR_DEVICE_LOST; }
+static VkResult VKAPI_CALL loseEnd(VkCommandBuffer) { return VK_ERROR_DEVICE_LOST; }
+static int checkStickyLossModes() {
+    for (unsigned mode=0;mode<4;++mode) {
+        Svga3VlknConfig cfg{}; cfg.forceMockBackend=true;
+        auto *dev=svga3_vlkn_device_create(&cfg); CHECK(dev);
+        auto &backend=*dev->backend; auto &dispatch=backend.dispatch();
+        realLossSubmit=dispatch.vkQueueSubmit; realLossReset=dispatch.vkResetCommandBuffer;
+        dispatch.vkQueueSubmit=countLossSubmit; dispatch.vkResetCommandBuffer=countLossReset;
+        lossSubmitCalls=lossResetCalls=0;
+        uint64_t completed=backend.completedSubmissionSerial();
+        if (mode==0) {
+            dispatch.vkBeginCommandBuffer=loseBegin;
+            CHECK(backend.getActiveCommandBuffer()==VK_NULL_HANDLE);
+        } else {
+            CHECK(backend.getActiveCommandBuffer()!=VK_NULL_HANDLE);
+            if (mode==1) dispatch.vkEndCommandBuffer=loseEnd;
+            if (mode==2) dispatch.vkQueueWaitIdle=loseQueueWait;
+            if (mode==3) {
+                dispatch.vkDeviceWaitIdle=loseDeviceWait;
+                CHECK(backend.waitIdle()==SVGA3_VLKN_ERROR_DEVICE_LOST);
+            } else CHECK(backend.flushCommandBuffer()==SVGA3_VLKN_ERROR_DEVICE_LOST);
+        }
+        CHECK(backend.isDeviceLost() && !backend.cmdBufferRecording());
+        CHECK(backend.completedSubmissionSerial()==completed && lossResetCalls==0);
+        unsigned submitted=lossSubmitCalls;
+        CHECK(submitted==(mode==2?1u:0u));
+        CHECK(backend.getActiveCommandBuffer()==VK_NULL_HANDLE);
+        CHECK(backend.flushCommandBuffer()==SVGA3_VLKN_ERROR_DEVICE_LOST);
+        CHECK(backend.waitIdle()==SVGA3_VLKN_ERROR_DEVICE_LOST);
+        CHECK(lossSubmitCalls==submitted && lossResetCalls==0);
+        svga3_vlkn_device_destroy(dev);
+        CHECK(lossSubmitCalls==submitted && lossResetCalls==0);
+    }
+    std::puts("Device loss during begin/end/queue wait/device wait stays lost without resets or resubmits: PASS");
+    return 0;
+}
 int main() {
+    CHECK(checkStickyLossModes()==0);
     CHECK(checkDeferredImages()==0);
     Svga3VlknConfig cfg{}; cfg.forceMockBackend = true;
     auto *dev = svga3_vlkn_device_create(&cfg); CHECK(dev);
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
     auto *ctx = dev->contextMgr->getContext(1);
+    uint32_t pointCap = 0;
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_POINT_SIZE,&pointCap) && pointCap == 1);
+    CHECK(ctx->setRenderState(SVGA3D_RS_POINTSIZE,0x3f800000) == SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setRenderState(SVGA3D_RS_POINTSIZE,0x41000000) == SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setRenderState(SVGA3D_RS_POINTSPRITEENABLE,1) == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND);
+    CHECK(ctx->setRenderState(SVGA3D_RS_POINTSPRITEENABLE,0) == SVGA3_VLKN_SUCCESS);
+    CHECK(ctx->setTextureStageState(0,SVGA3D_TS_GAMMA,0x7fc00000) == SVGA3_VLKN_ERROR_INVALID_PARAM);
+    CHECK(ctx->setRenderState(SVGA3D_RS_OUTPUTGAMMA,0x7fc00000) == SVGA3_VLKN_ERROR_INVALID_PARAM);
     uint32_t ffCap=1;
     for (auto cap : {SVGA3D_DEVCAP_MAX_LIGHTS,SVGA3D_DEVCAP_MAX_CLIP_PLANES})
         CHECK(svga3_vlkn_query_cap(dev,cap,&ffCap) && ffCap==0);

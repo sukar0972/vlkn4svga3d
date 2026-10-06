@@ -361,6 +361,7 @@ Svga3VlknStatus VlknSurface::allocate() {
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgInfo.imageType = ((m_depth > 1 || m_volumeImage) && !m_isCubeMap) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     imgInfo.format = m_vkFormat;
+    if (viewFormat(true) != m_vkFormat) imgInfo.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
     imgInfo.extent.width = m_width;
     imgInfo.extent.height = m_height;
     imgInfo.extent.depth = m_depth;
@@ -511,6 +512,7 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
         return status;
     }
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -797,7 +799,42 @@ void VlknSurface::destroy() {
     }
 }
 
-VkImageView VlknSurface::getRenderTargetView(uint32_t mip, uint32_t face) {
+VkFormat VlknSurface::viewFormat(bool srgb) const {
+    if (!srgb) return m_vkFormat;
+    switch (m_vkFormat) {
+        case VK_FORMAT_B8G8R8A8_UNORM: return VK_FORMAT_B8G8R8A8_SRGB;
+        case VK_FORMAT_R8G8B8A8_UNORM: return VK_FORMAT_R8G8B8A8_SRGB;
+        case VK_FORMAT_BC1_RGB_UNORM_BLOCK: return VK_FORMAT_BC1_RGB_SRGB_BLOCK;
+        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+        case VK_FORMAT_BC2_UNORM_BLOCK: return VK_FORMAT_BC2_SRGB_BLOCK;
+        case VK_FORMAT_BC3_UNORM_BLOCK: return VK_FORMAT_BC3_SRGB_BLOCK;
+        default: return m_vkFormat; // Gamma applies only to formats with an sRGB twin.
+    }
+}
+
+VkImageView VlknSurface::sampledView(bool srgb) {
+    if (!srgb || viewFormat(true) == m_vkFormat) return m_imageView;
+    // Share the bounded view cache; sampled entries use the otherwise unused high bit.
+    uint64_t key = (uint64_t(1) << 63) | m_viewMipLevels;
+    auto found = m_rtViews.find(key);
+    if (found != m_rtViews.end()) return found->second;
+    if (m_rtViews.size() >= SVGA3_MAX_RT_VIEWS) return VK_NULL_HANDLE;
+    VkImageViewCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.image = m_image;
+    info.viewType = m_isCubeMap ? VK_IMAGE_VIEW_TYPE_CUBE :
+        (isVolumeImage() ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D);
+    info.format = viewFormat(true);
+    info.components = sampleComponents(m_svgaFormat);
+    info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, m_viewMipLevels, 0, m_arrayLayers};
+    VkImageView view = VK_NULL_HANDLE;
+    if (m_backend->dispatch().vkCreateImageView(m_backend->device(), &info, nullptr, &view) != VK_SUCCESS)
+        return VK_NULL_HANDLE;
+    m_rtViews[key] = view;
+    return view;
+}
+
+VkImageView VlknSurface::getRenderTargetView(uint32_t mip, uint32_t face, bool srgb) {
     /* Validate against the surface: out-of-range levels/faces make
      * vkCreateImageView fail or misbehave, and each unique (mip,face)
      * caches a view — unbounded without this check. */
@@ -808,7 +845,7 @@ VkImageView VlknSurface::getRenderTargetView(uint32_t mip, uint32_t face) {
     if (m_rtViews.size() >= SVGA3_MAX_RT_VIEWS) {
         return VK_NULL_HANDLE;
     }
-    uint64_t key = ((uint64_t)mip << 32) | (uint64_t)face;
+    uint64_t key = ((uint64_t)mip << 32) | (uint64_t)face | (uint64_t(srgb) << 62);
     auto it = m_rtViews.find(key);
     if (it != m_rtViews.end()) {
         return it->second;
@@ -818,7 +855,7 @@ VkImageView VlknSurface::getRenderTargetView(uint32_t mip, uint32_t face) {
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = m_image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = m_vkFormat;
+    viewInfo.format = viewFormat(srgb);
     viewInfo.subresourceRange.aspectMask = nativeAspectMask();
     viewInfo.subresourceRange.baseMipLevel = mip;
     viewInfo.subresourceRange.levelCount = 1;
@@ -888,6 +925,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     const VkImageAspectFlags aspects = nativeAspectMask();
     const VkImageLayout transferLayout = upload ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = subresourceLayout(mipLevel,face) == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1200,6 +1238,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
      * Acquire the recording buffer only after allocation and host writes. */
     /* Transition image to TRANSFER_DST_OPTIMAL */
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
 
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1334,6 +1373,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     }
 
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
 
     /* Transition image to TRANSFER_SRC_OPTIMAL */
     VkImageMemoryBarrier barrier = {};
@@ -1522,6 +1562,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
 
     /* Transition image to TRANSFER_SRC_OPTIMAL */
     VkImageMemoryBarrier barrier = {};
@@ -1779,6 +1820,7 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
 
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     const VkImageLayout srcLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     const VkImageLayout dstLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     if (src->image()) src->transitionLayout(cb, srcLayout);
@@ -1962,6 +2004,7 @@ Svga3VlknStatus VlknSurfaceManager::stretchBlt(uint32_t srcSid,
     }
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     const VkImageLayout srcLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     const VkImageLayout dstLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     if (src->image()) src->transitionLayout(cb, srcLayout);
@@ -2204,6 +2247,7 @@ Svga3VlknStatus VlknSurfaceManager::generateMipmaps(uint32_t sid, SVGA3dTextureF
     if ((properties.optimalTilingFeatures&required)!=required) return SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT;
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     surf->transitionLayout(cb, VK_IMAGE_LAYOUT_GENERAL);
     VkFilter vkFilt = (filter == SVGA3D_TEX_FILTER_NEAREST) ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
 

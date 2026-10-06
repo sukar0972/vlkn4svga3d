@@ -67,6 +67,7 @@ public:
     Svga3VlknStatus init(const Svga3VlknConfig *config);
     void shutdown();
     Svga3VlknStatus waitIdle();
+    bool isDeviceLost() const { return m_deviceLost; }
     uint64_t completedSubmissionSerial() const { return m_completedSubmissionSerial; }
 
     /* Memory allocation helpers */
@@ -176,6 +177,8 @@ public:
     void setPreFlushHook(std::function<void()> hook) { m_preFlushHook = std::move(hook); }
 
 private:
+    bool m_deviceLost = false;
+    void observeDeviceResult(VkResult result);
     bool m_measurePerformance = false;
     PerformanceCounters m_performanceCounters{};
     Svga3VlknStatus initInstance(const Svga3VlknConfig *config);

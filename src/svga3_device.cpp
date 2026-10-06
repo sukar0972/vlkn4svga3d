@@ -40,7 +40,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_D24X8_BUFFER_FORMAT, 1, true },
     { SVGA3D_DEVCAP_QUERY_TYPES, 1, true },
     { SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING, 0, true },
-    { SVGA3D_DEVCAP_MAX_POINT_SIZE, 256, true },
+    { SVGA3D_DEVCAP_MAX_POINT_SIZE, 1, true },
     { SVGA3D_DEVCAP_MAX_SHADER_TEXTURES, 0, false },
     { SVGA3D_DEVCAP_MAX_TEXTURE_WIDTH, 8192, true },
     { SVGA3D_DEVCAP_MAX_TEXTURE_HEIGHT, 8192, true },
@@ -286,6 +286,7 @@ Svga3VlknStatus svga3_vlkn_context_create(Svga3VlknDevice *dev, uint32_t cid)
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->contextMgr->createContext(cid);
 }
 
@@ -293,6 +294,7 @@ Svga3VlknStatus svga3_vlkn_context_destroy(Svga3VlknDevice *dev, uint32_t cid)
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->contextMgr->destroyContext(cid);
 }
 
@@ -300,6 +302,7 @@ bool svga3_vlkn_context_exists(Svga3VlknDevice *dev, uint32_t cid)
 {
     if (!dev || !dev->contextMgr) return false;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->contextMgr->exists(cid);
 }
 
@@ -312,6 +315,7 @@ Svga3VlknStatus svga3_vlkn_surface_define(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     Svga3VlknStatus st = dev->surfaceMgr->defineSurface(sid, surfaceFlags, format, sizes, numSizes);
     if (st == SVGA3_VLKN_SUCCESS) {
@@ -324,6 +328,7 @@ Svga3VlknStatus svga3_vlkn_surface_destroy(Svga3VlknDevice *dev, uint32_t sid)
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     Svga3VlknStatus st = dev->surfaceMgr->destroySurface(sid);
     if (st == SVGA3_VLKN_SUCCESS) {
@@ -336,6 +341,7 @@ bool svga3_vlkn_surface_exists(Svga3VlknDevice *dev, uint32_t sid)
 {
     if (!dev || !dev->surfaceMgr) return false;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->surfaceMgr->exists(sid);
 }
 
@@ -348,6 +354,7 @@ Svga3VlknStatus svga3_vlkn_surface_dma_upload(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     svga3_vlkn::VlknSurface *surf = dev->surfaceMgr->getSurface(sid);
     if (!surf) return SVGA3_VLKN_ERROR_NOT_FOUND;
@@ -372,6 +379,7 @@ Svga3VlknStatus svga3_vlkn_surface_dma_download(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     svga3_vlkn::VlknSurface *surf = dev->surfaceMgr->getSurface(sid);
     if (!surf) return SVGA3_VLKN_ERROR_NOT_FOUND;
@@ -398,6 +406,7 @@ Svga3VlknStatus svga3_vlkn_surface_define_v2(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     Svga3VlknStatus st = dev->surfaceMgr->defineSurfaceV2(
         sid, surfaceFlags, format, multisampleCount, autogenFilter, sizes, numSizes
     );
@@ -411,6 +420,7 @@ Svga3VlknStatus svga3_vlkn_surface_set_active(Svga3VlknDevice *dev, uint32_t sid
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->surfaceMgr->setSurfaceActive(sid, active);
 }
 
@@ -422,6 +432,7 @@ Svga3VlknStatus svga3_vlkn_surface_copy(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     return dev->surfaceMgr->copy(srcSid, dstSid, boxes, numBoxes);
 }
@@ -435,6 +446,7 @@ Svga3VlknStatus svga3_vlkn_surface_stretch_blt(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr || !boxSrc || !boxDest) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     return dev->surfaceMgr->stretchBlt(srcSid, dstSid, *boxSrc, *boxDest, mode);
 }
@@ -445,6 +457,7 @@ Svga3VlknStatus svga3_vlkn_surface_generate_mipmaps(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     return dev->surfaceMgr->generateMipmaps(sid, filter);
 }
 
@@ -458,6 +471,7 @@ Svga3VlknStatus svga3_vlkn_surface_blit_to_screen(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr || !srcImage || !srcRect || !destRect) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     return dev->surfaceMgr->blitSurfaceToScreen(*srcImage, *srcRect, destScreenId, *destRect, clipRects, numClipRects, dev->guestMem.get());
 }
@@ -469,6 +483,7 @@ Svga3VlknStatus svga3_vlkn_surface_present(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->surfaceMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
     return dev->surfaceMgr->present(sid, rects, numRects, dev->guestMem.get());
 }
@@ -480,6 +495,7 @@ Svga3VlknStatus svga3_vlkn_context_set_render_state(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setRenderState(state, value);
@@ -492,6 +508,7 @@ Svga3VlknStatus svga3_vlkn_context_get_render_state(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !outValue) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->getRenderState(state, outValue);
@@ -506,6 +523,7 @@ Svga3VlknStatus svga3_vlkn_context_set_render_target(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setRenderTarget(type, sid, face, mipmap);
@@ -517,6 +535,7 @@ Svga3VlknStatus svga3_vlkn_context_set_viewport(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setViewport(rect);
@@ -528,6 +547,7 @@ Svga3VlknStatus svga3_vlkn_context_set_scissor_rect(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setScissorRect(rect);
@@ -540,6 +560,7 @@ Svga3VlknStatus svga3_vlkn_context_set_transform(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !matrix) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setTransform(type, matrix);
@@ -552,6 +573,7 @@ Svga3VlknStatus svga3_vlkn_context_get_transform(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !outMatrix) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->getTransform(type, outMatrix);
@@ -563,6 +585,7 @@ Svga3VlknStatus svga3_vlkn_context_set_zrange(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !zRange) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setZRange(zRange);
@@ -574,6 +597,7 @@ Svga3VlknStatus svga3_vlkn_context_get_zrange(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !outZRange) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     *outZRange = ctx->getZRange();
@@ -588,6 +612,7 @@ Svga3VlknStatus svga3_vlkn_context_set_texture_stage_state(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setTextureStageState(stage, name, value);
@@ -600,6 +625,7 @@ Svga3VlknStatus svga3_vlkn_context_set_texture(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setTexture(stage, sid);
@@ -612,6 +638,7 @@ Svga3VlknStatus svga3_vlkn_context_set_clip_plane(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !plane) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setClipPlane(index, plane);
@@ -624,6 +651,7 @@ Svga3VlknStatus svga3_vlkn_context_set_material(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !material) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setMaterial(face, material);
@@ -636,6 +664,7 @@ Svga3VlknStatus svga3_vlkn_context_set_light_data(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !data) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setLightData(index, data);
@@ -648,6 +677,7 @@ Svga3VlknStatus svga3_vlkn_context_set_light_enabled(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setLightEnabled(index, enabled);
@@ -662,6 +692,7 @@ Svga3VlknStatus svga3_vlkn_context_define_shader(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !bytecode || numDwords == 0) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->defineShader(shid, type, bytecode, numDwords);
@@ -674,6 +705,7 @@ Svga3VlknStatus svga3_vlkn_context_destroy_shader(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->destroyShader(shid, type);
@@ -686,6 +718,7 @@ Svga3VlknStatus svga3_vlkn_context_set_shader(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setShader(type, shid);
@@ -700,6 +733,7 @@ Svga3VlknStatus svga3_vlkn_context_set_shader_const(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !values) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->setShaderConst(reg, type, ctype, values);
@@ -714,6 +748,7 @@ Svga3VlknStatus svga3_vlkn_context_get_shader_const(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr || !outValues) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->getShaderConst(reg, type, ctype, outValues);
@@ -730,6 +765,7 @@ Svga3VlknStatus svga3_vlkn_context_clear(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     dev->contextMgr->endAllRenderPassesExcept(cid);
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
@@ -750,6 +786,7 @@ Svga3VlknStatus svga3_vlkn_context_draw(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     dev->contextMgr->endAllRenderPassesExcept(cid);
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
@@ -770,6 +807,7 @@ Svga3VlknStatus svga3_vlkn_context_begin_query(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->beginQuery(type);
@@ -781,6 +819,7 @@ Svga3VlknStatus svga3_vlkn_context_end_query(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->endQuery(type);
@@ -793,6 +832,7 @@ Svga3VlknStatus svga3_vlkn_context_wait_for_query(Svga3VlknDevice *dev,
 {
     if (!dev || !dev->contextMgr) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
     return ctx->waitForQuery(type, outResult);
