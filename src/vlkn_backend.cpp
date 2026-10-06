@@ -182,10 +182,21 @@ void VlknBackend::shutdown() {
     vlkn_dispatch_cleanup(&m_dispatch);
 }
 
+void VlknBackend::observeDeviceResult(VkResult result) {
+    if (result == VK_ERROR_DEVICE_LOST && !m_deviceLost) {
+        m_deviceLost = true;
+        m_cmdBufferRecording = false;
+        m_renderPassActive = false;
+        log_msg("[libqemu_svga3d] Vulkan device lost; disabling 3D until device recreation\n");
+    }
+}
+
 Svga3VlknStatus VlknBackend::waitIdle() {
+    if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (m_device && m_dispatch.vkDeviceWaitIdle) {
         VkResult res = m_dispatch.vkDeviceWaitIdle(m_device);
         if (res != VK_SUCCESS) {
+            observeDeviceResult(res);
             log_msg("[libqemu_svga3d] vkDeviceWaitIdle error: %d\n", res);
             return SVGA3_VLKN_ERROR_DEVICE_LOST;
         }
@@ -201,6 +212,7 @@ Svga3VlknStatus VlknBackend::waitIdle() {
             if (m_cmdBuffer && m_dispatch.vkResetCommandBuffer) {
                 res = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
                 if (res != VK_SUCCESS) {
+                    observeDeviceResult(res);
                     log_msg("[libqemu_svga3d] vkResetCommandBuffer error after idle: %d\n", res);
                     return SVGA3_VLKN_ERROR_DEVICE_LOST;
                 }
@@ -283,6 +295,7 @@ Svga3VlknStatus VlknBackend::initInstance(const Svga3VlknConfig *config) {
 
     VkResult res = m_dispatch.vkCreateInstance(&createInfo, nullptr, &m_instance);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
@@ -430,6 +443,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
 
     VkResult res = m_dispatch.vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_device);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
@@ -448,6 +462,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
 
     res = m_dispatch.vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_cmdPool);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
@@ -460,6 +475,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
 
     res = m_dispatch.vkAllocateCommandBuffers(m_device, &allocInfo, &m_cmdBuffer);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
@@ -478,6 +494,7 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
 
     res = m_dispatch.vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr, &m_descriptorPool);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
@@ -522,12 +539,14 @@ Svga3VlknStatus VlknBackend::allocateMemory(VkDeviceSize size, uint32_t memoryTy
 
     VkResult res = m_dispatch.vkAllocateMemory(m_device, &allocInfo, nullptr, outMemory);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
     return SVGA3_VLKN_SUCCESS;
 }
 
 void VlknBackend::freeMemory(VkDeviceMemory memory) {
+    if (m_deviceLost) return;
     if (memory) {
         m_dispatch.vkFreeMemory(m_device, memory, nullptr);
     }
@@ -548,6 +567,7 @@ Svga3VlknStatus VlknBackend::createBuffer(VkDeviceSize size,
 
     VkResult res = m_dispatch.vkCreateBuffer(m_device, &bufferInfo, nullptr, outBuffer);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
 
@@ -584,6 +604,7 @@ Svga3VlknStatus VlknBackend::createBuffer(VkDeviceSize size,
 }
 
 void VlknBackend::destroyBuffer(VkBuffer buffer, VkDeviceMemory memory) {
+    if (m_deviceLost) { retireBuffer(buffer, memory, nullptr, m_recordingSerial, 0); return; }
     if (buffer) m_dispatch.vkDestroyBuffer(m_device, buffer, nullptr);
     if (memory) m_dispatch.vkFreeMemory(m_device, memory, nullptr);
 }
@@ -603,6 +624,7 @@ Svga3VlknStatus VlknBackend::initStagingBuffer(size_t size) {
 
     VkResult res = m_dispatch.vkMapMemory(m_device, m_stagingMemory, 0, size, 0, &m_stagingMapped);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
     return SVGA3_VLKN_SUCCESS;
@@ -622,6 +644,7 @@ Svga3VlknStatus VlknBackend::initFallbackBuffer(size_t size) {
     void *mapped = nullptr;
     VkResult res = m_dispatch.vkMapMemory(m_device, m_fallbackMemory, 0, size, 0, &mapped);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
     }
 
@@ -675,6 +698,7 @@ Svga3VlknStatus VlknBackend::uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dst
         m_dispatch.vkUnmapMemory(m_device, tempMemory);
 
         VkCommandBuffer cb = getActiveCommandBuffer();
+        if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
         VkBufferCopy region = {};
         region.srcOffset = 0;
         region.dstOffset = dstOffset;
@@ -697,6 +721,7 @@ Svga3VlknStatus VlknBackend::uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dst
     memcpy(stagingMappedAt(stagingOffset), srcData, (size_t)size);
 
     VkCommandBuffer cb = getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     VkBufferCopy region = {};
     region.srcOffset = stagingOffset;
     region.dstOffset = dstOffset;
@@ -717,6 +742,7 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
         if (st != SVGA3_VLKN_SUCCESS) return st;
 
         VkCommandBuffer cb = getActiveCommandBuffer();
+        if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
         VkBufferCopy region = {};
         region.srcOffset = srcOffset;
         region.dstOffset = 0;
@@ -754,6 +780,7 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
     }
 
     VkCommandBuffer cb = getActiveCommandBuffer();
+    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     VkBufferCopy region = {};
     region.srcOffset = srcOffset;
     region.dstOffset = stagingOffset;
@@ -786,11 +813,15 @@ void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffe
 }
 
 VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
+    if (m_deviceLost) return VK_NULL_HANDLE;
+    if (m_cmdBufferPending && waitIdle() != SVGA3_VLKN_SUCCESS) return VK_NULL_HANDLE;
     if (!m_cmdBufferRecording) {
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        m_dispatch.vkBeginCommandBuffer(m_cmdBuffer, &beginInfo);
+        VkResult result = m_dispatch.vkBeginCommandBuffer(m_cmdBuffer, &beginInfo);
+        observeDeviceResult(result);
+        if (result != VK_SUCCESS) return VK_NULL_HANDLE;
         m_cmdBufferRecording = true;
         ++m_recordingSerial;
     }
@@ -865,6 +896,7 @@ void VlknBackend::cmdEndRenderPass(VkCommandBuffer cb) {
 }
 
 Svga3VlknStatus VlknBackend::flushCommandBuffer() {
+    if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     /* A prior submit may have succeeded even when its queue wait failed. Do
      * not reset or reuse that command buffer until device idle confirms it. */
     if (m_cmdBufferPending) {
@@ -894,10 +926,12 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
 
     VkResult res = m_dispatch.vkEndCommandBuffer(m_cmdBuffer);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkEndCommandBuffer error: %d\n", res);
         m_cmdBufferRecording = false;
         m_renderPassActive = false;
-        VkResult resetRes = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
+        VkResult resetRes = m_deviceLost ? VK_ERROR_DEVICE_LOST : m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
+        observeDeviceResult(resetRes);
         if (resetRes != VK_SUCCESS)
             log_msg("[libqemu_svga3d] vkResetCommandBuffer error after end failure: %d\n", resetRes);
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
@@ -911,8 +945,10 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
 
     res = m_dispatch.vkQueueSubmit(m_queue, 1, &submitInfo, VK_NULL_HANDLE);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkQueueSubmit error: %d\n", res);
-        VkResult resetRes = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
+        VkResult resetRes = m_deviceLost ? VK_ERROR_DEVICE_LOST : m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
+        observeDeviceResult(resetRes);
         if (resetRes != VK_SUCCESS)
             log_msg("[libqemu_svga3d] vkResetCommandBuffer error after submit failure: %d\n", resetRes);
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
@@ -925,6 +961,7 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
         m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - waitStart).count();
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkQueueWaitIdle error: %d\n", res);
         /* The submit was accepted. Keep its buffer pending until waitIdle()
          * establishes completion; resetting it here would race the GPU. */
@@ -938,6 +975,7 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     cleanupRetiredImages();
     res = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkResetCommandBuffer error: %d\n", res);
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
     }
@@ -1019,6 +1057,7 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &c
     VkRenderPass rp = VK_NULL_HANDLE;
     VkResult res = m_dispatch.vkCreateRenderPass(m_device, &rpInfo, nullptr, &rp);
     if (res != VK_SUCCESS) {
+        observeDeviceResult(res);
         log_msg("[libqemu_svga3d] getOrCreateRenderPass: vkCreateRenderPass failed (%d)\n", res);
         return VK_NULL_HANDLE;
     }

@@ -56,7 +56,9 @@ public:
     VkFormat vkFormat() const { return m_vkFormat; }
     VkImage image() const { return m_image; }
     VkImageView imageView() const { return m_imageView; }
-    VkImageView getRenderTargetView(uint32_t mip, uint32_t face);
+    VkImageView getRenderTargetView(uint32_t mip, uint32_t face, bool srgb = false);
+    VkFormat viewFormat(bool srgb) const;
+    VkImageView sampledView(bool srgb);
     VkImageLayout currentLayout() const {
         if (m_subresourceLayouts.empty()) return m_currentLayout;
         for (auto layout:m_subresourceLayouts) if (layout!=m_subresourceLayouts[0]) return VK_IMAGE_LAYOUT_UNDEFINED;

@@ -676,17 +676,17 @@ int main() {
         pointRange.primType=SVGA3D_PRIMITIVE_POINTLIST;pointRange.primitiveCount=1;
         pointRange.indexArray.surfaceId=SVGA3D_INVALID_ID;
         TEST_CHECK(svga3_vlkn_context_draw(dev,CID,SVGA3D_PRIMITIVE_POINTLIST,decls,2,&pointRange,1)==SVGA3_VLKN_SUCCESS,
-            "Render a three-pixel point");
+            "Render a point clamped to the advertised one-pixel limit");
         TEST_CHECK(svga3_vlkn_context_end_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION)==SVGA3_VLKN_SUCCESS,
             "End query outside the point render pass");
         uint32_t samples=0;
-        TEST_CHECK(svga3_vlkn_context_wait_for_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION,&samples)==SVGA3_VLKN_SUCCESS && samples==9,
-            "Occlusion query counts the nine covered point samples");
+        TEST_CHECK(svga3_vlkn_context_wait_for_query(dev,CID,SVGA3D_QUERYTYPE_OCCLUSION,&samples)==SVGA3_VLKN_SUCCESS && samples==1,
+            "Occlusion query counts one sample at the advertised point-size limit");
         svga3_vlkn_surface_dma_download(dev,SID_RT,0,nullptr,fb.data(),RT_W*4);
         unsigned redPoints=0;
         for (const auto& pixel : fb) redPoints += pixelMatches(pixel,255,0,0,255);
-        TEST_CHECK(redPoints==9 && pixelMatches(fb[32*RT_W+32],255,0,0,255),
-            "PSIZE changes coverage while leaving the point position intact");
+        TEST_CHECK(redPoints==1 && pixelMatches(fb[32*RT_W+32],255,0,0,255),
+            "Oversized shader PSIZE clamps to one without moving the point");
         svga3_vlkn_context_set_shader(dev,CID,SVGA3D_SHADERTYPE_VS,1);
         const SVGA3dRect negativeViewport = {uint32_t(-32),0,64,64};
         const SVGA3dRect oversizedScissor = {uint32_t(-5),uint32_t(-5),69,69};

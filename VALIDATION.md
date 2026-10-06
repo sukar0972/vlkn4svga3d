@@ -19,6 +19,23 @@ See the [full accuracy and performance report](docs/piglit-accuracy-20261004.md)
 
 ## Host checks
 
+The October 6 fixes for issues #100, #101, #102, #113 and #162 passed
+`make all`, `make test`, and all 14 host harness suites. The translator suite
+used `spirv-val`; the renderer suites used lavapipe. Pixel regressions cover
+D16/D24 depth bias, sRGB sampling/output, opaque texture alpha, relative
+constants through a0/aL with runtime and DEF values, out-of-range indices,
+and point coverage clamped to the advertised size of one. Device-loss
+injection covers begin, end, submit, queue wait and device wait; wrapped FIFO
+checks show that 3D is dropped while updates, screen objects and fences drain.
+
+Logs are in `artifacts/open-issues-20261006/`. These changes have not been
+replayed in a guest. The October 4 replay above did not reproduce the earlier
+GPU hangs; it does not validate recovery on this build or continuous-run
+stability. Real GPU-fault reproduction, device recreation and sustained-load
+validation remain deferred. On device loss, Vulkan allocations are retained
+until process exit so teardown cannot free resources whose completion is
+unknown.
+
 For the tested accuracy build, all 14 host harness suites passed: 11 configured for lavapipe and three ICD-free suites. Mock/preload checks and renderer-source CI also passed. Coverage includes attachment-copy pixels, point size, and occlusion queries. The QEMU integration executable exercises an in-process device harness; it does not boot a guest.
 
 The September 25 publication snapshot also passed `make all`, `make test`, and `make acceptance`; compiler warnings remained. Its transcripts are in `validation/`. The [testing guide](docs/testing.md) explains the current targets and dependencies.

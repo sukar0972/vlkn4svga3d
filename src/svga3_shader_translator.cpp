@@ -124,6 +124,7 @@ struct ParsedSrc {
     uint32_t regType;
     uint32_t swizzle[4];
     uint32_t srcMod;
+    uint32_t relativeToken = 0;
 };
 
 struct ShaderDefConst {
@@ -240,6 +241,56 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         }
     }
 
+    // Remove relative-address extension tokens into metadata so both translation
+    // passes continue to count logical operands. Never interpret DEF literals or
+    // DCL semantics as source parameters, or predicate negation as addressing.
+    std::vector<uint32_t> normalized{tokens[0]};
+    std::map<uint32_t, uint32_t> relativeOperands;
+    for (uint32_t cursor = 1; cursor < numTokens;) {
+        uint32_t instruction = tokens[cursor], op = instruction & 0xffff;
+        uint32_t length = op == D3DSIO_COMMENT ? (instruction >> 16) & 0x7fff : (instruction >> 24) & 15;
+        if (op == D3DSIO_END) { normalized.push_back(instruction); break; }
+        if (length >= numTokens - cursor) {
+            outError = "Truncated shader instruction";
+            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        }
+        uint32_t start = normalized.size();
+        normalized.push_back(instruction);
+        for (uint32_t i = 1; i <= length; ++i) {
+            uint32_t token = tokens[cursor + i];
+            bool source = op != D3DSIO_COMMENT && op != D3DSIO_DEF && op != D3DSIO_DEFI &&
+                op != D3DSIO_DCL && (i > 1 || op == D3DSIO_IF) &&
+                !((instruction & (1u << 28)) && i == 2);
+            if (source && (token & (1u << 13))) {
+                ParsedSrc src, address;
+                if (++i > length || !parseSrc(token, src) || src.regType != D3DSPR_CONST ||
+                    !parseSrc(tokens[cursor + i], address) || address.regNum != 0 || address.srcMod ||
+                    (tokens[cursor + i] & (1u << 13)) ||
+                    !((isVS && address.regType == D3DSPR_ADDR) || address.regType == D3DSPR_LOOP) ||
+                    address.swizzle[0] != address.swizzle[1] || address.swizzle[0] != address.swizzle[2] ||
+                    address.swizzle[0] != address.swizzle[3] ||
+                    (address.regType == D3DSPR_LOOP && address.swizzle[0] != 0)) {
+                    outError = "Invalid relative constant address operand";
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                }
+                relativeOperands[normalized.size()] = tokens[cursor + i];
+                token &= ~(1u << 13);
+            }
+            normalized.push_back(token);
+        }
+        if (op != D3DSIO_COMMENT)
+            normalized[start] = (instruction & ~(15u << 24)) | ((normalized.size() - start - 1) << 24);
+        cursor += length + 1;
+    }
+    tokens = normalized.data();
+    numTokens = normalized.size();
+    auto parseOperand = [&](uint32_t index, ParsedSrc &src) {
+        bool valid = parseSrc(tokens[index], src);
+        auto relative = relativeOperands.find(index);
+        if (relative != relativeOperands.end()) src.relativeToken = relative->second;
+        return valid;
+    };
+
     /* First pass: validate opcodes and extract DEF constants */
     std::map<uint32_t, ShaderDefConst> defConstants;
     std::map<uint32_t, ShaderDefConstI> defIntConstants;
@@ -339,7 +390,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             case D3DSIO_ENDLOOP: case D3DSIO_BREAK:
                 requiredParams = 0; break;
             case D3DSIO_TEXKILL: case D3DSIO_IF: requiredParams = 1; break;
-            case D3DSIO_MOV: case D3DSIO_RCP: case D3DSIO_RSQ: case D3DSIO_ABS:
+            case D3DSIO_MOVA: case D3DSIO_MOV: case D3DSIO_RCP: case D3DSIO_RSQ: case D3DSIO_ABS:
             case D3DSIO_FRC: case D3DSIO_EXP:
             case D3DSIO_LOOP: case D3DSIO_IFC:
             case D3DSIO_DCL:
@@ -377,7 +428,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     /* Predicate operand: must name a predicate register; its
                      * bit 13 is the negate flag, not relative addressing. */
                     ParsedSrc pred;
-                    if (!parseSrc(tokens[pc + i], pred) ||
+                    if (!parseOperand(pc + i, pred) ||
                         pred.regType != D3DSPR_PREDICATE || pred.regNum >= 4) {
                         outError = "Invalid predicate operand token";
                         return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -394,7 +445,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                  * so scanning every parameter token is safe. */
                 {
                     ParsedSrc anyOp;
-                    if (parseSrc(tokens[pc + i], anyOp) &&
+                    if (parseOperand(pc + i, anyOp) &&
                         anyOp.regType == D3DSPR_MISCTYPE && anyOp.regNum < 2) {
                         miscUsed[anyOp.regNum] = true;
                     }
@@ -412,7 +463,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         /* Check for unsupported instructions */
         switch (op) {
             case D3DSIO_NOP:
-            case D3DSIO_MOV:
+            case D3DSIO_MOVA: case D3DSIO_MOV:
             case D3DSIO_ADD:
             case D3DSIO_SUB:
             case D3DSIO_MUL:
@@ -511,7 +562,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             /* Fallback parameter count for SM 1.x where length field was 0 */
             switch (op) {
                 case D3DSIO_NOP: advance = 1; break;
-                case D3DSIO_MOV:
+                case D3DSIO_MOVA: case D3DSIO_MOV:
                 case D3DSIO_RCP:
                 case D3DSIO_RSQ:
                 case D3DSIO_ABS:
@@ -1024,6 +1075,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpVariable, { ptrFunctionV4Float, rVars[i], SpvStorageClassFunction, const0_v4 });
     }
 
+    uint32_t addressVar = b.allocId();
+    b.emitInst(b.functionDefinitions, SpvOpVariable, {ptrFunctionV4Float, addressVar, SpvStorageClassFunction, const0_v4});
+
     /* Output Registers Function locals */
     uint32_t outPosVar = b.allocId();
     uint32_t outPointSizeVar = isVS ? b.allocId() : 0;
@@ -1191,6 +1245,54 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 transErrorCode = SVGA3_VLKN_ERROR_INVALID_PARAM;
                 return const0_v4;
             }
+            if (src.relativeToken) {
+                ParsedSrc address; parseSrc(src.relativeToken, address);
+                uint32_t offset = 0;
+                if (address.regType == D3DSPR_LOOP) {
+                    for (auto frame = ctrlStack.rbegin(); frame != ctrlStack.rend(); ++frame) {
+                        if (frame->isLoop) {
+                            offset = b.allocId();
+                            b.emitInst(b.functionDefinitions, SpvOpLoad, {typeInt, offset, frame->ctrVar});
+                            break;
+                        }
+                    }
+                    if (!offset) { outError = "Relative aL read outside LOOP"; transError = true; return const0_v4; }
+                } else {
+                    uint32_t vec = b.allocId(), component = b.allocId(); offset = b.allocId();
+                    b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, vec, addressVar});
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, component, vec, address.swizzle[0]});
+                    // Clamp before float->integer conversion, including large guest values.
+                    uint32_t bounded = b.allocId(), low = b.allocId(), high = b.allocId();
+                    b.emitInst(b.typesConstantsGlobals, SpvOpConstant, {typeFloat, low, 0xc7800000u}); // -65536
+                    b.emitInst(b.typesConstantsGlobals, SpvOpConstant, {typeFloat, high, 0x47800000u});
+                    b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeFloat, bounded, glslSetId, GLSLstd450FClamp, component, low, high});
+                    b.emitInst(b.functionDefinitions, SpvOpConvertFToS, {typeInt, offset, bounded});
+                }
+                uint32_t index = b.allocId(), bounded = b.allocId(), pointer = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpIAdd, {typeInt, index, offset, intConst(src.regNum)});
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeInt, bounded, glslSetId, GLSLstd450SClamp, index, intConst(0), intConst(255)});
+                b.emitInst(b.functionDefinitions, SpvOpAccessChain, {ptrUniformV4Float, pointer, uboBlockVar, intConsts[0], bounded});
+                baseVal = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, baseVal, pointer});
+                for (const auto &definition : defConstants) {
+                    uint32_t components[4];
+                    for (int c = 0; c < 4; ++c) {
+                        uint32_t bits; memcpy(&bits, &definition.second.values[c], 4); components[c] = b.allocId();
+                        b.emitInst(b.typesConstantsGlobals, SpvOpConstant, {typeFloat, components[c], bits});
+                    }
+                    uint32_t literal = b.allocId(), equal = b.allocId(), condition = b.allocId(), selected = b.allocId();
+                    b.emitInst(b.typesConstantsGlobals, SpvOpConstantComposite, {typeV4Float, literal, components[0], components[1], components[2], components[3]});
+                    b.emitInst(b.functionDefinitions, SpvOpIEqual, {typeBool, equal, index, intConst(definition.first)});
+                    b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct, {typeV4Bool, condition, equal, equal, equal, equal});
+                    b.emitInst(b.functionDefinitions, SpvOpSelect, {typeV4Float, selected, condition, literal, baseVal});
+                    baseVal = selected;
+                }
+                uint32_t valid = b.allocId(), condition = b.allocId(), selected = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpIEqual, {typeBool, valid, index, bounded});
+                b.emitInst(b.functionDefinitions, SpvOpCompositeConstruct, {typeV4Bool, condition, valid, valid, valid, valid});
+                b.emitInst(b.functionDefinitions, SpvOpSelect, {typeV4Float, selected, condition, baseVal, const0_v4});
+                baseVal = selected;
+            } else {
             /* Check if defined by DEF */
             auto it = defConstants.find(src.regNum);
             if (it != defConstants.end()) {
@@ -1212,6 +1314,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 b.emitInst(b.functionDefinitions, SpvOpAccessChain, { ptrUniformV4Float, elemPtr, uboBlockVar, intConsts[0], regConstId });
                 baseVal = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpLoad, { typeV4Float, baseVal, elemPtr });
+            }
             }
         } else if (src.regType == D3DSPR_MISCTYPE) {
             /* SVGA3D misc registers (PS only): 0 = vPos (gl_FragCoord),
@@ -1518,7 +1621,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 case D3DSIO_ELSE: case D3DSIO_ENDIF:
                 case D3DSIO_ENDLOOP: case D3DSIO_BREAK: paramCount = 0; break;
                 case D3DSIO_TEXKILL: case D3DSIO_IF: paramCount = 1; break;
-                case D3DSIO_MOV:
+                case D3DSIO_MOVA: case D3DSIO_MOV:
                 case D3DSIO_RCP:
                 case D3DSIO_RSQ:
                 case D3DSIO_ABS:
@@ -1559,7 +1662,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             case D3DSIO_ELSE: case D3DSIO_ENDIF:
             case D3DSIO_ENDLOOP: case D3DSIO_BREAK: naturalCount = 0; break;
             case D3DSIO_TEXKILL: case D3DSIO_IF: naturalCount = 1; break;
-            case D3DSIO_MOV:
+            case D3DSIO_MOVA: case D3DSIO_MOV:
             case D3DSIO_RCP:
             case D3DSIO_RSQ:
             case D3DSIO_ABS:
@@ -1606,6 +1709,23 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         }
 
         switch (op) {
+            case D3DSIO_MOVA: {
+                ParsedDest dst; ParsedSrc src;
+                if (!isVS || !parseDest(tokens[pc + 1], dst) || dst.regType != D3DSPR_ADDR || dst.regNum != 0 || dst.dstMod) {
+                    outError = "MOVA requires vertex address register a0";
+                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+                }
+                parseOperand(pc + 2, src);
+                uint32_t value = emitLoadSrc(src), rounded = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeV4Float, rounded, glslSetId, GLSLstd450RoundEven, value});
+                uint32_t oldValue = b.allocId(), masked = b.allocId();
+                b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, oldValue, addressVar});
+                b.emitInst(b.functionDefinitions, SpvOpVectorShuffle, {typeV4Float, masked, oldValue, rounded,
+                    (dst.writeMask & 1) ? 4u : 0u, (dst.writeMask & 2) ? 5u : 1u,
+                    (dst.writeMask & 4) ? 6u : 2u, (dst.writeMask & 8) ? 7u : 3u});
+                b.emitInst(b.functionDefinitions, SpvOpStore, {addressVar, masked});
+                break;
+            }
             case D3DSIO_MOV: {
                 ParsedDest dst;
                 parseDest(tokens[pc + 1], dst);
@@ -1617,8 +1737,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                      * whose predicate component is false. Output shadow
                      * registers preserve their previous values as well. */
                     ParsedSrc pred, src;
-                    parseSrc(tokens[pc + 2], pred);
-                    parseSrc(tokens[pc + 3], src);
+                    parseOperand(pc + 2, pred);
+                    parseOperand(pc + 3, src);
                     const bool writable = dst.regType == D3DSPR_TEMP ||
                         (isVS && (dst.regType == D3DSPR_OUTPUT || dst.regType == D3DSPR_RASTOUT || dst.regType == D3DSPR_ATTROUT)) ||
                         (!isVS && dst.regType == D3DSPR_COLOROUT && dst.regNum == 0);
@@ -1645,7 +1765,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     predicate = predVec;
                 } else {
                     ParsedSrc src;
-                    parseSrc(tokens[pc + 2], src);
+                    parseOperand(pc + 2, src);
                     val = emitLoadSrc(src);
                 }
                 emitStoreDest(dst, val, predicate);
@@ -1655,8 +1775,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 if (dst.regType != D3DSPR_PREDICATE || dst.regNum >= 4) {
                     outError = "SETP destination is not a supported predicate register";
                     return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -1690,7 +1810,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest aL;
                 ParsedSrc iSrc;
                 parseDest(tokens[pc + 1], aL);
-                parseSrc(tokens[pc + 2], iSrc);
+                parseOperand(pc + 2, iSrc);
                 (void)aL;
                 if (iSrc.regType != D3DSPR_CONSTINT) {
                     outError = "LOOP operand is not an integer-constant register";
@@ -1806,8 +1926,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             }
             case D3DSIO_IFC: {
                 ParsedSrc s0, s1;
-                parseSrc(tokens[pc + 1], s0);
-                parseSrc(tokens[pc + 2], s1);
+                parseOperand(pc + 1, s0);
+                parseOperand(pc + 2, s1);
                 SpvOp cmpOp = relopVecOp((instToken >> 16) & 0xF);
                 if (cmpOp == SpvOpNop) {
                     outError = "Unsupported IFC comparison function";
@@ -1834,7 +1954,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
             }
             case D3DSIO_IF: {
                 ParsedSrc s0;
-                parseSrc(tokens[pc + 1], s0);
+                parseOperand(pc + 1, s0);
                 uint32_t cond=b.allocId();
                 if (s0.regType==D3DSPR_CONSTBOOL && s0.regNum<16) {
                     uint32_t values=emitIntegerConstant(s0.regNum,true),value=b.allocId();
@@ -1909,8 +2029,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t res = b.allocId();
@@ -1922,8 +2042,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t res = b.allocId();
@@ -1935,8 +2055,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t res = b.allocId();
@@ -1948,9 +2068,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1, s2;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
-                parseSrc(tokens[pc + 4], s2);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
+                parseOperand(pc + 4, s2);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t v2 = emitLoadSrc(s2);
@@ -1965,8 +2085,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t v0_xyz = b.allocId();
@@ -1984,8 +2104,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t dot = b.allocId();
@@ -1999,8 +2119,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t vec = emitLoadSrc(s0);
 
                 uint32_t dots[4];
@@ -2020,8 +2140,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t res = b.allocId();
@@ -2033,8 +2153,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t res = b.allocId();
@@ -2046,7 +2166,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t x0 = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeFloat, x0, v0, 0 });
@@ -2061,7 +2181,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t x0 = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, { typeFloat, x0, v0, 0 });
@@ -2078,7 +2198,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t res = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeV4Float, res, glslSetId, GLSLstd450FAbs, v0 });
@@ -2089,9 +2209,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1, s2;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
-                parseSrc(tokens[pc + 4], s2);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
+                parseOperand(pc + 4, s2);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t v2 = emitLoadSrc(s2);
@@ -2105,7 +2225,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t res = b.allocId();
                 b.emitInst(b.functionDefinitions, SpvOpExtInst, { typeV4Float, res, glslSetId, GLSLstd450Fract, v0 });
@@ -2116,9 +2236,9 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1, s2;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
-                parseSrc(tokens[pc + 4], s2);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
+                parseOperand(pc + 4, s2);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 uint32_t v2 = emitLoadSrc(s2);
@@ -2134,8 +2254,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 /* Ordered component comparisons produce 1.0 or 0.0. */
@@ -2150,7 +2270,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 /* D3D EXP: 2^(src.x), replicated to all components */
                 uint32_t x0 = b.allocId();
@@ -2166,8 +2286,8 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0, s1;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
-                parseSrc(tokens[pc + 3], s1);
+                parseOperand(pc + 2, s0);
+                parseOperand(pc + 3, s1);
                 uint32_t v0 = emitLoadSrc(s0);
                 uint32_t v1 = emitLoadSrc(s1);
                 /* D3D POW: (src0.x)^(src1.x), replicated to all components */
@@ -2188,7 +2308,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 ParsedDest dst;
                 ParsedSrc s0;
                 parseDest(tokens[pc + 1], dst);
-                parseSrc(tokens[pc + 2], s0);
+                parseOperand(pc + 2, s0);
                 uint32_t v0 = emitLoadSrc(s0);
                 /* SM3 SINCOS: dest.x = cos(src.x), dest.y = sin(src.x);
                  * z/w follow TGSI SCS (0.0, 1.0); the dest write mask
@@ -2222,11 +2342,11 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                     b.emitInst(b.functionDefinitions, SpvOpLoad, { typeV4Float, coord, psInTexCoords[samplerIdx] });
                 } else {
                     ParsedSrc s0;
-                    parseSrc(tokens[pc + 2], s0);
+                    parseOperand(pc + 2, s0);
                     coord = emitLoadSrc(s0);
                     if (instLen >= 2) {
                         ParsedSrc s1;
-                        parseSrc(tokens[pc + 3], s1);
+                        parseOperand(pc + 3, s1);
                         samplerIdx = (s1.regNum < 16) ? s1.regNum : 0;
                     } else {
                         samplerIdx = (dst.regNum < 8) ? dst.regNum : 0;
@@ -2295,7 +2415,7 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 case D3DSIO_LOOP:
                 case D3DSIO_IFC: advance = 3; break;
                 case D3DSIO_TEXKILL: case D3DSIO_IF: advance = 2; break;
-                case D3DSIO_MOV:
+                case D3DSIO_MOVA: case D3DSIO_MOV:
                 case D3DSIO_RCP:
                 case D3DSIO_RSQ:
                 case D3DSIO_ABS:
@@ -2356,16 +2476,10 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
         b.emitInst(b.functionDefinitions, SpvOpAccessChain, { ptrOutputV4Float, posPtr, vsGlPerVertex, intConsts[0] });
         b.emitInst(b.functionDefinitions, SpvOpStore, { posPtr, flippedPos });
 
-        /* Vulkan point pipelines require a defined PointSize even when the
-         * guest VS does not write PSIZE. Nonpositive sizes have undefined GL
-         * rasterization; choose one rather than emitting an invalid size. */
-        uint32_t pointValue = b.allocId(), pointX = b.allocId();
-        uint32_t positiveSize = b.allocId(), pointPtr = b.allocId();
-        b.emitInst(b.functionDefinitions, SpvOpLoad, {typeV4Float, pointValue, outPointSizeVar});
-        b.emitInst(b.functionDefinitions, SpvOpCompositeExtract, {typeFloat, pointX, pointValue, 0});
-        b.emitInst(b.functionDefinitions, SpvOpExtInst, {typeFloat, positiveSize, glslSetId, GLSLstd450FMax, pointX, const1_f});
+        // The advertised point-size range is [1,1] until point states/sprites are implemented.
+        uint32_t pointPtr = b.allocId();
         b.emitInst(b.functionDefinitions, SpvOpAccessChain, {ptrOutputFloat, pointPtr, vsGlPerVertex, intConsts[1]});
-        b.emitInst(b.functionDefinitions, SpvOpStore, {pointPtr, positiveSize});
+        b.emitInst(b.functionDefinitions, SpvOpStore, {pointPtr, const1_f});
 
         /* Store front and back color interpolants. */
         for (int c = 0; c < 4; ++c) {

@@ -8,6 +8,11 @@
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static VkResult VKAPI_CALL failSubmit(VkQueue, uint32_t, const VkSubmitInfo *, VkFence) { return VK_ERROR_OUT_OF_HOST_MEMORY; }
 
+static unsigned lostSubmits;
+static VkResult VKAPI_CALL loseSubmit(VkQueue, uint32_t, const VkSubmitInfo *, VkFence) {
+    ++lostSubmits; return VK_ERROR_DEVICE_LOST;
+}
+
 int main() {
     qemu_vmsvga::QemuVmsvgaDevice host;
     CHECK(host.init(false, true));
@@ -93,5 +98,23 @@ int main() {
     dev->backend->dispatch().vkQueueSubmit = savedSubmit;
     host.fifoRun();
     CHECK(fifo[SVGA_FIFO_STOP] == fifo[SVGA_FIFO_NEXT_CMD] && fifo[SVGA_FIFO_FENCE] == 74);
+    // A true device loss is sticky, but UPDATE, screen objects and fences still drain.
+    dev->backend->getActiveCommandBuffer();
+    dev->backend->dispatch().vkQueueSubmit = loseSubmit;
+    host.clearDisplayUpdates();
+    CHECK(run({SVGA_CMD_FENCE,75,SVGA_3D_CMD_CONTEXT_DEFINE,4,999,
+        SVGA_CMD_UPDATE,0,0,1,1,SVGA_CMD_DEFINE_SCREEN,sizeof(SVGAScreenObject),1,0,1,1,0,0,0,0,4,0,
+        SVGA_CMD_FENCE,76},true));
+    CHECK(dev->backend->isDeviceLost() && lostSubmits == 1 && fifo[SVGA_FIFO_FENCE] == 76);
+    CHECK(!dev->contextMgr->getContext(999) && host.displayUpdates().size() == 1);
+    CHECK(dev->backend->getActiveCommandBuffer() == VK_NULL_HANDLE);
+    CHECK(dev->backend->flushCommandBuffer() == SVGA3_VLKN_ERROR_DEVICE_LOST && lostSubmits == 1);
+    dev->backend->dispatch().vkQueueSubmit = savedSubmit;
+    CHECK(svga3_vlkn_context_create(dev,999) == SVGA3_VLKN_ERROR_DEVICE_LOST);
+    CHECK(svga3_vlkn_device_reset(dev) == SVGA3_VLKN_ERROR_DEVICE_LOST);
+    CHECK(dev->backend->waitIdle() == SVGA3_VLKN_ERROR_DEVICE_LOST);
+    CHECK(run({SVGA_CMD_UPDATE,0,0,1,1,SVGA_CMD_FENCE,77},false));
+    CHECK(fifo[SVGA_FIFO_FENCE] == 77 && lostSubmits == 1);
+    std::puts("Sticky device loss retains 2D, screen objects and fence framing: PASS");
     std::puts("Shared FIFO framing, wrapped packets, semantic errors and fence completion: PASS");
 }

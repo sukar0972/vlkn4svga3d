@@ -50,6 +50,58 @@ and instancing divisors are rejected. Unknown and unmapped surface formats,
 including packed/planar YUV, fail definition instead of being replaced with BGRA.
 Stencil clears are ignored on attachments with no stencil aspect.
 
+## Depth bias
+
+`DEPTHBIAS` supplies a normalized offset on D16 and D24 UNORM attachments;
+`SLOPESCALEDEPTHBIAS` supplies the slope factor. Both values are recorded for
+each draw. NaN and infinity are rejected without changing the stored state.
+Draws reject constant offsets whose Vulkan conversion overflows and nonzero
+normalized offsets on floating-point depth attachments. Bias does not prevent
+color rendering when no depth attachment is bound.
+
+The buffer-ordering suite checks stored depth, coplanar pixels, queued draws
+with different offsets, both slope-factor signs, and invalid inputs with Vulkan
+validation enabled through teardown.
+
+## Gamma, relative constants and points
+
+Texture `TS_GAMMA` and render-target `OUTPUTGAMMA` accept float values 1.0
+and 2.2. Gamma 2.2 selects compatible sRGB image views for BGRA/RGBA and
+BC1/BC2/BC3 formats; alpha swizzles and mip selection are preserved. Render
+passes and descriptors retain the selected view, so changing gamma does not
+rewrite a view used by queued draws. Formats without an sRGB twin keep their
+native view.
+
+Shader constant sources support `c[a0.component + offset]` in vertex shaders
+and `c[aL + offset]` inside vertex/pixel loops. MOVA rounds the address value;
+relative loads honor shader DEF constants and return zero for indices outside
+c0–c255 without accessing the remaining uniform bank. Malformed extension
+tokens and relative destinations are rejected. The translator suite validates
+SPIR-V, and buffer-ordering checks rendered values.
+
+The point-size cap is one. Point-size states accept only 1.0, shader PSIZE
+outputs clamp to one, and enabling point sprites fails explicitly. The
+verified-rendering suite checks one covered sample and unchanged position.
+Larger points and sprites remain unsupported.
+
+## Device loss
+
+A Vulkan `VK_ERROR_DEVICE_LOST` result disables the backend for its remaining
+lifetime. Later 3D FIFO packets are framed and dropped with limited logging;
+2D updates, screen objects and fences continue. Direct 3D API calls return
+device-lost, and reset cannot revive the failed Vulkan device. Destroy and
+recreate the device to start a fresh backend. Driver allocations are retained
+until process exit on loss because submission completion cannot be established.
+Other submission errors remain retryable.
+
+`test_fifo_framing` checks loss during submission followed by wrapped 3D,
+UPDATE, screen-object and fence packets. `test_atomic_commands` checks loss
+during command-buffer begin/end and queue/device waits, with no subsequent
+reset, completion-serial advance or submit. `test_preload_fifo` verifies that
+the preload path drains fences and still presents 2D after a renderer failure.
+These deterministic injections do not establish recovery from a physical GPU
+hang; device recreation and guest fault replay remain deferred.
+
 ## Query failure policy
 
 Queries require a successfully created Vulkan query pool. BEGIN, END and WAIT

@@ -841,9 +841,9 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
             }
             if (dev->contextMgr) dev->contextMgr->endAllRenderPasses();
-            if (dev->backend) {
+            if (dev->backend && !dev->backend->isDeviceLost()) {
                 Svga3VlknStatus fst = dev->backend->flushCommandBuffer();
-                if (fst != SVGA3_VLKN_SUCCESS) return fst;
+                if (fst != SVGA3_VLKN_SUCCESS && !dev->backend->isDeviceLost()) return fst;
             }
             *bytesRead = sizeof(uint32_t);
             return SVGA3_VLKN_SUCCESS;
@@ -926,8 +926,16 @@ Svga3VlknStatus svga3_vlkn_fifo_execute(Svga3VlknDevice *dev,
         size_t headerBytes = is3D ? 8 : 4;
         size_t payloadSize = is3D ? read(1) : words * 4 - headerBytes;
         size_t packetRead = 0;
-        Svga3VlknStatus st = svga3_vlkn::processFifoPacket(
-            dev, cmd, ptr + headerBytes, payloadSize, &packetRead);
+        Svga3VlknStatus st;
+        if (is3D && dev->backend->isDeviceLost()) {
+            // Framing is still validated above. Consume entire dropped packets.
+            static uint64_t dropped = 0;
+            if (++dropped <= 3 || dropped % 1024 == 0)
+                log_msg("[libqemu_svga3d] Dropping framed 3D command %u after device loss\n", cmd);
+            st = SVGA3_VLKN_SUCCESS;
+        } else {
+            st = svga3_vlkn::processFifoPacket(dev, cmd, ptr + headerBytes, payloadSize, &packetRead);
+        }
         // Known, framed 2D commands with no core implementation are skipped.
         // Unknown wire IDs were rejected above before advancing anything.
         size_t packetBytes = words * 4;

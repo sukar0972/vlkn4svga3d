@@ -162,7 +162,7 @@ static void TestDeviceLifecycleAndCaps() {
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
                 dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
             const bool signedFormat = dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_V16U16;
-            const uint32_t expected = dc.id == SVGA3D_DEVCAP_MAX_TEXTURES ? 1 : dc.id == SVGA3D_DEVCAP_TEXTURE_OPS ? 9 : signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
+            const uint32_t expected = (dc.id == SVGA3D_DEVCAP_MAX_POINT_SIZE || dc.id == SVGA3D_DEVCAP_MAX_TEXTURES) ? 1 : dc.id == SVGA3D_DEVCAP_TEXTURE_OPS ? 9 : signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
@@ -1219,6 +1219,14 @@ static void TestRenderStatesExhaustive(Svga3VlknDevice *dev) {
                 TEST_CHECK(st == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND, "Unsupported vertex blending rejected");
                 continue;
             }
+            if (rsi.id == SVGA3D_RS_POINTSIZE || rsi.id == SVGA3D_RS_POINTSIZEMIN || rsi.id == SVGA3D_RS_POINTSIZEMAX) {
+                TEST_CHECK(st == (testVal == 0x3f800000 ? SVGA3_VLKN_SUCCESS : SVGA3_VLKN_ERROR_INVALID_PARAM), "Point size limited to advertised range");
+                if (st != SVGA3_VLKN_SUCCESS) continue;
+            }
+            if (rsi.id == SVGA3D_RS_POINTSPRITEENABLE && testVal) {
+                TEST_CHECK(st == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND, "Unsupported point sprites rejected");
+                continue;
+            }
             TEST_CHECK(st == SVGA3_VLKN_SUCCESS, "Set RS " + std::string(rsi.name) + " s" + std::to_string(sweep));
 
             uint32_t readBack = 0;
@@ -1502,7 +1510,7 @@ static void TestFenceWithoutWindow() {
 }
 
 static VkResult VKAPI_CALL failRenameSubmit(VkQueue, uint32_t, const VkSubmitInfo *, VkFence) {
-    return VK_ERROR_DEVICE_LOST;
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
 static PFN_vkDestroyFramebuffer savedDestroyFramebuffer;
@@ -1629,14 +1637,14 @@ static void TestFlushPropagatesWaitFailures() {
 
     const uint64_t serial = backend.completedSubmissionSerial();
     backend.getActiveCommandBuffer();
-    g_injectedWaitResult = VK_ERROR_DEVICE_LOST;
+    g_injectedWaitResult = VK_ERROR_OUT_OF_HOST_MEMORY;
     TEST_CHECK(backend.flushCommandBuffer() == SVGA3_VLKN_ERROR_DEVICE_LOST,
                "Queue wait failure is returned from flush");
     TEST_CHECK(backend.completedSubmissionSerial() == serial,
                "Failed queue wait does not report submission complete");
 
     g_injectedWaitResult = VK_SUCCESS;
-    g_injectedDeviceWaitResult = VK_ERROR_DEVICE_LOST;
+    g_injectedDeviceWaitResult = VK_ERROR_OUT_OF_HOST_MEMORY;
     TEST_CHECK(backend.waitIdle() == SVGA3_VLKN_ERROR_DEVICE_LOST,
                "Device wait failure is returned to caller");
     TEST_CHECK(backend.completedSubmissionSerial() == serial,
@@ -1656,7 +1664,7 @@ static void TestFlushPropagatesWaitFailures() {
 static VkResult VKAPI_CALL failAllSubmits(VkQueue queue, uint32_t count,
                                          const VkSubmitInfo *info, VkFence fence) {
     (void)queue; (void)count; (void)info; (void)fence;
-    return VK_ERROR_DEVICE_LOST;
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
 /* Failure-injection (issue #12): a failed flush must propagate out of the
@@ -1707,7 +1715,7 @@ static void TestSurfaceTransfersPropagateFlushFailures() {
     auto savedDeviceWait = dispatch.vkDeviceWaitIdle;
     g_savedErrorDeviceWait = savedDeviceWait;
     dispatch.vkDeviceWaitIdle = injectDeviceWaitResult;
-    g_injectedDeviceWaitResult = VK_ERROR_DEVICE_LOST;
+    g_injectedDeviceWaitResult = VK_ERROR_OUT_OF_HOST_MEMORY;
     uint32_t result = 0x12345678;
     TEST_CHECK(svga3_vlkn_context_wait_for_query(dev, 9201, SVGA3D_QUERYTYPE_OCCLUSION, &result) == SVGA3_VLKN_ERROR_DEVICE_LOST && result == 0x12345678,
                "Query wait propagates device loss without writing a successful result");
@@ -1721,7 +1729,7 @@ static VkResult VKAPI_CALL failCreateFramebuffer(VkDevice device,
                                                  const VkAllocationCallbacks *alloc,
                                                  VkFramebuffer *framebuffer) {
     (void)device; (void)info; (void)alloc; (void)framebuffer;
-    return VK_ERROR_DEVICE_LOST;
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
 /* Review findings (PR #16): clear()/draw() discarded the
