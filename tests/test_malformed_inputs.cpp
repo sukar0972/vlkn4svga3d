@@ -71,8 +71,17 @@ int main() {
         TEST_CHECK(dev->contextMgr->createContext(8) == SVGA3_VLKN_SUCCESS, "Create state-validation context");
         auto *ctx = dev->contextMgr->getContext(8);
         float matrix[16]{};
-        for (uint32_t id : {uint32_t(SVGA3D_RS_MAX), 0x10000000u, UINT32_MAX})
+        uint32_t retained = 0xabcdef01u;
+        TEST_CHECK(ctx->getRenderState(SVGA3D_RS_COLORWRITEENABLE1, &retained) == SVGA3_VLKN_ERROR_NOT_FOUND && retained == 0xabcdef01u,
+                   "An unset independent color mask remains absent");
+        TEST_CHECK(ctx->setRenderState(SVGA3D_RS_COLORWRITEENABLE1, 0) == SVGA3_VLKN_SUCCESS &&
+                   ctx->getRenderState(SVGA3D_RS_COLORWRITEENABLE1, &retained) == SVGA3_VLKN_SUCCESS && retained == 0,
+                   "An explicitly disabled independent color mask is present");
+        for (uint32_t id : {uint32_t(SVGA3D_RS_MAX), 0x10000000u, UINT32_MAX}) {
             TEST_CHECK(ctx->setRenderState(static_cast<SVGA3dRenderStateName>(id), 7) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject forged render state ID");
+            TEST_CHECK(ctx->getRenderState(static_cast<SVGA3dRenderStateName>(id), &retained) == SVGA3_VLKN_ERROR_NOT_FOUND,
+                       "Forged render state reads remain absent");
+        }
         for (uint32_t id : {uint32_t(SVGA3D_TRANSFORM_MAX), 0x10000000u, UINT32_MAX})
             TEST_CHECK(ctx->setTransform(static_cast<SVGA3dTransformType>(id), matrix) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject forged transform ID");
     }

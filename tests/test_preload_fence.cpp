@@ -38,7 +38,7 @@ int main() {
     *reinterpret_cast<int *>(state+OFFSET_INDEX)=SVGA_REG_CONFIG_DONE;
     orig_io_write=fakeWrite; g_vlkn_initialized=true;
     my_vmsvga_io_write(state,1,1,4);
-    CHECK(fifo[SVGA_FIFO_3D_HWVERSION]==SVGA3D_HWVERSION_WS65_B1 && fifo[SVGA_FIFO_3D_HWVERSION_REVISED]==0x00020000);
+    CHECK(fifo[SVGA_FIFO_3D_HWVERSION]==SVGA3D_HWVERSION_WS8_B1 && fifo[SVGA_FIFO_3D_HWVERSION_REVISED]==0x00020001);
     CHECK((SVGA_CAPABILITIES_VALUE&1)==0);
     g_vlkn_initialized=false;
 

@@ -361,7 +361,19 @@ Svga3VlknStatus VlknSurface::allocate() {
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgInfo.imageType = ((m_depth > 1 || m_volumeImage) && !m_isCubeMap) ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     imgInfo.format = m_vkFormat;
-    if (viewFormat(true) != m_vkFormat) imgInfo.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+    const VkFormat viewFormats[]{m_vkFormat, viewFormat(true)};
+    VkImageFormatListCreateInfo formatList{};
+    if (viewFormats[1] != m_vkFormat) {
+        imgInfo.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+        // Enumerate both supported views so drivers can retain format-specific
+        // tiling/compression while linear and sRGB views share the same pixels.
+        if (m_backend->imageFormatList()) {
+            formatList.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO;
+            formatList.viewFormatCount = 2;
+            formatList.pViewFormats = viewFormats;
+            imgInfo.pNext = &formatList;
+        }
+    }
     imgInfo.extent.width = m_width;
     imgInfo.extent.height = m_height;
     imgInfo.extent.depth = m_depth;

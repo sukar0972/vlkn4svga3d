@@ -88,6 +88,26 @@ class PiglitSummaryTests(unittest.TestCase):
         self.assertEqual(report["svga_unverified_passing_llvmpipe"], ["two"])
         self.assertEqual(report["svga_problems_passing_llvmpipe"], [])
 
+    def test_completed_json_cannot_omit_planned_cases(self):
+        self.save("svga", {"one": "pass"})
+        (self.out / "test-list.txt").write_text("one\ntwo\n")
+        self.assertEqual(self.summarize(["svga"]), 1)
+        report = json.loads((self.out / "summary.json").read_text())
+        self.assertTrue(report["completed"]["svga"])
+        self.assertEqual(report["selection_problems"]["svga"]["missing"], ["two"])
+
+    def test_completed_json_cannot_substitute_another_case(self):
+        self.save("svga", {"one": "pass", "other": "pass"})
+        (self.out / "test-list.txt").write_text("one\ntwo\n")
+        self.assertEqual(self.summarize(["svga"]), 1)
+
+    def test_empty_or_duplicated_plan_fails(self):
+        self.save("svga", {"one": "pass"})
+        for plan in ("", "one\none\n"):
+            with self.subTest(plan=plan):
+                (self.out / "test-list.txt").write_text(plan)
+                self.assertEqual(self.summarize(["svga"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

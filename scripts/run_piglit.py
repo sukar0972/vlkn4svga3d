@@ -59,13 +59,19 @@ def summarize(out, renderers):
     tests = {name: load_results(out / name, planned) for name in renderers}
     report = {"count_unit": "top-level Piglit cases", "counts": {}, "subtest_counts": {},
               "completed": {},
-              "problems": {}, "svga_problems_passing_llvmpipe": [],
+              "problems": {}, "selection_problems": {}, "svga_problems_passing_llvmpipe": [],
               "svga_skips_passing_llvmpipe": [], "svga_unverified_passing_llvmpipe": []}
     failed = False
     for name, cases in tests.items():
         complete = any((out / name / filename).exists() for filename in
                        ("results.json", "results.json.bz2", "results.json.gz"))
         report["completed"][name] = complete
+        if planned is not None:
+            report["selection_problems"][name] = {
+                "missing": sorted(set(planned) - cases.keys()),
+                "unexpected": sorted(cases.keys() - set(planned)),
+            }
+            failed |= not planned or len(planned) != len(set(planned)) or set(planned) != cases.keys()
         counts = Counter(case["result"] for case in cases.values())
         problems = {key: value["result"] for key, value in cases.items()
                     if value["result"] not in {"pass", "skip"}}
@@ -106,13 +112,15 @@ def main():
     parser.add_argument("--last", action="append", help="Run matching cases last; smoke defaults to copyteximage/texsubimage")
     parser.add_argument("--test-timeout", type=int, default=60)
     parser.add_argument("--run-timeout", type=int, default=1800)
+    parser.add_argument("--setup-timeout", type=int, default=30,
+                        help="Timeout for test enumeration and renderer/package setup")
     parser.add_argument("--output", type=Path, help="New local artifact directory")
     args = parser.parse_args()
     if args.extended_state and not args.mesa_driver_path:
         parser.error("--extended-state requires --mesa-driver-path")
     if args.mesa_driver_path and not args.mesa_driver_path.startswith("/"):
         parser.error("--mesa-driver-path must be an absolute path on the test machine")
-    if args.test_timeout < 1 or args.run_timeout < 1:
+    if args.test_timeout < 1 or args.run_timeout < 1 or args.setup_timeout < 1:
         parser.error("timeouts must be positive")
     if args.ssh and (args.ssh.startswith("-") or any(c.isspace() for c in args.ssh)):
         parser.error("--ssh must be a single user@host destination")
@@ -125,7 +133,7 @@ def main():
         return ssh + [args.ssh, shlex.join(argv)] if args.ssh else argv
 
     def capture(argv):
-        return subprocess.check_output(command(argv), text=True, timeout=30)
+        return subprocess.check_output(command(argv), text=True, timeout=args.setup_timeout)
 
     remote = capture(["mktemp", "-d", "/tmp/vlkn-piglit-XXXXXXXX"]).strip() if args.ssh else str(out)
     renderers = ["svga", "llvmpipe"] if args.renderer == "compare" else [args.renderer]
@@ -149,7 +157,7 @@ def main():
         (out / "system.txt").write_text(capture(["uname", "-a"]))
         with (out / "packages.txt").open("w") as log:
             subprocess.run(command(["dpkg-query", "-W", "piglit", "libgl1-mesa-dri"]),
-                           stdout=log, stderr=subprocess.STDOUT, timeout=30)
+                           stdout=log, stderr=subprocess.STDOUT, timeout=args.setup_timeout)
         selection = []
         for pattern in filters:
             selection += ["-t", pattern]
@@ -166,7 +174,7 @@ def main():
         if args.ssh:
             subprocess.run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
                             str(test_list), f"{args.ssh}:{remote}/test-list.txt"],
-                           check=True, timeout=30)
+                            check=True, timeout=args.setup_timeout)
         selection = ["--test-list", f"{remote}/test-list.txt"]
         runner_errors = {}
         for renderer in renderers:
@@ -183,7 +191,7 @@ def main():
                 driver = args.mesa_driver_path.rstrip("/") + "/vmwgfx_dri.so"
                 (out / "svga-mesa-driver-sha256.txt").write_text(capture(["sha256sum", driver]))
                 loading = subprocess.run(command(env + ["LD_DEBUG=files", "glxinfo", "-B"]),
-                                         capture_output=True, text=True, timeout=30)
+                                         capture_output=True, text=True, timeout=args.setup_timeout)
                 (out / "svga-mesa-loader.log").write_text(loading.stderr)
                 if loading.returncode or not any(driver in line and "generating link map" in line
                                                  for line in loading.stderr.splitlines()):

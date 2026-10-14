@@ -742,57 +742,57 @@ VlknContext::~VlknContext() {
 }
 
 void VlknContext::initDefaultRenderStates() {
-    m_renderStates[SVGA3D_RS_ZENABLE] = 1;
-    m_renderStates[SVGA3D_RS_ZWRITEENABLE] = 1;
-    m_renderStates[SVGA3D_RS_ZFUNC] = SVGA3D_CMP_LESSEQUAL;
-    m_renderStates[SVGA3D_RS_ALPHATESTENABLE] = 0;
-    m_renderStates[SVGA3D_RS_ALPHAFUNC] = SVGA3D_CMP_ALWAYS;
-    m_renderStates[SVGA3D_RS_ALPHAREF] = 0;
-    m_renderStates[SVGA3D_RS_SRCBLEND] = SVGA3D_BLENDOP_ONE;
-    m_renderStates[SVGA3D_RS_DSTBLEND] = SVGA3D_BLENDOP_ZERO;
-    m_renderStates[SVGA3D_RS_CULLMODE] = SVGA3D_FACE_BACK;
-    m_renderStates[SVGA3D_RS_DITHERENABLE] = 0;
-    m_renderStates[SVGA3D_RS_BLENDENABLE] = 0;
-    m_renderStates[SVGA3D_RS_BLENDCOLOR] = 0xFFFFFFFF;
-    m_renderStates[SVGA3D_RS_FOGENABLE] = 0;
-    m_renderStates[SVGA3D_RS_SPECULARENABLE] = 0;
-    m_renderStates[SVGA3D_RS_STENCILENABLE] = 0;
-    m_renderStates[SVGA3D_RS_STENCILFAIL] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_STENCILZFAIL] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_STENCILPASS] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_STENCILFUNC] = SVGA3D_CMP_ALWAYS;
-    m_renderStates[SVGA3D_RS_STENCILREF] = 0;
-    m_renderStates[SVGA3D_RS_STENCILMASK] = 0xFFFFFFFF;
-    m_renderStates[SVGA3D_RS_STENCILWRITEMASK] = 0xFFFFFFFF;
-    m_renderStates[SVGA3D_RS_STENCILENABLE2SIDED] = 0;
-    m_renderStates[SVGA3D_RS_CCWSTENCILFUNC] = SVGA3D_CMP_ALWAYS;
-    m_renderStates[SVGA3D_RS_CCWSTENCILFAIL] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_CCWSTENCILZFAIL] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_CCWSTENCILPASS] = SVGA3D_STENCILOP_KEEP;
-    m_renderStates[SVGA3D_RS_TEXTUREFACTOR] = 0xFFFFFFFF;
-    m_renderStates[SVGA3D_RS_CLIPPING] = 1;
-    m_renderStates[SVGA3D_RS_LINEWIDTH] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_LIGHTINGENABLE] = 0;
-    m_renderStates[SVGA3D_RS_AMBIENT] = 0;
-    m_renderStates[SVGA3D_RS_COLORWRITEENABLE] = 0xF; /* RGBA */
-    m_renderStates[SVGA3D_RS_BLENDEQUATION] = SVGA3D_BLENDEQ_ADD;
-    m_renderStates[SVGA3D_RS_SCISSORTESTENABLE] = 0;
-    m_renderStates[SVGA3D_RS_POINTSIZE] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_POINTSIZEMIN] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_POINTSIZEMAX] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_POINTSPRITEENABLE] = 0;
-    m_renderStates[SVGA3D_RS_OUTPUTGAMMA] = 0x3f800000;
-    m_renderStates[SVGA3D_RS_SLOPESCALEDEPTHBIAS] = 0;
-    m_renderStates[SVGA3D_RS_DEPTHBIAS] = 0;
-    m_renderStates[SVGA3D_RS_SEPARATEALPHABLENDENABLE] = 0;
-    m_renderStates[SVGA3D_RS_SRCBLENDALPHA] = SVGA3D_BLENDOP_ONE;
-    m_renderStates[SVGA3D_RS_DSTBLENDALPHA] = SVGA3D_BLENDOP_ZERO;
-    m_renderStates[SVGA3D_RS_BLENDEQUATIONALPHA] = SVGA3D_BLENDEQ_ADD;
+    renderState(SVGA3D_RS_ZENABLE) = 1;
+    renderState(SVGA3D_RS_ZWRITEENABLE) = 1;
+    renderState(SVGA3D_RS_ZFUNC) = SVGA3D_CMP_LESSEQUAL;
+    renderState(SVGA3D_RS_ALPHATESTENABLE) = 0;
+    renderState(SVGA3D_RS_ALPHAFUNC) = SVGA3D_CMP_ALWAYS;
+    renderState(SVGA3D_RS_ALPHAREF) = 0;
+    renderState(SVGA3D_RS_SRCBLEND) = SVGA3D_BLENDOP_ONE;
+    renderState(SVGA3D_RS_DSTBLEND) = SVGA3D_BLENDOP_ZERO;
+    renderState(SVGA3D_RS_CULLMODE) = SVGA3D_FACE_BACK;
+    renderState(SVGA3D_RS_DITHERENABLE) = 0;
+    renderState(SVGA3D_RS_BLENDENABLE) = 0;
+    renderState(SVGA3D_RS_BLENDCOLOR) = 0xFFFFFFFF;
+    renderState(SVGA3D_RS_FOGENABLE) = 0;
+    renderState(SVGA3D_RS_SPECULARENABLE) = 0;
+    renderState(SVGA3D_RS_STENCILENABLE) = 0;
+    renderState(SVGA3D_RS_STENCILFAIL) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_STENCILZFAIL) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_STENCILPASS) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_STENCILFUNC) = SVGA3D_CMP_ALWAYS;
+    renderState(SVGA3D_RS_STENCILREF) = 0;
+    renderState(SVGA3D_RS_STENCILMASK) = 0xFFFFFFFF;
+    renderState(SVGA3D_RS_STENCILWRITEMASK) = 0xFFFFFFFF;
+    renderState(SVGA3D_RS_STENCILENABLE2SIDED) = 0;
+    renderState(SVGA3D_RS_CCWSTENCILFUNC) = SVGA3D_CMP_ALWAYS;
+    renderState(SVGA3D_RS_CCWSTENCILFAIL) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_CCWSTENCILZFAIL) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_CCWSTENCILPASS) = SVGA3D_STENCILOP_KEEP;
+    renderState(SVGA3D_RS_TEXTUREFACTOR) = 0xFFFFFFFF;
+    renderState(SVGA3D_RS_CLIPPING) = 1;
+    renderState(SVGA3D_RS_LINEWIDTH) = 0x3f800000;
+    renderState(SVGA3D_RS_LIGHTINGENABLE) = 0;
+    renderState(SVGA3D_RS_AMBIENT) = 0;
+    renderState(SVGA3D_RS_COLORWRITEENABLE) = 0xF; /* RGBA */
+    renderState(SVGA3D_RS_BLENDEQUATION) = SVGA3D_BLENDEQ_ADD;
+    renderState(SVGA3D_RS_SCISSORTESTENABLE) = 0;
+    renderState(SVGA3D_RS_POINTSIZE) = 0x3f800000;
+    renderState(SVGA3D_RS_POINTSIZEMIN) = 0x3f800000;
+    renderState(SVGA3D_RS_POINTSIZEMAX) = 0x3f800000;
+    renderState(SVGA3D_RS_POINTSPRITEENABLE) = 0;
+    renderState(SVGA3D_RS_OUTPUTGAMMA) = 0x3f800000;
+    renderState(SVGA3D_RS_SLOPESCALEDEPTHBIAS) = 0;
+    renderState(SVGA3D_RS_DEPTHBIAS) = 0;
+    renderState(SVGA3D_RS_SEPARATEALPHABLENDENABLE) = 0;
+    renderState(SVGA3D_RS_SRCBLENDALPHA) = SVGA3D_BLENDOP_ONE;
+    renderState(SVGA3D_RS_DSTBLENDALPHA) = SVGA3D_BLENDOP_ZERO;
+    renderState(SVGA3D_RS_BLENDEQUATIONALPHA) = SVGA3D_BLENDEQ_ADD;
 
     SVGA3dFillMode fm = {};
     fm.s.mode = SVGA3D_FILLMODE_FILL;
     fm.s.face = SVGA3D_FACE_FRONT_BACK;
-    m_renderStates[SVGA3D_RS_FILLMODE] = fm.uintValue;
+    renderState(SVGA3D_RS_FILLMODE) = fm.uintValue;
 }
 
 Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_t value) {
@@ -837,17 +837,16 @@ Svga3VlknStatus VlknContext::setRenderState(SVGA3dRenderStateName state, uint32_
     if (state == SVGA3D_RS_OUTPUTGAMMA) {
         float gamma; memcpy(&gamma, &value, sizeof(gamma));
         if (!std::isfinite(gamma) || (gamma != 1.0f && std::fabs(gamma - 2.2f) > 0.001f)) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-        if (m_renderStates[state] != value) endRenderPassIfActive();
+        if (renderState(state) != value) endRenderPassIfActive();
     }
-    m_renderStates[(uint32_t)state] = value;
+    renderState((uint32_t)state) = value;
     return SVGA3_VLKN_SUCCESS;
 }
 
 Svga3VlknStatus VlknContext::getRenderState(SVGA3dRenderStateName state, uint32_t *outValue) const {
     if (!outValue) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    auto it = m_renderStates.find((uint32_t)state);
-    if (it != m_renderStates.end()) {
-        *outValue = it->second;
+    if (uint32_t(state) < SVGA3D_RS_MAX && m_renderStatesPresent.test(uint32_t(state))) {
+        *outValue = m_renderStates[uint32_t(state)];
         return SVGA3_VLKN_SUCCESS;
     }
     return SVGA3_VLKN_ERROR_NOT_FOUND;
@@ -1038,7 +1037,7 @@ Svga3VlknStatus VlknContext::setViewport(const SVGA3dRect *rect) {
     m_viewport.height = (float)rect->h;
     m_viewport.minDepth = m_zRange.min;
     m_viewport.maxDepth = m_zRange.max;
-    if (!m_scissorExplicit && !m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) {
+    if (!m_scissorExplicit && !renderState(SVGA3D_RS_SCISSORTESTENABLE)) {
         m_scissor.offset.x = rect->x;
         m_scissor.offset.y = rect->y;
         m_scissor.extent.width = rect->w;
@@ -1435,6 +1434,8 @@ Svga3VlknStatus VlknContext::setShaderConst(uint32_t reg, SVGA3dShaderType type,
 
     if (ctype == SVGA3D_CONST_TYPE_FLOAT) {
         if (reg >= 256) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        if (memcmp(bank.floatConsts[reg], values, sizeof(bank.floatConsts[reg])) == 0)
+            return SVGA3_VLKN_SUCCESS;
         const float *f = reinterpret_cast<const float*>(values);
         bank.floatConsts[reg][0] = f[0];
         bank.floatConsts[reg][1] = f[1];
@@ -1442,6 +1443,8 @@ Svga3VlknStatus VlknContext::setShaderConst(uint32_t reg, SVGA3dShaderType type,
         bank.floatConsts[reg][3] = f[3];
     } else if (ctype == SVGA3D_CONST_TYPE_INT) {
         if (reg >= 16) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        if (memcmp(bank.intConsts[reg], values, sizeof(bank.intConsts[reg])) == 0)
+            return SVGA3_VLKN_SUCCESS;
         const int32_t *i = reinterpret_cast<const int32_t*>(values);
         bank.intConsts[reg][0] = i[0];
         bank.intConsts[reg][1] = i[1];
@@ -1449,6 +1452,8 @@ Svga3VlknStatus VlknContext::setShaderConst(uint32_t reg, SVGA3dShaderType type,
         bank.intConsts[reg][3] = i[3];
     } else if (ctype == SVGA3D_CONST_TYPE_BOOL) {
         if (reg >= 16) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        if (((bank.boolConsts >> reg) & 1u) == (values[0] != 0))
+            return SVGA3_VLKN_SUCCESS;
         if (values[0]) {
             bank.boolConsts |= (1u << reg);
         } else {
@@ -1591,8 +1596,8 @@ Svga3VlknStatus VlknContext::ensureRenderPassActive() {
         if (!colorSurfs[i]) continue;
         anyColor = true;
         float outputGamma = 1.0f;
-        auto gammaState = m_renderStates.find(SVGA3D_RS_OUTPUTGAMMA);
-        if (gammaState != m_renderStates.end()) memcpy(&outputGamma, &gammaState->second, sizeof(outputGamma));
+        if (m_renderStatesPresent.test(SVGA3D_RS_OUTPUTGAMMA))
+            memcpy(&outputGamma, &m_renderStates[SVGA3D_RS_OUTPUTGAMMA], sizeof(outputGamma));
         bool srgb = std::fabs(outputGamma - 2.2f) <= 0.001f;
         colorFormats[i] = colorSurfs[i]->viewFormat(srgb);
         colorViews[i] = colorSurfs[i]->getRenderTargetView(m_renderTargets[i].mipmap, m_renderTargets[i].face, srgb);
@@ -1894,7 +1899,7 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
 
     auto clippedClearRect = [&](VkRect2D rect) {
         rect = clipToFramebuffer(rect,m_fbWidth,m_fbHeight);
-        if (!m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) return rect;
+        if (!renderState(SVGA3D_RS_SCISSORTESTENABLE)) return rect;
         auto scissor = clipToFramebuffer(m_scissor,m_fbWidth,m_fbHeight);
         int64_t left = std::max(rect.offset.x, scissor.offset.x);
         int64_t top = std::max(rect.offset.y, scissor.offset.y);
@@ -1953,33 +1958,33 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         key.pretransformed |= decls[i].identity.usage == SVGA3D_DECLUSAGE_POSITIONT;
 
     SVGA3dFillMode fm;
-    fm.uintValue = m_renderStates[SVGA3D_RS_FILLMODE];
+    fm.uintValue = renderState(SVGA3D_RS_FILLMODE);
     key.fillMode = m_backend->features().fillModeNonSolid ? fm.s.mode : uint32_t(SVGA3D_FILLMODE_FILL);
 
     bool hasDepthAttachment = (m_depthStencilTarget.sid != SVGA3D_INVALID_ID && m_depthStencilTarget.sid != 0);
-    key.cullMode = m_renderStates[SVGA3D_RS_CULLMODE];
-    key.depthClamp = !m_renderStates[SVGA3D_RS_CLIPPING] && m_backend->features().depthClamp;
-    key.lineWidthBits = m_renderStates[SVGA3D_RS_LINEWIDTH];
-    key.depthTestEnable = hasDepthAttachment ? m_renderStates[SVGA3D_RS_ZENABLE] : 0;
+    key.cullMode = renderState(SVGA3D_RS_CULLMODE);
+    key.depthClamp = !renderState(SVGA3D_RS_CLIPPING) && m_backend->features().depthClamp;
+    key.lineWidthBits = renderState(SVGA3D_RS_LINEWIDTH);
+    key.depthTestEnable = hasDepthAttachment ? renderState(SVGA3D_RS_ZENABLE) : 0;
     key.depthBiasEnable = hasDepthAttachment &&
-        ((m_renderStates[SVGA3D_RS_DEPTHBIAS] & 0x7fffffffu) ||
-         (m_renderStates[SVGA3D_RS_SLOPESCALEDEPTHBIAS] & 0x7fffffffu));
-    key.depthWriteEnable = hasDepthAttachment ? m_renderStates[SVGA3D_RS_ZWRITEENABLE] : 0;
-    key.depthFunc = m_renderStates[SVGA3D_RS_ZFUNC];
-    key.blendEnable = m_renderStates[SVGA3D_RS_BLENDENABLE];
-    key.srcColorBlend = m_renderStates[SVGA3D_RS_SRCBLEND];
-    key.dstColorBlend = m_renderStates[SVGA3D_RS_DSTBLEND];
-    key.colorBlendEq = m_renderStates[SVGA3D_RS_BLENDEQUATION];
+        ((renderState(SVGA3D_RS_DEPTHBIAS) & 0x7fffffffu) ||
+         (renderState(SVGA3D_RS_SLOPESCALEDEPTHBIAS) & 0x7fffffffu));
+    key.depthWriteEnable = hasDepthAttachment ? renderState(SVGA3D_RS_ZWRITEENABLE) : 0;
+    key.depthFunc = renderState(SVGA3D_RS_ZFUNC);
+    key.blendEnable = renderState(SVGA3D_RS_BLENDENABLE);
+    key.srcColorBlend = renderState(SVGA3D_RS_SRCBLEND);
+    key.dstColorBlend = renderState(SVGA3D_RS_DSTBLEND);
+    key.colorBlendEq = renderState(SVGA3D_RS_BLENDEQUATION);
     /* D3D9 semantics: when SEPARATEALPHABLENDENABLE is off, the alpha
      * blend uses the color factors/equation and the *ALPHA states are
      * ignored. Guests that drive non-separate blending (e.g. Mesa's
      * SVGA backend) only emit the *ALPHA states when separate blending
      * is on, so reading them unconditionally would blend alpha with
      * stale or default factors. */
-    if (m_renderStates[SVGA3D_RS_SEPARATEALPHABLENDENABLE]) {
-        key.srcAlphaBlend = m_renderStates[SVGA3D_RS_SRCBLENDALPHA];
-        key.dstAlphaBlend = m_renderStates[SVGA3D_RS_DSTBLENDALPHA];
-        key.alphaBlendEq = m_renderStates[SVGA3D_RS_BLENDEQUATIONALPHA];
+    if (renderState(SVGA3D_RS_SEPARATEALPHABLENDENABLE)) {
+        key.srcAlphaBlend = renderState(SVGA3D_RS_SRCBLENDALPHA);
+        key.dstAlphaBlend = renderState(SVGA3D_RS_DSTBLENDALPHA);
+        key.alphaBlendEq = renderState(SVGA3D_RS_BLENDEQUATIONALPHA);
     } else {
         key.srcAlphaBlend = key.srcColorBlend;
         key.dstAlphaBlend = key.dstColorBlend;
@@ -1987,21 +1992,21 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     }
     VlknSurface *depthSurf = (hasDepthAttachment && m_surfaceMgr) ? m_surfaceMgr->getSurface(m_depthStencilTarget.sid) : nullptr;
     bool depthHasStencil = depthSurf ? svga3_format_has_stencil(depthSurf->svgaFormat()) : false;
-    key.stencilEnable = (hasDepthAttachment && depthHasStencil) ? m_renderStates[SVGA3D_RS_STENCILENABLE] : 0;
+    key.stencilEnable = (hasDepthAttachment && depthHasStencil) ? renderState(SVGA3D_RS_STENCILENABLE) : 0;
     if (key.stencilEnable) {
-        key.stencilFunc = m_renderStates[SVGA3D_RS_STENCILFUNC];
-        key.stencilFail = m_renderStates[SVGA3D_RS_STENCILFAIL];
-        key.stencilZFail = m_renderStates[SVGA3D_RS_STENCILZFAIL];
-        key.stencilPass = m_renderStates[SVGA3D_RS_STENCILPASS];
-        key.stencilRef = m_renderStates[SVGA3D_RS_STENCILREF];
-        key.stencilMask = m_renderStates[SVGA3D_RS_STENCILMASK];
-        key.stencilWriteMask = m_renderStates[SVGA3D_RS_STENCILWRITEMASK];
-        key.stencil2Sided = m_renderStates[SVGA3D_RS_STENCILENABLE2SIDED];
+        key.stencilFunc = renderState(SVGA3D_RS_STENCILFUNC);
+        key.stencilFail = renderState(SVGA3D_RS_STENCILFAIL);
+        key.stencilZFail = renderState(SVGA3D_RS_STENCILZFAIL);
+        key.stencilPass = renderState(SVGA3D_RS_STENCILPASS);
+        key.stencilRef = renderState(SVGA3D_RS_STENCILREF);
+        key.stencilMask = renderState(SVGA3D_RS_STENCILMASK);
+        key.stencilWriteMask = renderState(SVGA3D_RS_STENCILWRITEMASK);
+        key.stencil2Sided = renderState(SVGA3D_RS_STENCILENABLE2SIDED);
         if (key.stencil2Sided) {
-            key.ccwStencilFunc = m_renderStates[SVGA3D_RS_CCWSTENCILFUNC];
-            key.ccwStencilFail = m_renderStates[SVGA3D_RS_CCWSTENCILFAIL];
-            key.ccwStencilZFail = m_renderStates[SVGA3D_RS_CCWSTENCILZFAIL];
-            key.ccwStencilPass = m_renderStates[SVGA3D_RS_CCWSTENCILPASS];
+            key.ccwStencilFunc = renderState(SVGA3D_RS_CCWSTENCILFUNC);
+            key.ccwStencilFail = renderState(SVGA3D_RS_CCWSTENCILFAIL);
+            key.ccwStencilZFail = renderState(SVGA3D_RS_CCWSTENCILZFAIL);
+            key.ccwStencilPass = renderState(SVGA3D_RS_CCWSTENCILPASS);
             key.ccwStencilRef = key.stencilRef;
             key.ccwStencilMask = key.stencilMask;
             key.ccwStencilWriteMask = key.stencilWriteMask;
@@ -2017,11 +2022,11 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
             unpack(key.stencilWriteMask, key.ccwStencilWriteMask);
         }
     }
-    key.colorWriteMask[0] = m_renderStates[SVGA3D_RS_COLORWRITEENABLE];
+    key.colorWriteMask[0] = renderState(SVGA3D_RS_COLORWRITEENABLE);
     for (uint32_t i = 1; i < 4; ++i) {
-        const auto mask = m_renderStates.find(SVGA3D_RS_COLORWRITEENABLE1 + i - 1);
+        const uint32_t state = SVGA3D_RS_COLORWRITEENABLE1 + i - 1;
         // Legacy Mesa emits one mask for the whole framebuffer.
-        key.colorWriteMask[i] = mask == m_renderStates.end() ? key.colorWriteMask[0] : mask->second;
+        key.colorWriteMask[i] = m_renderStatesPresent.test(state) ? m_renderStates[state] : key.colorWriteMask[0];
     }
     for (uint32_t i = 0; i < 4; ++i) {
         const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
@@ -2072,10 +2077,10 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
         }
     }
     key.ffTextureStage0 = useFfTex ? (hasVertexColor ? 1 : 2) : 0;
-    if (m_renderStates[SVGA3D_RS_ALPHATESTENABLE]) {
+    if (renderState(SVGA3D_RS_ALPHATESTENABLE)) {
         key.alphaTestEnable = 1;
-        key.alphaFunc = m_renderStates[SVGA3D_RS_ALPHAFUNC];
-        key.alphaRef = m_renderStates[SVGA3D_RS_ALPHAREF];
+        key.alphaFunc = renderState(SVGA3D_RS_ALPHAFUNC);
+        key.alphaRef = renderState(SVGA3D_RS_ALPHAREF);
     } else {
         key.alphaTestEnable = 0;
         key.alphaFunc = SVGA3D_CMP_ALWAYS;
@@ -2096,7 +2101,6 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
     /* Create Graphics Pipeline */
     VkGraphicsPipelineCreateInfo pipeInfo = {};
     pipeInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-
     /* Shader stages */
     VkPipelineShaderStageCreateInfo stages[2] = {};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2481,8 +2485,8 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     if (!numRanges) return SVGA3_VLKN_SUCCESS;
     auto *depthBiasTarget = m_surfaceMgr ? m_surfaceMgr->getSurface(m_depthStencilTarget.sid) : nullptr;
     float normalizedBias, slopeBias;
-    memcpy(&normalizedBias, &m_renderStates[SVGA3D_RS_DEPTHBIAS], sizeof(normalizedBias));
-    memcpy(&slopeBias, &m_renderStates[SVGA3D_RS_SLOPESCALEDEPTHBIAS], sizeof(slopeBias));
+    memcpy(&normalizedBias, &renderState(SVGA3D_RS_DEPTHBIAS), sizeof(normalizedBias));
+    memcpy(&slopeBias, &renderState(SVGA3D_RS_SLOPESCALEDEPTHBIAS), sizeof(slopeBias));
     float constantBias = 0.0f;
     if (depthBiasTarget && normalizedBias != 0.0f) {
         if (normalizedDepthBiasFactor(1.0f, depthBiasTarget->vkFormat()) == 0.0f) {
@@ -2498,7 +2502,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     static const bool traceFifo = std::getenv("SVGA3_VLKN_TRACE_FIFO") != nullptr;
     if (traceFifo) {
         fprintf(stderr, "[draw-state] cullMode=%u (1=NONE,2=FRONT,3=BACK)\n",
-                m_renderStates[SVGA3D_RS_CULLMODE]);
+                renderState(SVGA3D_RS_CULLMODE));
         fprintf(stderr, "[draw-state] viewport=(%g,%g %gx%g) scissor=(%d,%d %ux%u) rt0=%u\n",
                 m_viewport.x, m_viewport.y, m_viewport.width, m_viewport.height,
                 m_scissor.offset.x, m_scissor.offset.y,
@@ -2835,73 +2839,74 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     /* Framebuffer/buffer changes above can submit previous work. Allocate
      * constants after those submissions, so the next draw cannot reset the
      * ring over a slot allocated before the submission but bound afterward. */
-    /* 1. Update Constant Buffers (UBOs)
-     * Upload on EVERY draw, not only when the guest resent constants.
-     * A draw that skips the upload binds the previous draw's ring slot;
-     * when the epoch later resets (any submission completes), the next
-     * upload rewrites that slot while the skipping draw may still be
-     * recorded-but-unsubmitted, so it executes with another draw's
-     * constants. A private slot per draw removes the aliasing; the
-     * ring-full path below already submits+waits before any reuse. */
+    /* Unchanged programmable constants may share an immutable ring slice
+     * within one submission epoch. Completion invalidates that slice before
+     * the cursor resets, so a queued draw cannot retain a slot that the next
+     * update overwrites. Fixed-function/POSITIONT draws still upload their
+     * derived matrix and viewport constants on every draw. */
     {
         if (m_constantRingMapped && m_constantRingBuffer) {
             const uint64_t submissionSerial = m_backend->completedSubmissionSerial();
             if (submissionSerial != m_constantRingSubmissionSerial) {
                 m_constantRingCursor = 0;
                 m_constantRingSubmissionSerial = submissionSerial;
+                m_constantsDirty = true;
             }
-            const size_t slotSize = m_constantRingStride * 2;
-            if (m_constantRingCursor + slotSize > m_constantRingSize) {
-                /* The ring is full. Submit and wait before reusing any slice. */
-                endRenderPassIfActive();
-                Svga3VlknStatus fst = m_backend->flushCommandBuffer();
-                if (fst != SVGA3_VLKN_SUCCESS) return fst;
-                m_constantRingCursor = 0;
-                m_constantRingSubmissionSerial = m_backend->completedSubmissionSerial();
-                rpStatus = ensureRenderPassActive();
-                if (rpStatus != SVGA3_VLKN_SUCCESS) return rpStatus;
-            }
+            if (m_constantsDirty || m_boundVS == SVGA3D_INVALID_ID || pretransformed) {
+                const size_t slotSize = m_constantRingStride * 2;
+                if (m_constantRingCursor + slotSize > m_constantRingSize) {
+                    /* The ring is full. Submit and wait before reusing any slice. */
+                    endRenderPassIfActive();
+                    Svga3VlknStatus fst = m_backend->flushCommandBuffer();
+                    if (fst != SVGA3_VLKN_SUCCESS) return fst;
+                    m_constantRingCursor = 0;
+                    m_constantRingSubmissionSerial = m_backend->completedSubmissionSerial();
+                    rpStatus = ensureRenderPassActive();
+                    if (rpStatus != SVGA3_VLKN_SUCCESS) return rpStatus;
+                    m_constantRingSubmissionSerial = m_backend->completedSubmissionSerial();
+                }
 
-            const size_t vsOffset = m_constantRingCursor;
-            const size_t psOffset = vsOffset + m_constantRingStride;
-            uint8_t *mapped = static_cast<uint8_t*>(m_constantRingMapped);
-            if (m_boundVS == SVGA3D_INVALID_ID || pretransformed) {
-                float tempConsts[256][4];
-                memcpy(tempConsts, m_vsConsts.floatConsts, sizeof(tempConsts));
-                for (int col = 0; col < 4; ++col) {
-                    for (int row = 0; row < 4; ++row) {
-                        tempConsts[col][row] = ffMvp[row * 4 + col];
+                const size_t vsOffset = m_constantRingCursor;
+                const size_t psOffset = vsOffset + m_constantRingStride;
+                uint8_t *mapped = static_cast<uint8_t*>(m_constantRingMapped);
+                if (m_boundVS == SVGA3D_INVALID_ID || pretransformed) {
+                    float tempConsts[256][4];
+                    memcpy(tempConsts, m_vsConsts.floatConsts, sizeof(tempConsts));
+                    for (int col = 0; col < 4; ++col) {
+                        for (int row = 0; row < 4; ++row) {
+                            tempConsts[col][row] = ffMvp[row * 4 + col];
+                        }
                     }
+                    if (pretransformed) {
+                        const float sx = 2.0f/m_viewport.width, sy = -2.0f/m_viewport.height;
+                        const float range = m_viewport.maxDepth - m_viewport.minDepth;
+                        const float sz = range != 0 ? 1.0f/range : 0.0f;
+                        const float scale[4] = {sx,sy,sz,0};
+                        const float bias[4] = {(.5f-m_viewport.x)*sx-1,
+                            (.5f-m_viewport.y)*sy+1,-m_viewport.minDepth*sz,1};
+                        memcpy(tempConsts[4],scale,sizeof(scale)); memcpy(tempConsts[5],bias,sizeof(bias));
+                    }
+                    memcpy(mapped + vsOffset, tempConsts, sizeof(tempConsts));
+                    m_lastFfMvp = ffMvp;
+                    m_vsConstsUploadedForFf = true;
+                } else {
+                    memcpy(mapped + vsOffset, m_vsConsts.floatConsts, sizeof(m_vsConsts.floatConsts));
+                    m_vsConstsUploadedForFf = false;
                 }
-                if (pretransformed) {
-                    const float sx = 2.0f/m_viewport.width, sy = -2.0f/m_viewport.height;
-                    const float range = m_viewport.maxDepth - m_viewport.minDepth;
-                    const float sz = range != 0 ? 1.0f/range : 0.0f;
-                    const float scale[4] = {sx,sy,sz,0};
-                    const float bias[4] = {(.5f-m_viewport.x)*sx-1,
-                        (.5f-m_viewport.y)*sy+1,-m_viewport.minDepth*sz,1};
-                    memcpy(tempConsts[4],scale,sizeof(scale)); memcpy(tempConsts[5],bias,sizeof(bias));
-                }
-                memcpy(mapped + vsOffset, tempConsts, sizeof(tempConsts));
-                m_lastFfMvp = ffMvp;
-                m_vsConstsUploadedForFf = true;
-            } else {
-                memcpy(mapped + vsOffset, m_vsConsts.floatConsts, sizeof(m_vsConsts.floatConsts));
-                m_vsConstsUploadedForFf = false;
+                memcpy(mapped + psOffset, m_psConsts.floatConsts, sizeof(m_psConsts.floatConsts));
+                auto uploadIntegerBanks=[&](size_t offset,const ShaderConstantBank &bank) {
+                    memcpy(mapped+offset+kShaderIntOffset*16,bank.intConsts,sizeof(bank.intConsts));
+                    for (unsigned reg=0;reg<16;++reg) {
+                        uint32_t enabled=(bank.boolConsts>>reg)&1;
+                        uint32_t vector[4]{enabled,enabled,enabled,enabled};
+                        memcpy(mapped+offset+(kShaderBoolOffset+reg)*16,vector,sizeof(vector));
+                    }
+                };
+                uploadIntegerBanks(vsOffset,m_vsConsts); uploadIntegerBanks(psOffset,m_psConsts);
+                m_vsConstDynamicOffset = static_cast<uint32_t>(vsOffset);
+                m_psConstDynamicOffset = static_cast<uint32_t>(psOffset);
+                m_constantRingCursor += slotSize;
             }
-            memcpy(mapped + psOffset, m_psConsts.floatConsts, sizeof(m_psConsts.floatConsts));
-            auto uploadIntegerBanks=[&](size_t offset,const ShaderConstantBank &bank) {
-                memcpy(mapped+offset+kShaderIntOffset*16,bank.intConsts,sizeof(bank.intConsts));
-                for (unsigned reg=0;reg<16;++reg) {
-                    uint32_t enabled=(bank.boolConsts>>reg)&1;
-                    uint32_t vector[4]{enabled,enabled,enabled,enabled};
-                    memcpy(mapped+offset+(kShaderBoolOffset+reg)*16,vector,sizeof(vector));
-                }
-            };
-            uploadIntegerBanks(vsOffset,m_vsConsts); uploadIntegerBanks(psOffset,m_psConsts);
-            m_vsConstDynamicOffset = static_cast<uint32_t>(vsOffset);
-            m_psConstDynamicOffset = static_cast<uint32_t>(psOffset);
-            m_constantRingCursor += slotSize;
         }
         m_constantsDirty = false;
     }
@@ -2919,7 +2924,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     if (shouldLogDraw) {
         bool useFfTex = (m_boundPS == SVGA3D_INVALID_ID && m_stages[0].combinerEnabled && m_stages[0].sid != SVGA3D_INVALID_ID && m_stages[0].sid != 0 && m_surfaceMgr->getSurface(m_stages[0].sid) != nullptr);
         log_msg("[libqemu_svga3d] ctx::draw #%u (cid=%u): boundVS=%u, boundPS=%u, useFfTex=%d, stage0.sid=%u, rtSid=%u, cull=%u, vp=(%.1f,%.1f %.1fx%.1f)\n",
-                m_drawCount + 1, m_cid, m_boundVS, m_boundPS, (int)useFfTex, m_stages[0].sid, m_renderTargets[0].sid, m_renderStates[SVGA3D_RS_CULLMODE],
+                m_drawCount + 1, m_cid, m_boundVS, m_boundPS, (int)useFfTex, m_stages[0].sid, m_renderTargets[0].sid, renderState(SVGA3D_RS_CULLMODE),
                 m_viewport.x, m_viewport.y, m_viewport.width, m_viewport.height);
         float activeMvp[4][4];
         if (m_boundVS == SVGA3D_INVALID_ID) {
@@ -3002,7 +3007,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
 
     /* BLENDCOLOR is packed ARGB. Record it per draw so queued draws retain
      * their own constants without creating a pipeline for every color. */
-    const uint32_t blendColor = m_renderStates[SVGA3D_RS_BLENDCOLOR];
+    const uint32_t blendColor = renderState(SVGA3D_RS_BLENDCOLOR);
     const float blendConstants[4] = {
         float((blendColor >> 16) & 0xFF) / 255.0f,
         float((blendColor >> 8) & 0xFF) / 255.0f,
@@ -3013,8 +3018,8 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     m_backend->dispatch().vkCmdSetDepthBias(cb, constantBias, 0.0f, slopeBias);
 
     auto stencilValues = [&](SVGA3dRenderStateName state, auto command) {
-        uint32_t front = m_renderStates[state], back = front;
-        if (m_renderStates[SVGA3D_RS_STENCILENABLE2SIDED] && (front & 0xffff0000u) == 0x564c0000u) {
+        uint32_t front = renderState(state), back = front;
+        if (renderState(SVGA3D_RS_STENCILENABLE2SIDED) && (front & 0xffff0000u) == 0x564c0000u) {
             back = (front >> 8) & 255; front &= 255;
         }
         command(cb, VK_STENCIL_FACE_FRONT_BIT, front);
@@ -3034,7 +3039,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     VkViewport drawViewport = rasterViewport();
     m_backend->dispatch().vkCmdSetViewport(cb, 0, 1, &drawViewport);
     VkRect2D activeScissor = m_scissor;
-    if (!m_renderStates[SVGA3D_RS_SCISSORTESTENABLE]) {
+    if (!renderState(SVGA3D_RS_SCISSORTESTENABLE)) {
         activeScissor.offset.x = (int32_t)m_viewport.x;
         activeScissor.offset.y = (int32_t)m_viewport.y;
         activeScissor.extent.width = (uint32_t)m_viewport.width;

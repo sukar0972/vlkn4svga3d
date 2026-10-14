@@ -123,6 +123,7 @@ public:
     const VkPhysicalDeviceProperties& properties() const { return m_props; }
     const VkPhysicalDeviceFeatures& features() const { return m_features; }
     bool customBorderColors() const { return m_customBorderColors; }
+    bool imageFormatList() const { return m_imageFormatList; }
     const VkPhysicalDeviceMemoryProperties& memoryProperties() const { return m_memProps; }
     VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
 
@@ -197,6 +198,7 @@ private:
     VkPhysicalDeviceProperties m_props;
     VkPhysicalDeviceFeatures m_features;
     bool m_customBorderColors = false;
+    bool m_imageFormatList = false;
     VkPhysicalDeviceMemoryProperties m_memProps;
 
     VkCommandPool m_cmdPool;

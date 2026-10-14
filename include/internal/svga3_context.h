@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 #include <array>
+#include <bitset>
 #include <map>
 #include <cstdint>
 #include <cstring>
@@ -312,7 +313,14 @@ private:
     uint32_t m_cid;
 
     /* State tables */
-    std::unordered_map<uint32_t, uint32_t> m_renderStates;
+    // State names are a bounded protocol enum. Preserve absent-state behavior
+    // (including independent color-mask fallback) without hashing every draw.
+    uint32_t &renderState(uint32_t state) {
+        m_renderStatesPresent.set(state);
+        return m_renderStates[state];
+    }
+    std::array<uint32_t, SVGA3D_RS_MAX> m_renderStates{};
+    std::bitset<SVGA3D_RS_MAX> m_renderStatesPresent;
     RenderTargetBinding m_renderTargets[SVGA3_MAX_RENDER_TARGETS];
     RenderTargetBinding m_depthStencilTarget;
     TextureStageState m_stages[SVGA3_MAX_TEXTURE_STAGES];

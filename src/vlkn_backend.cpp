@@ -421,25 +421,34 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
         auto enumerate = (PFN_vkEnumerateDeviceExtensionProperties)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkEnumerateDeviceExtensionProperties");
         auto getFeatures = (PFN_vkGetPhysicalDeviceFeatures2)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2");
         uint32_t count = 0;
-        if (enumerate && getFeatures && enumerate(m_physicalDevice, nullptr, &count, nullptr) == VK_SUCCESS) {
+        if (enumerate && enumerate(m_physicalDevice, nullptr, &count, nullptr) == VK_SUCCESS) {
             std::vector<VkExtensionProperties> extensions(count);
             if (enumerate(m_physicalDevice, nullptr, &count, extensions.data()) == VK_SUCCESS) {
-                for (const auto &extension : extensions) if (strcmp(extension.extensionName, borderExtension) == 0) {
-                    VkPhysicalDeviceFeatures2 features = {};
-                    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-                    features.pNext = &borderFeatures;
-                    getFeatures(m_physicalDevice, &features);
-                    m_customBorderColors = borderFeatures.customBorderColors && borderFeatures.customBorderColorWithoutFormat;
-                    break;
+                for (const auto &extension : extensions) {
+                    const uint32_t requestedVersion = (config && config->apiVersion) ? config->apiVersion : VK_API_VERSION_1_1;
+                    if (getFeatures && strcmp(extension.extensionName, borderExtension) == 0) {
+                        VkPhysicalDeviceFeatures2 features = {};
+                        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+                        features.pNext = &borderFeatures;
+                        getFeatures(m_physicalDevice, &features);
+                        m_customBorderColors = borderFeatures.customBorderColors && borderFeatures.customBorderColorWithoutFormat;
+                    }
+                    // maintenance2, required by image_format_list, is core in 1.1.
+                    if (requestedVersion >= VK_API_VERSION_1_1 && m_props.apiVersion >= VK_API_VERSION_1_1 &&
+                        strcmp(extension.extensionName, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0)
+                        m_imageFormatList = true;
                 }
             }
         }
     }
+    std::vector<const char *> deviceExtensions;
+    if (m_imageFormatList) deviceExtensions.push_back(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME);
     if (m_customBorderColors) {
         deviceCreateInfo.pNext = &borderFeatures;
-        deviceCreateInfo.enabledExtensionCount = 1;
-        deviceCreateInfo.ppEnabledExtensionNames = &borderExtension;
+        deviceExtensions.push_back(borderExtension);
     }
+    deviceCreateInfo.enabledExtensionCount = deviceExtensions.size();
+    deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     VkResult res = m_dispatch.vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_device);
     if (res != VK_SUCCESS) {

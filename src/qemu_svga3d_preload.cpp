@@ -131,8 +131,11 @@
 #define SVGA_CMD_RECT_FILL            2
 #endif
 #define SVGA_FIFO_NEXT                SVGA_FIFO_NEXT_CMD
-static constexpr uint32_t kPreloadHardwareVersion = SVGA3D_HWVERSION_WS65_B1;
-static_assert(kPreloadHardwareVersion == 0x00020000, "WS65_B1 protocol value");
+// Preserve the lab's vGPU9 hardware version: Linux vmwgfx/Xorg requires 2.1
+// for this screen-object guest path. Use its actual enum, rather than the old
+// locally redefined WS65_B1 name (whose protocol value is 2.0).
+static constexpr uint32_t kPreloadHardwareVersion = SVGA3D_HWVERSION_WS8_B1;
+static_assert(kPreloadHardwareVersion == 0x00020001, "WS8_B1 protocol value");
 #define SVGA_FIFO_BUSY                290
 
 struct vmsvga_rect_s {

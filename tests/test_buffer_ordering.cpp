@@ -7,6 +7,57 @@
 #define DST(t, n) (0x800f0000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 #define SRC(t, n) (0x80e40000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 static uint32_t floatBits(float value) { uint32_t bits; memcpy(&bits,&value,4); return bits; }
+static bool constant_epoch_regression() {
+  Svga3VlknConfig cfg{}; cfg.enableValidationLayers=true;
+  auto *d=svga3_vlkn_device_create(&cfg); if (!d) return false;
+  bool ok=svga3_vlkn_context_create(d,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dSize target{4,4,1}, vertices{36,1,1};
+  ok &= svga3_vlkn_surface_define(d,1,0,SVGA3D_A8R8G8B8,&target,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,2,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&vertices,1)==SVGA3_VLKN_SUCCESS;
+  const float positions[]{-1,-1,0,3,-1,0,-1,3,0};
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+  const uint32_t vs[]{0xfffe0300,31u|(2u<<24),0x80000000,DST(1,0),
+    31u|(2u<<24),0x80000000,DST(6,0),1u|(2u<<24),DST(6,0),SRC(1,0),0xffff};
+  const uint32_t ps[]{0xffff0300,1u|(2u<<24),DST(8,0),SRC(2,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,1,SVGA3D_SHADERTYPE_VS,vs,sizeof(vs)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_define_shader(d,1,1,SVGA3D_SHADERTYPE_PS,ps,sizeof(ps)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_COLOR0,1,0,0)==SVGA3_VLKN_SUCCESS;
+  SVGA3dRect viewport{0,0,4,4},left{0,0,2,4},right{2,0,2,4};
+  ok &= svga3_vlkn_context_set_viewport(d,1,&viewport)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CULLMODE,SVGA3D_FACE_NONE)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_SCISSORTESTENABLE,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dVertexDecl decl{}; decl.identity.type=SVGA3D_DECLTYPE_FLOAT3; decl.identity.usage=SVGA3D_DECLUSAGE_POSITION; decl.array={2,0,12};
+  SVGA3dPrimitiveRange range{}; range.primType=SVGA3D_PRIMITIVE_TRIANGLELIST; range.primitiveCount=1; range.indexArray.surfaceId=SVGA3D_INVALID_ID;
+  auto draw=[&]() { return svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS; };
+  const float colors[][4]{{1,0,0,1},{0,0,1,1},{0,1,0,1},{1,1,1,1}};
+  const uint32_t expected[]{0xffff0000u,0xff0000ffu,0xff00ff00u,0xffffffffu};
+  for (unsigned epoch=0;epoch<4;++epoch) {
+    unsigned a=epoch%4,b=(epoch+1)%4;
+    ok &= svga3_vlkn_context_set_scissor_rect(d,1,&left)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[a]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_device_wait_idle(d)==SVGA3_VLKN_SUCCESS;
+    // Reuse unchanged state after completion, then queue another unchanged
+    // draw and a changed-color draw before observing either region.
+    ok &= draw();
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[a]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_context_set_scissor_rect(d,1,&right)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[b]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    uint32_t pixels[16]{};
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x)
+      ok &= pixels[y*4+x]==expected[x<2?a:b];
+  }
+  d->contextMgr->clear(); d->surfaceMgr->clear(); d->backend->shutdown();
+  ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
+  svga3_vlkn_device_destroy(d);
+  printf("immutable constants across submission epochs: %s\n",ok?"PASS":"FAIL");
+  return ok;
+}
 static bool gamma_and_relative_regression() {
   Svga3VlknConfig cfg{}; cfg.enableValidationLayers = true;
   auto *d=svga3_vlkn_device_create(&cfg); if (!d) return false;
@@ -418,6 +469,7 @@ static bool staging_wrap_regression() {
 }
 int main() {
   if (!gamma_and_relative_regression()) return 1;
+  if (!constant_epoch_regression()) return 1;
   Svga3VlknConfig cfg{};
   cfg.apiVersion = VK_API_VERSION_1_1;
   cfg.enableValidationLayers = true;
@@ -627,6 +679,27 @@ int main() {
   const uint32_t depthPixel = pixels[48 * 64 + 40];
   correct &= (depthPixel & 0x00ffffff) == 0x00404040;
   printf("depth texture sample pixel=0x%08x expected=0xff404040\n", depthPixel);
+  // The guest's normalized 24-bit texture fallback uses D24S8_INT when
+  // floating DF24 is unavailable. Keep raw depth sampling valid for that
+  // fallback and both ordinary packed 24-bit formats.
+  for (auto format : {SVGA3D_Z_D24S8_INT, SVGA3D_Z_D24X8, SVGA3D_Z_D24S8}) {
+    correct &= svga3_vlkn_surface_define(d, 5, 0, format, &depthSize, 1) ==
+               SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_set_render_target(d, 1, SVGA3D_RT_DEPTH,
+                                                    5, 0, 0) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_clear(d, 1, SVGA3D_CLEAR_DEPTH, 0, 0.25f,
+                                        0, nullptr, 0) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_set_render_target(d, 1, SVGA3D_RT_DEPTH,
+                                                    SVGA3D_INVALID_ID, 0, 0) ==
+               SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_draw(d, 1, SVGA3D_PRIMITIVE_TRIANGLELIST,
+                                       &decl, 1, &r, 1) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_surface_dma_download(d, 1, 0, nullptr, pixels.data(),
+                                               64 * 4) == SVGA3_VLKN_SUCCESS;
+    correct &= (pixels[48 * 64 + 40] & 0xffffff) == 0x404040;
+    printf("packed depth format=%u sample pixel=0x%08x expected=0xff404040\n",
+           unsigned(format), pixels[48 * 64 + 40]);
+  }
   /* Retire a cache with more than 64 distinct sampler states safely. */
   for (unsigned i = 0; i < 80; ++i) {
     float bias = float(i) / 16;

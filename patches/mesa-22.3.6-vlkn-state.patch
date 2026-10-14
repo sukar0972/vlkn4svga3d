@@ -215,3 +215,18 @@
 +   if (try_flipped_depth_stencil_copy(svga, blit))
 +      return true;
 +
+--- a/src/gallium/drivers/svga/svga_state_fs.c
++++ b/src/gallium/drivers/svga/svga_state_fs.c
+@@ -249,1 +249,4 @@
+-            if (!svga_have_vgpu10(svga) &&
++            /* This adapter returns raw depth, including legacy formats.
++             * Keep Mesa's shader comparisons when the opt-in path is used. */
++            if (!svga_have_vgpu10(svga) &&
++                !debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) &&
+--- a/src/gallium/drivers/svga/svga_pipe_blit.c
++++ b/src/gallium/drivers/svga/svga_pipe_blit.c
+@@ -575,1 +575,3 @@
+-   if (!svga_have_vgpu10(svga) && (blit.mask & PIPE_MASK_Z) &&
++   if (!svga_have_vgpu10(svga) &&
++       !debug_get_bool_option("SVGA_VLKN_EXTENDED_STATE", false) &&
++       (blit.mask & PIPE_MASK_Z) &&
