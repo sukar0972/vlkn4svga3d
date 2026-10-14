@@ -363,6 +363,9 @@ Svga3VlknStatus svga3_vlkn_device_unmap_guest_ram(
     uint64_t gpaBase
 );
 
+/* The registered host allocation must remain accessible until a successful
+ * replacement, device reset, or device destruction. Presentation completes
+ * its writes before displayUpdate. */
 Svga3VlknStatus svga3_vlkn_device_set_framebuffer(
     Svga3VlknDevice *dev,
     void *fbHva,

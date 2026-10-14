@@ -207,6 +207,35 @@ int main() {
   scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram==unchanged;
   g_display_gmrfb.format.value=0x1820;
 
+  // Read a pitched, offset screen back to a different VRAM region before
+  // acknowledging the following guest fence. Preserve unrelated bytes.
+  g_display_gmrfb.ptr.offset = 12288;
+  g_display_gmrfb.bytesPerLine = 48;
+  reset(4096);
+  for (uint32_t word : {uint32_t(SVGA_CMD_BLIT_SCREEN_TO_GMRFB),
+      1u,2u,3u,4u,5u,6u,0u,uint32_t(SVGA_CMD_FENCE),91u}) append(word);
+  my_vmsvga_fifo_run(state);
+  bool readbackOk = fifo[SVGA_FIFO_FENCE]==91 && fifo[3]==fifo[2];
+  for (unsigned row=0;row<2;++row) for (unsigned col=0;col<2;++col) {
+    uint32_t value; memcpy(&value,vram.data()+12288+(2+row)*48+(1+col)*4,4);
+    readbackOk &= value==(0xff000000|((2+row)<<8)|(1+col));
+  }
+  readbackOk &= vram[12288]==0x9b && vram[12288+2*48]==0x9b;
+  auto beforeReadback=vram;
+  readbackOk &= !blit_screen_to_gmrfb(state,0,0,-1,0,2,2,0) &&
+      !blit_screen_to_gmrfb(state,0,0,0,0,9,2,0) &&
+      !blit_screen_to_gmrfb(state,0,0,0,0,2,2,1) &&
+      !blit_screen_to_gmrfb(state,INT32_MAX,0,0,0,2,2,0) && vram==beforeReadback;
+  g_display_gmrfb.ptr.offset=65532;
+  readbackOk &= !blit_screen_to_gmrfb(state,0,0,0,0,2,2,0) && vram==beforeReadback;
+  // Overlapping rows must read a snapshot rather than earlier overwritten rows.
+  g_display_gmrfb.ptr.offset=4096+32;g_display_gmrfb.bytesPerLine=32;
+  readbackOk &= blit_screen_to_gmrfb(state,0,0,0,0,8,3,0);
+  for(unsigned row=0;row<3;++row)
+    readbackOk &= memcmp(vram.data()+4096+(row+1)*32,beforeReadback.data()+4096+row*32,32)==0;
+  printf("screen readback pixels, bounds, overlap and fence ordering: %s\n",readbackOk?"PASS":"FAIL");
+  ok &= readbackOk;
+  vram=unchanged;g_display_gmrfb.bytesPerLine=32;
   g_display_gmrfb.ptr.offset = 65520;
   scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram == unchanged;
   g_display_gmrfb.ptr.offset = 8192;
@@ -306,6 +335,19 @@ int main() {
     svga3_vlkn_device_destroy(g_vlknDev);
     g_vlknDev = nullptr; g_renderer_lost=false;
   }
+  g_vlknDev=svga3_vlkn_device_create(&cfg);
+  bool failedReadbackOk=g_vlknDev!=nullptr;
+  if(g_vlknDev) {
+    auto before=vram;
+    auto &dispatch=g_vlknDev->backend->dispatch();auto saved=dispatch.vkQueueSubmit;
+    g_vlknDev->backend->getActiveCommandBuffer();dispatch.vkQueueSubmit=failFenceSubmit;
+    failedReadbackOk &= !blit_screen_to_gmrfb(state,0,0,0,0,2,2,0) &&
+        g_renderer_lost && vram==before;
+    dispatch.vkQueueSubmit=saved;
+    svga3_vlkn_device_destroy(g_vlknDev);g_vlknDev=nullptr;g_renderer_lost=false;
+  }
+  printf("failed GPU completion retains screen readback destination: %s\n",failedReadbackOk?"PASS":"FAIL");
+  ok &= failedReadbackOk;
   printf("screen-object pitch and dimensions override legacy mode: %s\n",paddedScreenOk?"PASS":"FAIL");
   ok &= paddedScreenOk;
   return ok ? 0 : 1;

@@ -154,6 +154,7 @@ void svga3_vlkn_device_destroy(Svga3VlknDevice *dev)
         std::lock_guard<std::mutex> lock(dev->mutex);
         if (dev->backend) {
             dev->backend->waitIdle();
+            dev->backend->releaseFramebufferImport();
         }
         if (dev->surfaceMgr) {
             dev->surfaceMgr->setContextManager(nullptr);
@@ -172,6 +173,8 @@ Svga3VlknStatus svga3_vlkn_device_reset(Svga3VlknDevice *dev)
     std::lock_guard<std::mutex> lock(dev->mutex);
     if (dev->backend) {
         Svga3VlknStatus waitStatus = dev->backend->waitIdle();
+        if (waitStatus != SVGA3_VLKN_SUCCESS) return waitStatus;
+        waitStatus = dev->backend->releaseFramebufferImport();
         if (waitStatus != SVGA3_VLKN_SUCCESS) return waitStatus;
     }
     dev->dxContexts.clear();
@@ -883,6 +886,10 @@ Svga3VlknStatus svga3_vlkn_device_set_framebuffer(
 {
     if (!dev || !dev->guestMem) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     std::lock_guard<std::mutex> lock(dev->mutex);
+    if (dev->backend) {
+        auto status = dev->backend->releaseFramebufferImport();
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+    }
     return dev->guestMem->setFramebuffer(fbHva, fbGpa, fbSize, width, height, pitch, bpp);
 }
 

@@ -44,3 +44,19 @@ Compile `accuracy_probe.c` in the guest with `cc -O2 -Wall -Wextra accuracy_prob
 The 2022 Piglit depth/stencil texture case rejects `GL_INVALID_ENUM` for unsized cube storage when depth cube maps are unavailable. This also fails on llvmpipe with GL 2.1 and `GL_EXT_gpu_shader4` disabled. [ARB_texture_storage](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_texture_storage.txt) requires `INVALID_ENUM` for unsized internal formats; [OpenGL error semantics](https://registry.khronos.org/OpenGL/specs/gl/glspec46.core.pdf) allow any applicable error when several conditions hold. The optional `patches/piglit-20220119-depth-stencil-error.patch` accepts both applicable errors for this one call. Keep unmodified Piglit results alongside any corrected run; the patch does not waive pixel failures or unsupported features.
 
 To use the corrected driver for desktop applications on Debian 12 amd64, add the contents of `xsessionrc.example` to the guest user's `~/.xsessionrc` and log in again. The example assumes the module is in `~/vlkn-mesa/dri` and keeps the system DRI directory as a fallback for software rendering. Back up any existing session file first. Software comparison commands must still unset both variables, as the Piglit runner does automatically. Verify the default client loader with `DISPLAY=:0 LD_DEBUG=files glxinfo -B`; it should load the custom `vmwgfx_dri.so`.
+
+### Mixed X11 and OpenGL screen readback
+
+`glx_x11_mix_probe.c` checks GL front, window and root-screen pixels across
+buffer swaps, X drawing and window movement. A four-color pattern checks
+readback orientation. Run it in the guest's visible X session when changing
+screen presentation or readback handling:
+
+```sh
+cc -O2 -Wall -Wextra glx_x11_mix_probe.c -lGL -lX11 -o glx_x11_mix_probe
+DISPLAY=:0 LIBGL_DRIVERS_PATH="$HOME/vlkn-mesa/dri" \
+  SVGA_VLKN_EXTENDED_STATE=1 vblank_mode=0 ./glx_x11_mix_probe
+```
+
+A successful run reports zero failures. Accuracy and offscreen rendering
+checks alone do not cover these window-system interactions.

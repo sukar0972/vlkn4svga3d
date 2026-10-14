@@ -306,7 +306,8 @@ private:
                                    const SVGA3dVertexDecl *decls,
                                    uint32_t numDecls,
                                    VkRenderPass renderPass);
-    Svga3VlknStatus ensureRenderPassActive();
+    Svga3VlknStatus ensureRenderPassActive(uint32_t clearFlags = 0, uint32_t clearColor = 0,
+                                         float clearDepth = 0, uint32_t clearStencil = 0);
 
     VlknBackend *m_backend;
     VlknSurfaceManager *m_surfaceMgr;

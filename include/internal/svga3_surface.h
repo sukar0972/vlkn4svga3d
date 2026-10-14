@@ -222,6 +222,9 @@ public:
     Svga3VlknStatus ensureVolumeSurface(uint32_t sid);
     bool exists(uint32_t sid) const;
     void clear();
+    // Opt-in for FIFO integrations: eligible image transfers remain queued
+    // until readback, presentation, a fence or explicit completion.
+    void enableImageTransferBatching(bool enabled) { m_batchImageTransfers = enabled; }
 
     Svga3VlknStatus copy(uint32_t srcSid,
                          uint32_t dstSid,
@@ -275,6 +278,7 @@ public:
 private:
     VlknBackend *m_backend;
     VlknContextManager *m_contextMgr = nullptr;
+    bool m_batchImageTransfers = false;
     uint32_t m_capacity;
     // Bounded, reusable CPU metadata; no framebuffer or GPU data is cached.
     std::vector<SVGA3dCopyRect> m_presentationRects;

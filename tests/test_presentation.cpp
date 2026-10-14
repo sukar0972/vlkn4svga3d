@@ -27,6 +27,22 @@
 #include <cmath>
 #include <cassert>
 #include <algorithm>
+#include <cstdlib>
+
+static PFN_vkGetDeviceProcAddr originalGetProc;
+static bool failSubmissionWait, failSubmissionReset, missingFenceEntry;
+static VkResult VKAPI_CALL rejectedWait(VkDevice, uint32_t, const VkFence *, VkBool32, uint64_t) {
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+static VkResult VKAPI_CALL rejectedReset(VkDevice, uint32_t, const VkFence *) {
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+static PFN_vkVoidFunction VKAPI_CALL submissionTestProc(VkDevice device, const char *name) {
+    if (missingFenceEntry && !strcmp(name, "vkWaitForFences")) return nullptr;
+    if (failSubmissionWait && !strcmp(name, "vkWaitForFences")) return (PFN_vkVoidFunction)rejectedWait;
+    if (failSubmissionReset && !strcmp(name, "vkResetFences")) return (PFN_vkVoidFunction)rejectedReset;
+    return originalGetProc(device, name);
+}
 
 #define TEST_CHECK(cond, msg) \
     do { \
@@ -152,6 +168,7 @@ int main() {
     TEST_CHECK(dev != nullptr, "Real Vulkan device creation succeeded");
     svga3_vlkn::VlknBackend *backend = dev->backend.get();
     TEST_CHECK(!backend->dispatch().isMock, "Execution is running on real Vulkan driver (NOT mock)");
+    TEST_CHECK(backend->enableSubmissionFenceWait(200), "Synchronous submission fence initialized");
 
     VkPhysicalDeviceProperties props;
     backend->dispatch().vkGetPhysicalDeviceProperties(backend->physicalDevice(), &props);
@@ -921,6 +938,94 @@ int main() {
     TEST_CHECK(dev->surfaceMgr->stretchBlt(9910,9910,overlapSrc,overlapDst,SVGA3D_STRETCH_BLT_POINT)==SVGA3_VLKN_SUCCESS,"Snapshot overlapping same-image stretch");
     uint32_t overlapPixels[8]{}; const uint32_t overlapExpected[8]={1,1,2,3,5,5,6,7};
     TEST_CHECK(stretch->dmaDownload(0,&strip,overlapPixels,16,false,0)==SVGA3_VLKN_SUCCESS && memcmp(overlapPixels,overlapExpected,sizeof(overlapExpected))==0,"Overlapping stretch preserves original source pixels");
+
+    // Exercise direct coherent scanout with a nonzero backing offset and a
+    // pitched partial rectangle. Every byte outside the write stays intact.
+    {
+        const size_t bytes = 65536;
+        std::unique_ptr<uint8_t, decltype(&std::free)> imported(
+            static_cast<uint8_t*>(std::aligned_alloc(bytes, bytes)), &std::free);
+        TEST_CHECK(imported != nullptr, "Allocate aligned scanout control");
+        memset(imported.get(), 0x5a, bytes);
+        TEST_CHECK(backend->enableFramebufferImport(true) == SVGA3_VLKN_SUCCESS,
+                   "Opt into platform-owned coherent scanout");
+        TEST_CHECK(svga3_vlkn_device_set_framebuffer(dev, imported.get(), 0, bytes, 64, 64, 256, 4) == SVGA3_VLKN_SUCCESS,
+                   "Register aligned pitched framebuffer");
+        TEST_CHECK(svga3_vlkn_device_set_scanout_offset(dev, 4096) == SVGA3_VLKN_SUCCESS,
+                   "Use nonzero imported scanout offset");
+        const bool supported = backend->importFramebuffer(imported.get(), bytes) != VK_NULL_HANDLE;
+        std::cout << "  [INFO] Coherent framebuffer import: " << (supported ? "active" : "unsupported; staging fallback") << '\n';
+        SVGA3dSize size{8,8,1};
+        TEST_CHECK(dev->surfaceMgr->defineSurface(9920, 0, SVGA3D_A8R8G8B8, &size, 1) == SVGA3_VLKN_SUCCESS,
+                   "Define direct scanout source");
+        auto *source = dev->surfaceMgr->getSurface(9920);
+        const SVGA3dCopyRect rect{5,6,4,3,2,1};
+        for (uint32_t epoch = 0; epoch < 4; ++epoch) {
+            if (epoch == 2) {
+                TEST_CHECK(dev->surfaceMgr->destroySurface(9920) == SVGA3_VLKN_SUCCESS &&
+                           dev->surfaceMgr->defineSurface(9920,0,SVGA3D_A8R8G8B8,&size,1) == SVGA3_VLKN_SUCCESS,
+                           "Replace scanout source between completed transfers");
+                source=dev->surfaceMgr->getSurface(9920);
+            }
+            uint32_t pixels[64];
+            for (uint32_t i=0;i<64;++i) pixels[i] = 0xff000000u | (epoch << 16) | (i * 257);
+            TEST_CHECK(source->dmaUpload(0, nullptr, pixels, 32, false) == SVGA3_VLKN_SUCCESS,
+                       "Upload changed scanout pixels");
+            TEST_CHECK(dev->surfaceMgr->present(9920, &rect, 1, dev->guestMem.get()) == SVGA3_VLKN_SUCCESS,
+                       "Complete pitched scanout write");
+            bool exact = true;
+            for (size_t word=0;word<bytes/4;++word) {
+                uint32_t expected=0x5a5a5a5a;
+                if (word >= 1024) {
+                    const size_t x=(word-1024)%64, y=(word-1024)/64;
+                    if (x>=5 && x<9 && y>=6 && y<9) expected=pixels[(y-6+1)*8+(x-5+2)];
+                }
+                uint32_t actual; memcpy(&actual, imported.get()+word*4, 4);
+                exact &= actual==expected;
+            }
+            TEST_CHECK(exact, "Direct scanout preserves pitch, backing offset, untouched bytes and changed pixels");
+        }
+        TEST_CHECK(svga3_vlkn_device_set_framebuffer(dev, qemuFb.data(), 0, qemuFb.size()*4, FB_W, FB_H, FB_W*4, 4) == SVGA3_VLKN_SUCCESS,
+                   "Release import before its owner frees the framebuffer");
+        TEST_CHECK(backend->importFramebuffer(imported.get()+1, bytes-1) == VK_NULL_HANDLE,
+                   "Unaligned framebuffer retains staging fallback");
+        TEST_CHECK(backend->enableFramebufferImport(false) == SVGA3_VLKN_SUCCESS,
+                   "Detach coherent import before freeing its owner");
+    }
+
+    // A failed completion wait must retain the pending command buffer and
+    // its staging epoch until device idle establishes actual completion.
+    TEST_CHECK(backend->flushCommandBuffer() == SVGA3_VLKN_SUCCESS, "Drain before fence failure controls");
+    originalGetProc = backend->dispatch().vkGetDeviceProcAddr;
+    backend->dispatch().vkGetDeviceProcAddr = submissionTestProc;
+    failSubmissionWait = true;
+    TEST_CHECK(backend->enableSubmissionFenceWait(0), "Install completion wait failure control");
+    backend->getActiveCommandBuffer();
+    const auto completedBefore = backend->completedSubmissionSerial();
+    TEST_CHECK(backend->flushCommandBuffer() != SVGA3_VLKN_SUCCESS &&
+               backend->completedSubmissionSerial() == completedBefore,
+               "Failed fence wait does not retire submission epoch");
+    TEST_CHECK(backend->waitIdle() == SVGA3_VLKN_SUCCESS &&
+               backend->completedSubmissionSerial() > completedBefore,
+               "Device idle recovers the accepted pending submission");
+    failSubmissionWait = false;
+    failSubmissionReset = true;
+    TEST_CHECK(backend->enableSubmissionFenceWait(0), "Install fence reset failure control");
+    backend->getActiveCommandBuffer();
+    TEST_CHECK(backend->flushCommandBuffer() != SVGA3_VLKN_SUCCESS && backend->cmdBufferRecording(),
+               "Reset failure preserves unsubmitted recording");
+    failSubmissionReset = false;
+    backend->dispatch().vkGetDeviceProcAddr = originalGetProc;
+    TEST_CHECK(backend->enableSubmissionFenceWait(200) && backend->flushCommandBuffer() == SVGA3_VLKN_SUCCESS,
+               "Retry submits retained recording with a reset fence");
+    backend->dispatch().vkGetDeviceProcAddr = submissionTestProc;
+    missingFenceEntry = true;
+    TEST_CHECK(!backend->enableSubmissionFenceWait(0), "Missing fence entry point rejects mode change");
+    missingFenceEntry = false;
+    backend->dispatch().vkGetDeviceProcAddr = originalGetProc;
+    backend->getActiveCommandBuffer();
+    TEST_CHECK(backend->flushCommandBuffer() == SVGA3_VLKN_SUCCESS,
+               "Rejected mode change preserves the working fence dispatch");
 
     /* Clean up */
     svga3_vlkn_context_destroy(dev, CID);

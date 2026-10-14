@@ -18,6 +18,16 @@
 extern "C" void log_msg(const char *fmt, ...);
 
 namespace {
+static VkClearColorValue attachmentClearColor(uint32_t packed, SVGA3dSurfaceFormat format) {
+    VkClearColorValue value{};
+    value.float32[0] = float((packed >> 16) & 255) / 255;
+    value.float32[1] = float((packed >> 8) & 255) / 255;
+    value.float32[2] = float(packed & 255) / 255;
+    value.float32[3] = float(packed >> 24) / 255;
+    if (format == SVGA3D_ALPHA8) value.float32[0] = value.float32[3];
+    return value;
+}
+
 // SVGA supplies a normalized depth offset; Vulkan multiplies the constant
 // factor by the attachment's least representable depth increment. Floating
 // depth has a primitive-dependent increment and cannot use this conversion.
@@ -1564,7 +1574,8 @@ VkSampler VlknContext::getOrCreateSampler(uint32_t stage) {
     return s.sampler;
 }
 
-Svga3VlknStatus VlknContext::ensureRenderPassActive() {
+Svga3VlknStatus VlknContext::ensureRenderPassActive(uint32_t clearFlags, uint32_t clearColor,
+                                                 float clearDepth, uint32_t clearStencil) {
     if (m_backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     if (m_inRenderPass) {
         if (m_backend && m_backend->isRenderPassActive() && m_backend->cmdBufferRecording() &&
@@ -1609,7 +1620,7 @@ Svga3VlknStatus VlknContext::ensureRenderPassActive() {
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
     }
 
-    m_activeRenderPass = m_backend->getOrCreateRenderPass(colorFormats, depthFmt);
+    m_activeRenderPass = m_backend->getOrCreateRenderPass(colorFormats, depthFmt, clearFlags);
     if (m_activeRenderPass == VK_NULL_HANDLE) {
         log_msg("[libqemu_svga3d] ensureRenderPassActive error: render pass creation failed\n");
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
@@ -1741,6 +1752,16 @@ Svga3VlknStatus VlknContext::ensureRenderPassActive() {
     beginInfo.renderArea.offset.y = 0;
     beginInfo.renderArea.extent.width = fbWidth;
     beginInfo.renderArea.extent.height = fbHeight;
+    VkClearValue clearValues[5]{};
+    if (clearFlags) {
+        uint32_t count = 0;
+        for (size_t i=0;i<colorViews.size();++i) if (colorViews[i] != VK_NULL_HANDLE)
+            clearValues[count++].color = attachmentClearColor(clearColor, colorSurfs[i]->svgaFormat());
+        if (depthSurf && depthView != VK_NULL_HANDLE)
+            clearValues[count++].depthStencil = {clearDepth, clearStencil};
+        beginInfo.clearValueCount = count;
+        beginInfo.pClearValues = clearValues;
+    }
 
     m_backend->cmdBeginRenderPass(cb, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
     m_inRenderPass = true;
@@ -1862,7 +1883,25 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         flags = static_cast<SVGA3dClearFlag>(flags & ~SVGA3D_CLEAR_STENCIL);
     if (flags == 0) return SVGA3_VLKN_SUCCESS;
 
-    Svga3VlknStatus rpStatus = ensureRenderPassActive();
+    // A full clear starting a pass can discard its old attachment contents.
+    // Partial/scissored clears and clears inside an existing pass retain LOAD.
+    const bool fullRect = !numRects || (numRects == 1 && rects &&
+        rects[0].x == 0 && rects[0].y == 0 &&
+        rects[0].w == m_viewport.width && rects[0].h == m_viewport.height);
+    bool loadClear = !m_backend->isRenderPassActive() && fullRect &&
+        m_viewport.x == 0 && m_viewport.y == 0 && m_viewport.width > 0 && m_viewport.height > 0;
+    if (renderState(SVGA3D_RS_SCISSORTESTENABLE))
+        loadClear &= m_scissor.offset.x == 0 && m_scissor.offset.y == 0 &&
+            m_scissor.extent.width == m_viewport.width && m_scissor.extent.height == m_viewport.height;
+    auto coversAttachment = [&](const RenderTargetBinding &target) {
+        auto *surface = m_surfaceMgr->getSurface(target.sid);
+        if (!surface) return true;
+        const auto *mip = surface->getMipInfo(target.mipmap);
+        return mip && mip->width == m_viewport.width && mip->height == m_viewport.height;
+    };
+    for (const auto &target : m_renderTargets) loadClear &= coversAttachment(target);
+    loadClear &= coversAttachment(m_depthStencilTarget);
+    Svga3VlknStatus rpStatus = ensureRenderPassActive(loadClear ? uint32_t(flags) : 0, colorRGBA, depth, stencil);
     if (rpStatus != SVGA3_VLKN_SUCCESS) return rpStatus;
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
@@ -1875,16 +1914,8 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         VkClearAttachment &a = attachments[attachCount++];
         a.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         a.colorAttachment = i;
-        /* Unpack RGBA */
-        float r = ((colorRGBA >> 16) & 0xFF) / 255.0f;
-        float g = ((colorRGBA >> 8) & 0xFF) / 255.0f;
-        float b = (colorRGBA & 0xFF) / 255.0f;
-        float alpha = ((colorRGBA >> 24) & 0xFF) / 255.0f;
         const auto *target = m_surfaceMgr->getSurface(m_renderTargets[i].sid);
-        a.clearValue.color.float32[0] = target->svgaFormat() == SVGA3D_ALPHA8 ? alpha : r;
-        a.clearValue.color.float32[1] = g;
-        a.clearValue.color.float32[2] = b;
-        a.clearValue.color.float32[3] = alpha;
+        a.clearValue.color = attachmentClearColor(colorRGBA, target->svgaFormat());
     }
 
     if ((flags & SVGA3D_CLEAR_DEPTH) || (flags & SVGA3D_CLEAR_STENCIL)) {
@@ -1932,7 +1963,7 @@ Svga3VlknStatus VlknContext::clear(SVGA3dClearFlag flags,
         if (r.rect.extent.width && r.rect.extent.height) clearRects.push_back(r);
     }
 
-    if (attachCount > 0 && !clearRects.empty()) {
+    if (!loadClear && attachCount > 0 && !clearRects.empty()) {
         m_backend->dispatch().vkCmdClearAttachments(
             cb, attachCount, attachments, (uint32_t)clearRects.size(), clearRects.data()
         );
@@ -3003,31 +3034,25 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         endRenderPassIfActive();
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
     }
-    m_backend->dispatch().vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    m_backend->bindGraphicsPipeline(cb, pipeline);
 
     /* BLENDCOLOR is packed ARGB. Record it per draw so queued draws retain
      * their own constants without creating a pipeline for every color. */
-    const uint32_t blendColor = renderState(SVGA3D_RS_BLENDCOLOR);
-    const float blendConstants[4] = {
-        float((blendColor >> 16) & 0xFF) / 255.0f,
-        float((blendColor >> 8) & 0xFF) / 255.0f,
-        float(blendColor & 0xFF) / 255.0f,
-        float((blendColor >> 24) & 0xFF) / 255.0f
-    };
-    m_backend->dispatch().vkCmdSetBlendConstants(cb, blendConstants);
-    m_backend->dispatch().vkCmdSetDepthBias(cb, constantBias, 0.0f, slopeBias);
+    GraphicsDrawState drawState{};
+    drawState.blendColor = renderState(SVGA3D_RS_BLENDCOLOR);
+    drawState.constantBias = constantBias;
+    drawState.slopeBias = slopeBias;
 
-    auto stencilValues = [&](SVGA3dRenderStateName state, auto command) {
+    auto stencilValues = [&](SVGA3dRenderStateName state) {
         uint32_t front = renderState(state), back = front;
         if (renderState(SVGA3D_RS_STENCILENABLE2SIDED) && (front & 0xffff0000u) == 0x564c0000u) {
             back = (front >> 8) & 255; front &= 255;
         }
-        command(cb, VK_STENCIL_FACE_FRONT_BIT, front);
-        command(cb, VK_STENCIL_FACE_BACK_BIT, back);
+        return std::array<uint32_t, 2>{front, back};
     };
-    stencilValues(SVGA3D_RS_STENCILREF, m_backend->dispatch().vkCmdSetStencilReference);
-    stencilValues(SVGA3D_RS_STENCILMASK, m_backend->dispatch().vkCmdSetStencilCompareMask);
-    stencilValues(SVGA3D_RS_STENCILWRITEMASK, m_backend->dispatch().vkCmdSetStencilWriteMask);
+    drawState.stencil[0] = stencilValues(SVGA3D_RS_STENCILREF);
+    drawState.stencil[1] = stencilValues(SVGA3D_RS_STENCILMASK);
+    drawState.stencil[2] = stencilValues(SVGA3D_RS_STENCILWRITEMASK);
 
     if (m_descriptorSet) {
         uint32_t dynamicOffsets[2] = {m_vsConstDynamicOffset, m_psConstDynamicOffset};
@@ -3036,8 +3061,7 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         );
     }
 
-    VkViewport drawViewport = rasterViewport();
-    m_backend->dispatch().vkCmdSetViewport(cb, 0, 1, &drawViewport);
+    drawState.viewport = rasterViewport();
     VkRect2D activeScissor = m_scissor;
     if (!renderState(SVGA3D_RS_SCISSORTESTENABLE)) {
         activeScissor.offset.x = (int32_t)m_viewport.x;
@@ -3046,7 +3070,8 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
         activeScissor.extent.height = (uint32_t)m_viewport.height;
     }
     activeScissor = clipToFramebuffer(activeScissor, m_fbWidth, m_fbHeight);
-    m_backend->dispatch().vkCmdSetScissor(cb, 0, 1, &activeScissor);
+    drawState.scissor = activeScissor;
+    m_backend->setGraphicsDrawState(cb, drawState);
 
     /* 4. Bind Vertex Buffers */
     VkBuffer fallbackBuf = (m_backend && m_backend->fallbackBuffer()) ? m_backend->fallbackBuffer() : m_dummyVb;
@@ -3099,13 +3124,15 @@ Svga3VlknStatus VlknContext::draw(SVGA3dPrimitiveType primitiveType,
     for (uint32_t i = 0; i < numRanges; ++i) {
         const SVGA3dPrimitiveRange &r = ranges[i];
         SVGA3dPrimitiveType ptype = (r.primType != SVGA3D_PRIMITIVE_INVALID) ? (SVGA3dPrimitiveType)r.primType : primitiveType;
-        if (i == 0 || ptype != currentBoundType) {
+        // The draw's default topology was already looked up and bound above.
+        // Only ranges overriding that topology need another pipeline lookup.
+        if (ptype != currentBoundType) {
             VkPipeline pipe = getOrCreatePipeline(ptype, decls, numDecls, m_activeRenderPass);
             if (pipe == VK_NULL_HANDLE) {
                 endRenderPassIfActive();
                 return SVGA3_VLKN_ERROR_DEVICE_LOST;
             }
-            m_backend->dispatch().vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+            m_backend->bindGraphicsPipeline(cb, pipe);
             currentBoundType = ptype;
         }
         uint32_t count = calcVertexCount(ptype, r.primitiveCount);
