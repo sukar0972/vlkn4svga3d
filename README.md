@@ -39,7 +39,7 @@ make test-piglit PIGLIT_ARGS="--ssh svga3d@10.0.0.144 --renderer compare --outpu
 
 `make test` checks the mock backend and reference harness. `make harness-loop` exercises the host Vulkan path. Piglit runs inside the guest and compares SVGA pixels with llvmpipe. Neither `test-qemu` nor `test_qemu_integration` boots a guest.
 
-The [testing guide](docs/testing.md) covers dependencies, individual targets, suite coverage, repeated harness runs and Piglit result handling. [VALIDATION.md](VALIDATION.md) records measured results and their limits.
+The [testing guide](docs/testing.md) covers dependencies, individual targets, suite coverage, repeated harness runs and Piglit result handling. The [PR graphics gate policy](docs/pr-graphics-gate.md) defines Oracle queue rules, required accuracy/performance evidence and activation blockers; the graphics gate is not yet enforced on GitHub. [VALIDATION.md](VALIDATION.md) records measured results and their limits.
 
 ## Licensing
 

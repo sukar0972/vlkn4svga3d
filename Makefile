@@ -77,7 +77,7 @@ QEMU_TEST_TARGET = $(BIN_DIR)/test_qemu_integration
 DX_TEST_TARGET = $(BIN_DIR)/test_dx_path
 LIB_QEMU_SVGA3D = $(LIB_DIR)/libqemu_svga3d.so
 
-.PHONY: preload-lab all clean test test-oracle test-vlkn test-real-vulkan test-shader-translation test-shader test-guest-mem test-verified-rendering test-presentation test-qemu test-piglit harness-loop acceptance dump
+.PHONY: preload-lab preload-lab-release all clean test test-oracle test-vlkn test-real-vulkan test-shader-translation test-shader test-guest-mem test-verified-rendering test-presentation test-qemu test-piglit harness-loop acceptance dump
 
 all: $(BIN_DIR)/test_resource_limits $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence $(BIN_DIR)/test_buffer_ordering $(ORACLE_TARGET) $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(VLKN_TEST_TARGET) $(REAL_VULKAN_TEST_TARGET) $(SHADER_TRANSLATION_TEST_TARGET) $(TRANSLATOR_NOVULKAN_TEST_TARGET) $(SHADER_TEST_TARGET) $(GUEST_MEM_TEST_TARGET) $(VERIFIED_RENDERING_TEST_TARGET) $(PRESENTATION_TEST_TARGET) $(QEMU_TEST_TARGET) $(MALFORMED_INPUT_TEST_TARGET)
 
@@ -269,6 +269,11 @@ $(BIN_DIR)/test_preload_fifo: tests/test_preload_fifo.cpp src/qemu_svga3d_preloa
 # NOT part of the default build; build it explicitly for the designated VM
 # only, and never configure it as a global LD_PRELOAD.
 preload-lab: $(LIB_QEMU_SVGA3D)
+
+# Separate outputs prevent a debug adapter/library from being reused when
+# measuring release throughput. The ordinary lab target retains validation.
+preload-lab-release:
+	$(MAKE) BUILD_DIR=build/release BIN_DIR=bin/release LIB_DIR=lib/release CXXFLAGS="$(CXXFLAGS) -DNDEBUG" preload-lab
 
 $(BIN_DIR)/test_preload_fence: tests/test_preload_fence.cpp src/qemu_svga3d_preload.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@

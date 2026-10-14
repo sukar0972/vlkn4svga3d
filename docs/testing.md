@@ -129,6 +129,15 @@ Real-driver, buffer-ordering, shader-execution and verified-rendering suites
 remain available locally through the harness loop. Piglit requires the live VM;
 CI checks its reporting logic only.
 
+The [PR graphics gate policy](pr-graphics-gate.md) defines queue admission,
+latest-revision replacement, one-job Oracle scheduling, correctness before
+performance, result validity, retries and activation requirements. Its status
+table distinguishes implemented draft behavior from pending queue features.
+The draft compares the exact base and candidate with focused Piglit and matched
+glmark2; no GitHub runner or required graphics check is activated. The ordinary
+CI job tests gate failures and cleanup ownership locally; those tests do not
+establish guest graphics results. Smoke results cannot satisfy the full gate.
+
 ## Performance changes and correctness contracts
 
 The goal is higher end-to-end throughput with unchanged guest-visible accuracy.
@@ -245,6 +254,17 @@ What each suite proves:
 | `test_verified_rendering` | Analytical pixel/rendering scenes (repository-local; does not prove external GLES rendering) |
 | `test_presentation` | Presentation/framebuffer paths |
 | `test_qemu_integration` | Host-side integration only; no QEMU guest boots |
+
+## Lab release benchmarks
+
+For lab throughput measurements, `make preload-lab-release` builds the adapter
+and core with `NDEBUG` in separate `build/release/` and `lib/release/` outputs.
+The ordinary `preload-lab` target retains the debug validation policy. At VM
+startup, explicitly set `SVGA3_VLKN_VALIDATE=0` for timing and `=1` for Vulkan
+correctness checks. Clearing the variable does not disable validation in a
+debug build. Verify the loaded adapter hash and validation setting before
+comparing scores; benchmark runs with different validation settings are not
+comparable.
 
 ## QEMU integration limitations
 

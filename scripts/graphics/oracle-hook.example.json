@@ -1,0 +1,19 @@
+{
+  "runtime": "/opt/vlkn-ci/qemu-gate-root",
+  "base_image": "/opt/vlkn-ci/qemu-gate-root/images/debian12-graphics-base.qcow2",
+  "seed": "/home/ubuntu/vlkn-ci/guest/seed.iso",
+  "mesa_driver": "/opt/vlkn-ci/vmwgfx_dri-corrected.so",
+  "piglit_fixtures": "/opt/vlkn-ci/piglit-fixtures",
+  "ssh_user": "ubuntu",
+  "ssh": "vlkn-pr-guest",
+  "ssh_port": 2223,
+  "conditions": {
+    "host_icd": "lavapipe",
+    "host_runtime_mesa": "25.0.7-2+deb13u1",
+    "host_runtime_llvm": "19.1.7-3+b1",
+    "cpu_affinity": "unrestricted host scheduling; one guest vCPU",
+    "background_load": "record the actual fixed host workload",
+    "desktop": "1024x768",
+    "gpu_clocks": "software rendering"
+  }
+}
