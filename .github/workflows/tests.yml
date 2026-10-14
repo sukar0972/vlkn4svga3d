@@ -25,10 +25,15 @@ jobs:
         run: make -j2 test
       - name: Run no-ICD shader translator tests
         run: make test-translator-novulkan
-      - name: Run malformed-input regressions
-        run: make bin/test_malformed_inputs && ./bin/test_malformed_inputs
-      - name: Run lavapipe guest-memory, presentation and QEMU suites
+      - name: Run complete host harness with synchronization validation
         run: |
-          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
-          test -n "$VK_ICD_FILENAMES"
-          make -j2 test-guest-mem test-presentation test-qemu
+          export HARNESS_ICD="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$HARNESS_ICD"
+          export VK_ICD_FILENAMES="$HARNESS_ICD"
+          export VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
+          export SPIRV_TOOLS_DIR=/usr/bin
+          make -j2 all
+          bash scripts/harness_loop.sh --iterations 1 --skip-build --fail-fast
+          for suite in test_atomic_commands test_resource_limits test_query_state test_fifo_framing; do
+            "./bin/$suite"
+          done

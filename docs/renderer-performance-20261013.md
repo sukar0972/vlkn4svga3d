@@ -9,6 +9,9 @@ The current build passes the complete project-selected Piglit comparison,
 focused FBO regressions, host tests, accuracy and mixed X11/OpenGL controls.
 The existing unsupported-feature skips remain unchanged.
 
+Reproduction commands and private-driver build files are in
+[Proxmox performance setup](proxmox-performance-setup.md).
+
 ## Benchmark conditions
 
 - Proxmox host: Intel i5-7500T, four physical CPUs, Intel HD Graphics 630.
@@ -182,6 +185,10 @@ Temporary submission stack tracing was removed. The adapter does not defer
 or acknowledge successful guest fences before GPU completion.
 
 ## Evidence
+
+The committed [result summary](renderer-performance-20261013-results.json)
+contains complete counts, measured samples, component identities and a hash
+of the validated renderer/test source. Raw logs remain in the local artifacts.
 
 Artifacts are under `artifacts/performance-addition-20261013/`:
 

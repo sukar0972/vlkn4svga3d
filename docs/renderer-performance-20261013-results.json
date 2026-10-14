@@ -1,0 +1,190 @@
+{
+  "environment": "VM119, Intel i5-7500T / HD 630, Debian 12 guest; other VM CPU allocations unchanged",
+  "adapter_sha256": "597b66347fc9e0d00715472a95b43ecd5d7c2dda645036ebbefae4ad9315be1c",
+  "host_intel_driver_sha256": "6199401013d1704e4b030768780954d094e2a7add4e1a0b26b0656f8d741af12",
+  "guest_module_sha256": "88a1b2409b87b946843133ff28b1c0cf382dd21436b69e9a3507ce8ecaa7381a",
+  "glmark_one_second": [
+    {
+      "sample": "warmup",
+      "score": 646,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-1",
+      "score": 648,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-2",
+      "score": 643,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-3",
+      "score": 650,
+      "rendered_scenes": 32
+    }
+  ],
+  "glmark_standard": [
+    {
+      "sample": "warmup",
+      "score": 650,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-1",
+      "score": 659,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-2",
+      "score": 659,
+      "rendered_scenes": 32
+    },
+    {
+      "sample": "run-3",
+      "score": 657,
+      "rendered_scenes": 32
+    }
+  ],
+  "host_release": {
+    "svga3d-oracle": 0,
+    "test_atomic_commands": 0,
+    "test_buffer_ordering": 0,
+    "test_dx_path": 0,
+    "test_fifo_framing": 0,
+    "test_guest_memory": 0,
+    "test_malformed_inputs": 0,
+    "test_preload_fence": 0,
+    "test_preload_fifo": 0,
+    "test_presentation": 0,
+    "test_qemu_integration": 0,
+    "test_query_state": 0,
+    "test_real_vulkan": 0,
+    "test_resource_limits": 0,
+    "test_shader_execution": 0,
+    "test_shader_translation": 0,
+    "test_svga3_vlkn": 0,
+    "test_translator_novulkan": 0,
+    "test_verified_rendering": 0
+  },
+  "host_debug_suites_passed": 14,
+  "python_tests_passed": 36,
+  "piglit_selected": {
+    "count_unit": "top-level Piglit cases",
+    "counts": {
+      "svga": {
+        "pass": 141,
+        "skip": 5
+      },
+      "llvmpipe": {
+        "pass": 146
+      }
+    },
+    "subtest_counts": {
+      "svga": {
+        "pass": 149,
+        "skip": 160
+      },
+      "llvmpipe": {
+        "pass": 309
+      }
+    },
+    "completed": {
+      "svga": true,
+      "llvmpipe": true
+    },
+    "problems": {
+      "svga": {},
+      "llvmpipe": {}
+    },
+    "selection_problems": {
+      "svga": {
+        "missing": [],
+        "unexpected": []
+      },
+      "llvmpipe": {
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    "svga_problems_passing_llvmpipe": [],
+    "svga_skips_passing_llvmpipe": [
+      "spec@!opengl 2.0@gl-2.0-large-point-fs",
+      "spec@!opengl 2.0@fragment-and-vertex-texturing",
+      "spec@!opengl 2.1@fbo-mrt-alphatest-no-buffer-zero-write",
+      "spec@ext_framebuffer_object@fbo-blending-snorm",
+      "spec@glsl-1.10@execution@fs-discard-deep-branch"
+    ],
+    "svga_unverified_passing_llvmpipe": []
+  },
+  "piglit_fbo": {
+    "count_unit": "top-level Piglit cases",
+    "counts": {
+      "svga": {
+        "pass": 13,
+        "skip": 16
+      },
+      "llvmpipe": {
+        "pass": 29
+      }
+    },
+    "subtest_counts": {
+      "svga": {
+        "pass": 154
+      },
+      "llvmpipe": {
+        "pass": 249,
+        "skip": 4
+      }
+    },
+    "completed": {
+      "svga": true,
+      "llvmpipe": true
+    },
+    "problems": {
+      "svga": {},
+      "llvmpipe": {}
+    },
+    "selection_problems": {
+      "svga": {
+        "missing": [],
+        "unexpected": []
+      },
+      "llvmpipe": {
+        "missing": [],
+        "unexpected": []
+      }
+    },
+    "svga_problems_passing_llvmpipe": [],
+    "svga_skips_passing_llvmpipe": [
+      "spec@ext_framebuffer_object@fbo-blending-snorm",
+      "spec@ext_packed_float@fbo-blending-formats",
+      "spec@ext_packed_float@fbo-alphatest-formats",
+      "spec@ext_packed_float@fbo-colormask-formats",
+      "spec@ext_texture_integer@fbo-blending",
+      "spec@ext_texture_integer@fbo-blending gl_arb_texture_rg",
+      "spec@arb_texture_rg@fbo-blending-formats",
+      "spec@arb_texture_rg@fbo-alphatest-formats",
+      "spec@arb_texture_rg@fbo-colormask-formats",
+      "spec@arb_texture_rg@fbo-blending-formats-float",
+      "spec@arb_texture_rg@fbo-alphatest-formats-float",
+      "spec@arb_texture_rg@fbo-colormask-formats-float",
+      "spec@arb_texture_rgb10_a2ui@fbo-blending",
+      "spec@ext_texture_snorm@fbo-blending-formats",
+      "spec@ext_texture_snorm@fbo-alphatest-formats",
+      "spec@ext_texture_snorm@fbo-colormask-formats"
+    ],
+    "svga_unverified_passing_llvmpipe": []
+  },
+  "validation": {
+    "accuracy_failures": 0,
+    "mixed_x11_gl_failures": 0,
+    "glmark_success": 27,
+    "glmark_unknown": 6,
+    "glmark_failure": 0,
+    "vulkan_sync_renderer_errors": 0,
+    "gpu_hang_reset_fence_timeout": false
+  },
+  "validated_renderer_and_test_source_sha256": "9eb96f2b1ec9364847b629758116c14f4a1cca1d1ce7777023aeb2e585d80a24"
+}

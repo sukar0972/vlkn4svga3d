@@ -1,0 +1,11 @@
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential python3 meson ninja-build pkg-config ca-certificates \
+    python3-mako python3-yaml python3-packaging bison flex \
+    zlib1g-dev libzstd-dev libdrm-dev libexpat1-dev libelf-dev \
+    glslang-tools llvm-19-dev libclang-19-dev clang-19 \
+    libllvmspirvlib-19-dev spirv-tools spirv-headers libclc-19-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY build-intel.sh /usr/local/bin/build-intel
+WORKDIR /mesa
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/build-intel"]
