@@ -20,7 +20,8 @@ namespace svga3_vlkn {
 /* Threading and command-buffer contract (issue #13).
  *
  * The backend owns a SINGLE global command buffer (m_cmdBuffer) and a single
- * queue (m_queue). Every flush ends with vkQueueWaitIdle, so all recorded
+ * queue (m_queue). Every flush waits for queue completion, using queue idle
+ * or an explicitly enabled submission fence, so all recorded
  * work — transfers and draws alike — is fully serialized: correctness over
  * throughput. There is no separate transfer queue and no fence-based overlap.
  *
@@ -59,6 +60,14 @@ struct PerformanceCounters {
     uint64_t identicalShaderDefinitions = 0;
 };
 
+struct GraphicsDrawState {
+    VkViewport viewport{};
+    VkRect2D scissor{};
+    uint32_t blendColor = 0;
+    float constantBias = 0, slopeBias = 0;
+    std::array<std::array<uint32_t, 2>, 3> stencil{};
+};
+
 class VlknBackend {
 public:
     VlknBackend();
@@ -92,6 +101,14 @@ public:
     Svga3VlknStatus downloadFromBuffer(void *dstData, VkBuffer srcBuffer, VkDeviceSize srcOffset, VkDeviceSize size);
     void recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
                                VkDeviceSize offset, VkDeviceSize size);
+    // Optional coherent import of the registered framebuffer. Every use is
+    // completed before returning to its owner; registration changes release it.
+    VkBuffer importFramebuffer(void *pointer, size_t size, size_t requiredSize = 0);
+    // Only platform-owned allocations valid through process exit may opt in:
+    // the device-loss policy retains GPU allocations when completion is unknown.
+    Svga3VlknStatus enableFramebufferImport(bool enabled);
+    VkDeviceSize framebufferImportAlignment() const { return m_allowFramebufferImport ? m_hostImportAlignment : 0; }
+    Svga3VlknStatus releaseFramebufferImport();
 
     // Opt-in measurements; callers serialize access through the device lock.
     PerformanceCounters *performanceCounters() { return m_measurePerformance ? &m_performanceCounters : nullptr; }
@@ -100,6 +117,8 @@ public:
 
     /* Command buffer management */
     VkCommandBuffer getActiveCommandBuffer();
+    void bindGraphicsPipeline(VkCommandBuffer commands, VkPipeline pipeline);
+    void setGraphicsDrawState(VkCommandBuffer commands, const GraphicsDrawState &state);
     Svga3VlknStatus flushCommandBuffer();
     bool cmdBufferRecording() const { return m_cmdBufferRecording; }
     uint64_t recordingSerial() const { return m_recordingSerial; }
@@ -119,10 +138,12 @@ public:
     VkPhysicalDevice physicalDevice() const { return m_physicalDevice; }
     VkDevice device() const { return m_device; }
     VkQueue queue() const { return m_queue; }
+    bool enableSubmissionFenceWait(uint32_t spinMicroseconds);
     uint32_t queueFamilyIndex() const { return m_queueFamilyIndex; }
     const VkPhysicalDeviceProperties& properties() const { return m_props; }
     const VkPhysicalDeviceFeatures& features() const { return m_features; }
     bool customBorderColors() const { return m_customBorderColors; }
+    bool imageFormatList() const { return m_imageFormatList; }
     const VkPhysicalDeviceMemoryProperties& memoryProperties() const { return m_memProps; }
     VkDescriptorPool descriptorPool() const { return m_descriptorPool; }
 
@@ -147,7 +168,8 @@ public:
 
     /* Default / shared RenderPass for color + depth/stencil */
     VkRenderPass getOrCreateRenderPass(VkFormat colorFormat, VkFormat depthFormat);
-    VkRenderPass getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat);
+    VkRenderPass getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat,
+                                     uint32_t clearFlags = 0);
 
     /* Staging Buffer Accessors */
     VkBuffer stagingBuffer() const { return m_stagingBuffer; }
@@ -197,13 +219,30 @@ private:
     VkPhysicalDeviceProperties m_props;
     VkPhysicalDeviceFeatures m_features;
     bool m_customBorderColors = false;
+    bool m_imageFormatList = false;
+    VkDeviceSize m_hostImportAlignment = 0;
+    bool m_allowFramebufferImport = false;
+    PFN_vkGetMemoryHostPointerPropertiesEXT m_getHostPointerProperties = nullptr;
+    VkBuffer m_framebufferBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_framebufferMemory = VK_NULL_HANDLE;
+    void *m_framebufferPointer = nullptr;
+    size_t m_framebufferSize = 0;
     VkPhysicalDeviceMemoryProperties m_memProps;
 
     VkCommandPool m_cmdPool;
     VkCommandBuffer m_cmdBuffer;
+    VkFence m_submissionFence = VK_NULL_HANDLE;
+    PFN_vkDestroyFence m_destroySubmissionFence = nullptr;
+    PFN_vkResetFences m_resetSubmissionFence = nullptr;
+    PFN_vkGetFenceStatus m_submissionFenceStatus = nullptr;
+    PFN_vkWaitForFences m_waitSubmissionFence = nullptr;
+    uint32_t m_fenceSpinMicroseconds = 0;
     bool m_cmdBufferRecording;
     bool m_cmdBufferPending;
     bool m_renderPassActive;
+    VkPipeline m_boundGraphicsPipeline = VK_NULL_HANDLE;
+    bool m_graphicsDrawStateValid = false;
+    GraphicsDrawState m_graphicsDrawState{};
     uint64_t m_completedSubmissionSerial;
     uint64_t m_recordingSerial;
 
@@ -255,6 +294,7 @@ private:
         std::array<VkFormat, 4> colorFormats;
         VkFormat depthFormat;
         VkRenderPass renderPass;
+        uint32_t clearFlags;
     };
     std::vector<RenderPassEntry> m_renderPasses;
     std::mutex m_mutex;

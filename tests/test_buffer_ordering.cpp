@@ -7,6 +7,148 @@
 #define DST(t, n) (0x800f0000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 #define SRC(t, n) (0x80e40000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 static uint32_t floatBits(float value) { uint32_t bits; memcpy(&bits,&value,4); return bits; }
+static bool batched_image_transfer_regression() {
+  Svga3VlknConfig cfg{};cfg.enableValidationLayers=true;
+  auto *d=svga3_vlkn_device_create(&cfg);if(!d)return false;
+  d->surfaceMgr->enableImageTransferBatching(true);
+  d->backend->enablePerformanceCounters(true);d->backend->resetPerformanceCounters();
+  bool ok=true;SVGA3dSize small{4,4,1},large{8,8,1};
+  for(unsigned sid=101;sid<=103;++sid)
+    ok &= svga3_vlkn_surface_define(d,sid,SVGA3D_SURFACE_HINT_TEXTURE,SVGA3D_A8R8G8B8,sid==103?&large:&small,1)==SVGA3_VLKN_SUCCESS;
+  uint32_t original[16],changed[16];
+  for(unsigned i=0;i<16;++i) { original[i]=0xff000000u+i*0x000d0703u;changed[i]=0xff800000u+i*0x00030507u; }
+  ok &= svga3_vlkn_surface_dma_upload(d,101,0,nullptr,original,16)==SVGA3_VLKN_SUCCESS;
+  const auto complete=d->backend->completedSubmissionSerial();
+  SVGA3dCopyBox copy{0,0,0,4,4,1,0,0,0};
+  ok &= svga3_vlkn_surface_copy(d,101,102,&copy,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dBox source{0,0,0,4,4,1},destination{0,0,0,8,8,1};
+  ok &= svga3_vlkn_surface_stretch_blt(d,102,103,&source,&destination,SVGA3D_STRETCH_BLT_POINT)==SVGA3_VLKN_SUCCESS;
+  ok &= d->backend->completedSubmissionSerial()==complete;
+  // A later source upload cannot change the already queued copy and blit.
+  ok &= svga3_vlkn_surface_dma_upload(d,101,0,nullptr,changed,16)==SVGA3_VLKN_SUCCESS;
+  uint32_t scaled[64]{};
+  ok &= svga3_vlkn_surface_dma_download(d,103,0,nullptr,scaled,32)==SVGA3_VLKN_SUCCESS;
+  for(unsigned y=0;y<8;++y)for(unsigned x=0;x<8;++x)ok &= scaled[y*8+x]==original[(y/2)*4+x/2];
+  ok &= d->backend->performanceCounters()->queueSubmissions==1;
+  uint32_t current[16]{};
+  ok &= svga3_vlkn_surface_dma_download(d,101,0,nullptr,current,16)==SVGA3_VLKN_SUCCESS && !memcmp(current,changed,sizeof(current));
+  // Buffer copies keep their synchronous CPU-readback contract.
+  SVGA3dSize bytes{64,1,1};
+  for(unsigned sid=104;sid<=105;++sid)
+    ok &= svga3_vlkn_surface_define(d,sid,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&bytes,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_upload(d,104,0,nullptr,original,64)==SVGA3_VLKN_SUCCESS;
+  copy={0,0,0,64,1,1,0,0,0};
+  ok &= svga3_vlkn_surface_copy(d,104,105,&copy,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_dma_download(d,105,0,nullptr,current,64)==SVGA3_VLKN_SUCCESS && !memcmp(current,original,sizeof(current));
+  d->contextMgr->clear();d->surfaceMgr->clear();d->backend->shutdown();
+  ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
+  svga3_vlkn_device_destroy(d);
+  printf("batched image copy/blit ordering, later source update and synchronous buffer copy: %s\n",ok?"PASS":"FAIL");
+  return ok;
+}
+static bool constant_epoch_regression() {
+  Svga3VlknConfig cfg{}; cfg.enableValidationLayers=true;
+  auto *d=svga3_vlkn_device_create(&cfg); if (!d) return false;
+  bool ok=svga3_vlkn_context_create(d,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dSize target{4,4,1}, vertices{36,1,1};
+  ok &= svga3_vlkn_surface_define(d,1,0,SVGA3D_A8R8G8B8,&target,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_surface_define(d,2,SVGA3D_SURFACE_HINT_VERTEXBUFFER,SVGA3D_BUFFER,&vertices,1)==SVGA3_VLKN_SUCCESS;
+  const float positions[]{-1,-1,0,3,-1,0,-1,3,0};
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+  const uint32_t vs[]{0xfffe0300,31u|(2u<<24),0x80000000,DST(1,0),
+    31u|(2u<<24),0x80000000,DST(6,0),1u|(2u<<24),DST(6,0),SRC(1,0),0xffff};
+  const uint32_t ps[]{0xffff0300,1u|(2u<<24),DST(8,0),SRC(2,0),0xffff};
+  ok &= svga3_vlkn_context_define_shader(d,1,1,SVGA3D_SHADERTYPE_VS,vs,sizeof(vs)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_define_shader(d,1,1,SVGA3D_SHADERTYPE_PS,ps,sizeof(ps)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_VS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,1,SVGA3D_RT_COLOR0,1,0,0)==SVGA3_VLKN_SUCCESS;
+  SVGA3dRect viewport{0,0,4,4},left{0,0,2,4},right{2,0,2,4};
+  ok &= svga3_vlkn_context_set_viewport(d,1,&viewport)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_CULLMODE,SVGA3D_FACE_NONE)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,1,SVGA3D_RS_SCISSORTESTENABLE,1)==SVGA3_VLKN_SUCCESS;
+  SVGA3dVertexDecl decl{}; decl.identity.type=SVGA3D_DECLTYPE_FLOAT3; decl.identity.usage=SVGA3D_DECLUSAGE_POSITION; decl.array={2,0,12};
+  SVGA3dPrimitiveRange range{}; range.primType=SVGA3D_PRIMITIVE_TRIANGLELIST; range.primitiveCount=1; range.indexArray.surfaceId=SVGA3D_INVALID_ID;
+  auto draw=[&]() { return svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS; };
+  const float colors[][4]{{1,0,0,1},{0,0,1,1},{0,1,0,1},{1,1,1,1}};
+  const uint32_t expected[]{0xffff0000u,0xff0000ffu,0xff00ff00u,0xffffffffu};
+  for (unsigned epoch=0;epoch<4;++epoch) {
+    unsigned a=epoch%4,b=(epoch+1)%4;
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_scissor_rect(d,1,&left)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[a]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_device_wait_idle(d)==SVGA3_VLKN_SUCCESS;
+    // Reuse unchanged state after completion, then queue another unchanged
+    // draw and a changed-color draw before observing either region.
+    ok &= draw();
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[a]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_context_set_scissor_rect(d,1,&right)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[b]))==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    uint32_t pixels[16]{};
+    if (epoch == 1) {
+      SVGA3dBox middleVertex{12,0,0,12,1,1};
+      const float movedVertex[]{10,10,0};
+      ok &= svga3_vlkn_surface_dma_upload(d,2,0,&middleVertex,movedVertex,12)==SVGA3_VLKN_SUCCESS;
+      auto *mapped = static_cast<const uint8_t *>(d->surfaceMgr->getSurface(2)->bufferMapped());
+      ok &= mapped && !memcmp(mapped,positions,12) && !memcmp(mapped+12,movedVertex,12) &&
+          !memcmp(mapped+24,positions+6,12);
+    }
+    if (epoch == 2) {
+      auto *vertexSurface = d->surfaceMgr->getSurface(2);
+      const size_t oldSize = vertexSurface->bufferSize();
+      const auto beforeGrowth = d->backend->completedSubmissionSerial();
+      ok &= vertexSurface->ensureBufferSize(oldSize+17)==SVGA3_VLKN_SUCCESS;
+      ok &= d->backend->completedSubmissionSerial()>beforeGrowth;
+      auto *mapped = static_cast<const uint8_t *>(vertexSurface->bufferMapped());
+      ok &= mapped && !memcmp(mapped,positions,sizeof(positions));
+      if (mapped) for (size_t i=oldSize;i<vertexSurface->bufferSize();++i) ok &= mapped[i]==0;
+    }
+    // Later CPU writes must preserve the queued vertices across repeated
+    // submission epochs.
+    float hiddenPositions[9];
+    for (unsigned i=0;i<9;++i) hiddenPositions[i]=positions[i]+(i%3==0 ? 10.0f : 0.0f);
+    ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,hiddenPositions,36)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x)
+      ok &= pixels[y*4+x]==expected[x<2?a:b];
+  }
+  // Dynamic raster state belongs to the shared command buffer. Alternate
+  // contexts with different viewport/scissor values, then repeat after a
+  // readback starts a new recording with otherwise unchanged guest state.
+  ok &= svga3_vlkn_surface_dma_upload(d,2,0,nullptr,positions,36)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_create(d,2)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_define_shader(d,2,1,SVGA3D_SHADERTYPE_VS,vs,sizeof(vs)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_define_shader(d,2,1,SVGA3D_SHADERTYPE_PS,ps,sizeof(ps)/4)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,2,SVGA3D_SHADERTYPE_VS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader(d,2,SVGA3D_SHADERTYPE_PS,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_target(d,2,SVGA3D_RT_COLOR0,1,0,0)==SVGA3_VLKN_SUCCESS;
+  SVGA3dRect top{0,0,4,2};
+  ok &= svga3_vlkn_context_set_viewport(d,2,&top)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_scissor_rect(d,2,&right)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,2,SVGA3D_RS_CULLMODE,SVGA3D_FACE_NONE)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_render_state(d,2,SVGA3D_RS_SCISSORTESTENABLE,1)==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader_const(d,1,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[0]))==SVGA3_VLKN_SUCCESS;
+  ok &= svga3_vlkn_context_set_shader_const(d,2,0,SVGA3D_SHADERTYPE_PS,SVGA3D_CONST_TYPE_FLOAT,reinterpret_cast<const uint32_t*>(colors[1]))==SVGA3_VLKN_SUCCESS;
+  for (unsigned epoch=0;epoch<2;++epoch) {
+    uint32_t pixels[16]{};
+    ok &= svga3_vlkn_surface_dma_upload(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    ok &= svga3_vlkn_context_set_scissor_rect(d,1,&left)==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_context_draw(d,2,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
+    ok &= draw();
+    ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
+    for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x)
+      ok &= pixels[y*4+x] == (x<2 ? expected[0] : y<2 ? expected[1] : 0);
+  }
+  d->contextMgr->clear(); d->surfaceMgr->clear(); d->backend->shutdown();
+  ok &= !d->backend->validationErrors() && !d->backend->validationWarnings();
+  svga3_vlkn_device_destroy(d);
+  printf("immutable constants across submission epochs: %s\n",ok?"PASS":"FAIL");
+  return ok;
+}
 static bool gamma_and_relative_regression() {
   Svga3VlknConfig cfg{}; cfg.enableValidationLayers = true;
   auto *d=svga3_vlkn_device_create(&cfg); if (!d) return false;
@@ -418,6 +560,7 @@ static bool staging_wrap_regression() {
 }
 int main() {
   if (!gamma_and_relative_regression()) return 1;
+  if (!constant_epoch_regression()) return 1;
   Svga3VlknConfig cfg{};
   cfg.apiVersion = VK_API_VERSION_1_1;
   cfg.enableValidationLayers = true;
@@ -627,6 +770,27 @@ int main() {
   const uint32_t depthPixel = pixels[48 * 64 + 40];
   correct &= (depthPixel & 0x00ffffff) == 0x00404040;
   printf("depth texture sample pixel=0x%08x expected=0xff404040\n", depthPixel);
+  // The guest's normalized 24-bit texture fallback uses D24S8_INT when
+  // floating DF24 is unavailable. Keep raw depth sampling valid for that
+  // fallback and both ordinary packed 24-bit formats.
+  for (auto format : {SVGA3D_Z_D24S8_INT, SVGA3D_Z_D24X8, SVGA3D_Z_D24S8}) {
+    correct &= svga3_vlkn_surface_define(d, 5, 0, format, &depthSize, 1) ==
+               SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_set_render_target(d, 1, SVGA3D_RT_DEPTH,
+                                                    5, 0, 0) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_clear(d, 1, SVGA3D_CLEAR_DEPTH, 0, 0.25f,
+                                        0, nullptr, 0) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_set_render_target(d, 1, SVGA3D_RT_DEPTH,
+                                                    SVGA3D_INVALID_ID, 0, 0) ==
+               SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_context_draw(d, 1, SVGA3D_PRIMITIVE_TRIANGLELIST,
+                                       &decl, 1, &r, 1) == SVGA3_VLKN_SUCCESS;
+    correct &= svga3_vlkn_surface_dma_download(d, 1, 0, nullptr, pixels.data(),
+                                               64 * 4) == SVGA3_VLKN_SUCCESS;
+    correct &= (pixels[48 * 64 + 40] & 0xffffff) == 0x404040;
+    printf("packed depth format=%u sample pixel=0x%08x expected=0xff404040\n",
+           unsigned(format), pixels[48 * 64 + 40]);
+  }
   /* Retire a cache with more than 64 distinct sampler states safely. */
   for (unsigned i = 0; i < 80; ++i) {
     float bias = float(i) / 16;
@@ -835,6 +999,7 @@ int main() {
   correct &= d->backend->validationErrors() == 0 &&
              d->backend->validationWarnings() == 0;
   svga3_vlkn_device_destroy(d);
+  correct &= batched_image_transfer_regression();
   correct &= staging_wrap_regression();
   correct &= robust_index_regression();
   return correct ? 0 : 1;

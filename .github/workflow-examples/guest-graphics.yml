@@ -1,0 +1,46 @@
+name: Guest graphics
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One dedicated machine/guest pool: never overlap measurements or cancel cleanup.
+concurrency:
+  group: guest-graphics-lab
+  cancel-in-progress: false
+
+jobs:
+  guest-graphics:
+    name: Piglit and glmark2 gate
+    runs-on: [self-hosted, linux, x64, vlkn-guest-graphics]
+    environment: guest-graphics
+    timeout-minutes: 360
+    steps:
+      - name: Check out candidate merge commit
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+          persist-credentials: false
+      - name: Check out exact PR base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: baseline
+          persist-credentials: false
+      - name: Run guest correctness and performance gate
+        run: >-
+          python3 candidate/scripts/run_pr_graphics_gate.py
+          --base baseline --candidate candidate
+          --guest-hook /opt/vlkn-ci/guest-hook
+          --output graphics-evidence
+      - name: Preserve evidence even when testing fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-graphics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: graphics-evidence/
+          if-no-files-found: error
+          retention-days: 30

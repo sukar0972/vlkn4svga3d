@@ -121,6 +121,11 @@ void VlknBackend::shutdown() {
                 (unsigned long long)c.identicalShaderDefinitions);
     }
     cleanupRetiredBuffers(true);
+    releaseFramebufferImport();
+    if (m_submissionFence) {
+        m_destroySubmissionFence(m_device, m_submissionFence, nullptr);
+        m_submissionFence = VK_NULL_HANDLE;
+    }
 
     for (auto &rp : m_renderPasses) {
         if (rp.renderPass) {
@@ -421,25 +426,59 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
         auto enumerate = (PFN_vkEnumerateDeviceExtensionProperties)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkEnumerateDeviceExtensionProperties");
         auto getFeatures = (PFN_vkGetPhysicalDeviceFeatures2)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2");
         uint32_t count = 0;
-        if (enumerate && getFeatures && enumerate(m_physicalDevice, nullptr, &count, nullptr) == VK_SUCCESS) {
+        if (enumerate && enumerate(m_physicalDevice, nullptr, &count, nullptr) == VK_SUCCESS) {
             std::vector<VkExtensionProperties> extensions(count);
             if (enumerate(m_physicalDevice, nullptr, &count, extensions.data()) == VK_SUCCESS) {
-                for (const auto &extension : extensions) if (strcmp(extension.extensionName, borderExtension) == 0) {
-                    VkPhysicalDeviceFeatures2 features = {};
-                    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-                    features.pNext = &borderFeatures;
-                    getFeatures(m_physicalDevice, &features);
-                    m_customBorderColors = borderFeatures.customBorderColors && borderFeatures.customBorderColorWithoutFormat;
-                    break;
+                for (const auto &extension : extensions) {
+                    const uint32_t requestedVersion = (config && config->apiVersion) ? config->apiVersion : VK_API_VERSION_1_1;
+                    if (getFeatures && strcmp(extension.extensionName, borderExtension) == 0) {
+                        VkPhysicalDeviceFeatures2 features = {};
+                        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+                        features.pNext = &borderFeatures;
+                        getFeatures(m_physicalDevice, &features);
+                        m_customBorderColors = borderFeatures.customBorderColors && borderFeatures.customBorderColorWithoutFormat;
+                    }
+                    // maintenance2, required by image_format_list, is core in 1.1.
+                    if (requestedVersion >= VK_API_VERSION_1_1 && m_props.apiVersion >= VK_API_VERSION_1_1 &&
+                        strcmp(extension.extensionName, VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME) == 0)
+                        m_imageFormatList = true;
+                    if (requestedVersion >= VK_API_VERSION_1_1 && m_props.apiVersion >= VK_API_VERSION_1_1 &&
+                        strcmp(extension.extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME) == 0) {
+                        auto properties = (PFN_vkGetPhysicalDeviceProperties2)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceProperties2");
+                        auto external = (PFN_vkGetPhysicalDeviceExternalBufferProperties)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceExternalBufferProperties");
+                        if (properties && external) {
+                            VkPhysicalDeviceExternalMemoryHostPropertiesEXT host{};
+                            host.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
+                            VkPhysicalDeviceProperties2 props{};
+                            props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+                            props.pNext = &host;
+                            properties(m_physicalDevice, &props);
+                            VkPhysicalDeviceExternalBufferInfo info{};
+                            info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO;
+                            info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                            info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+                            VkExternalBufferProperties result{};
+                            result.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES;
+                            external(m_physicalDevice, &info, &result);
+                            const auto flags = result.externalMemoryProperties.externalMemoryFeatures;
+                            if ((flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) &&
+                                !(flags & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT))
+                                m_hostImportAlignment = host.minImportedHostPointerAlignment;
+                        }
+                    }
                 }
             }
         }
     }
+    std::vector<const char *> deviceExtensions;
+    if (m_imageFormatList) deviceExtensions.push_back(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME);
+    if (m_hostImportAlignment) deviceExtensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     if (m_customBorderColors) {
         deviceCreateInfo.pNext = &borderFeatures;
-        deviceCreateInfo.enabledExtensionCount = 1;
-        deviceCreateInfo.ppEnabledExtensionNames = &borderExtension;
+        deviceExtensions.push_back(borderExtension);
     }
+    deviceCreateInfo.enabledExtensionCount = deviceExtensions.size();
+    deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     VkResult res = m_dispatch.vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_device);
     if (res != VK_SUCCESS) {
@@ -453,6 +492,8 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     }
 
     m_dispatch.vkGetDeviceQueue(m_device, m_queueFamilyIndex, 0, &m_queue);
+    if (m_hostImportAlignment)
+        m_getHostPointerProperties = (PFN_vkGetMemoryHostPointerPropertiesEXT)m_dispatch.vkGetDeviceProcAddr(m_device, "vkGetMemoryHostPointerPropertiesEXT");
 
     /* Create Command Pool */
     VkCommandPoolCreateInfo poolInfo = {};
@@ -559,6 +600,11 @@ Svga3VlknStatus VlknBackend::createBuffer(VkDeviceSize size,
                                          VkDeviceMemory *outMemory,
                                          VkMemoryPropertyFlags preferredProperties)
 {
+    // Queued vertex/index updates snapshot old mapped bytes. Cached coherent
+    // memory keeps those CPU reads cheap while preserving the required flags.
+    if (!preferredProperties && (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
+        (usage & (VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT)))
+        preferredProperties = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -795,6 +841,100 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
     return SVGA3_VLKN_SUCCESS;
 }
 
+Svga3VlknStatus VlknBackend::enableFramebufferImport(bool enabled) {
+    if (!enabled) {
+        auto status = releaseFramebufferImport();
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+    }
+    m_allowFramebufferImport = enabled;
+    return SVGA3_VLKN_SUCCESS;
+}
+
+Svga3VlknStatus VlknBackend::releaseFramebufferImport() {
+    if (!m_framebufferBuffer) {
+        m_framebufferPointer = nullptr;
+        m_framebufferSize = 0;
+        return SVGA3_VLKN_SUCCESS;
+    }
+    auto status = flushCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) return status;
+    destroyBuffer(m_framebufferBuffer, m_framebufferMemory);
+    m_framebufferBuffer = VK_NULL_HANDLE;
+    m_framebufferMemory = VK_NULL_HANDLE;
+    m_framebufferPointer = nullptr;
+    m_framebufferSize = 0;
+    return SVGA3_VLKN_SUCCESS;
+}
+
+VkBuffer VlknBackend::importFramebuffer(void *pointer, size_t size, size_t requiredSize) {
+    if (!m_allowFramebufferImport || m_deviceLost || !m_getHostPointerProperties || !m_hostImportAlignment || !pointer ||
+        uintptr_t(pointer) % m_hostImportAlignment || !size)
+        return VK_NULL_HANDLE;
+    if (requiredSize) {
+        if (requiredSize > size || requiredSize > SIZE_MAX - (m_hostImportAlignment - 1)) return VK_NULL_HANDLE;
+        const size_t rounded = ((requiredSize + m_hostImportAlignment - 1) / m_hostImportAlignment) * m_hostImportAlignment;
+        if (rounded > size) return VK_NULL_HANDLE;
+        size = rounded;
+    }
+    if (size % m_hostImportAlignment) return VK_NULL_HANDLE;
+    if (pointer == m_framebufferPointer && size == m_framebufferSize) return m_framebufferBuffer;
+    if (releaseFramebufferImport() != SVGA3_VLKN_SUCCESS) return VK_NULL_HANDLE;
+    // Remember failed imports too; an unavailable platform mapping must not
+    // cause allocation attempts on every frame. Re-registration clears it.
+    m_framebufferPointer = pointer;
+    m_framebufferSize = size;
+
+    VkMemoryHostPointerPropertiesEXT host{};
+    host.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT;
+    VkResult result = m_getHostPointerProperties(m_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                pointer, &host);
+    observeDeviceResult(result);
+    if (result != VK_SUCCESS) return VK_NULL_HANDLE;
+    VkExternalMemoryBufferCreateInfo external{};
+    external.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+    external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+    VkBufferCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    info.pNext = &external;
+    info.size = size;
+    info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    result = m_dispatch.vkCreateBuffer(m_device, &info, nullptr, &buffer);
+    observeDeviceResult(result);
+    if (result != VK_SUCCESS) return VK_NULL_HANDLE;
+    VkMemoryRequirements requirements{};
+    m_dispatch.vkGetBufferMemoryRequirements(m_device, buffer, &requirements);
+    int type = findMemoryType(requirements.memoryTypeBits & host.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (type < 0 || requirements.size > size) {
+        destroyBuffer(buffer, memory);
+        return VK_NULL_HANDLE;
+    }
+    VkImportMemoryHostPointerInfoEXT import{};
+    import.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT;
+    import.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+    import.pHostPointer = pointer;
+    VkMemoryAllocateInfo allocation{};
+    allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocation.pNext = &import;
+    allocation.allocationSize = size;
+    allocation.memoryTypeIndex = type;
+    result = m_dispatch.vkAllocateMemory(m_device, &allocation, nullptr, &memory);
+    if (result == VK_SUCCESS) result = m_dispatch.vkBindBufferMemory(m_device, buffer, memory, 0);
+    observeDeviceResult(result);
+    if (result != VK_SUCCESS) {
+        destroyBuffer(buffer, memory);
+        return VK_NULL_HANDLE;
+    }
+    m_framebufferBuffer = buffer;
+    m_framebufferMemory = memory;
+    log_msg("[libqemu_svga3d] Imported coherent framebuffer: %p size=%zu memory_type=%d\n", pointer, size, type);
+    return buffer;
+}
+
 void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffer,
                                        VkDeviceSize offset, VkDeviceSize size) {
     // Queue completion supplies execution ordering; this dependency makes
@@ -823,9 +963,55 @@ VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
         observeDeviceResult(result);
         if (result != VK_SUCCESS) return VK_NULL_HANDLE;
         m_cmdBufferRecording = true;
+        m_boundGraphicsPipeline = VK_NULL_HANDLE;
+        m_graphicsDrawStateValid = false;
         ++m_recordingSerial;
     }
     return m_cmdBuffer;
+}
+
+void VlknBackend::bindGraphicsPipeline(VkCommandBuffer commands, VkPipeline pipeline) {
+    // Binding state belongs to the shared command buffer, not a context.
+    // A new recording invalidates it; interleaved contexts update it here.
+    if (pipeline != m_boundGraphicsPipeline) {
+        m_dispatch.vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        m_boundGraphicsPipeline = pipeline;
+    }
+}
+
+void VlknBackend::setGraphicsDrawState(VkCommandBuffer commands, const GraphicsDrawState &state) {
+    // All renderer pipelines declare these states dynamic. Values persist
+    // across compatible pipeline binds and render passes, but not recordings.
+    const auto &old = m_graphicsDrawState;
+    const bool first = !m_graphicsDrawStateValid;
+    if (first || memcmp(&state.viewport, &old.viewport, sizeof(state.viewport)))
+        m_dispatch.vkCmdSetViewport(commands, 0, 1, &state.viewport);
+    if (first || memcmp(&state.scissor, &old.scissor, sizeof(state.scissor)))
+        m_dispatch.vkCmdSetScissor(commands, 0, 1, &state.scissor);
+    if (first || state.blendColor != old.blendColor) {
+        const uint32_t color = state.blendColor;
+        const float values[4] = {float((color >> 16) & 255) / 255,
+            float((color >> 8) & 255) / 255, float(color & 255) / 255, float(color >> 24) / 255};
+        m_dispatch.vkCmdSetBlendConstants(commands, values);
+    }
+    if (first || memcmp(&state.constantBias, &old.constantBias, sizeof(float)) ||
+        memcmp(&state.slopeBias, &old.slopeBias, sizeof(float)))
+        m_dispatch.vkCmdSetDepthBias(commands, state.constantBias, 0, state.slopeBias);
+    const PFN_vkCmdSetStencilReference setters[] = {m_dispatch.vkCmdSetStencilReference,
+        m_dispatch.vkCmdSetStencilCompareMask, m_dispatch.vkCmdSetStencilWriteMask};
+    for (size_t i = 0; i < state.stencil.size(); ++i) {
+        const auto &faces = state.stencil[i];
+        const bool front = first || faces[0] != old.stencil[i][0];
+        const bool back = first || faces[1] != old.stencil[i][1];
+        if ((front || back) && faces[0] == faces[1])
+            setters[i](commands, VK_STENCIL_FACE_FRONT_AND_BACK, faces[0]);
+        else {
+            if (front) setters[i](commands, VK_STENCIL_FACE_FRONT_BIT, faces[0]);
+            if (back) setters[i](commands, VK_STENCIL_FACE_BACK_BIT, faces[1]);
+        }
+    }
+    m_graphicsDrawState = state;
+    m_graphicsDrawStateValid = true;
 }
 
 void VlknBackend::retireBuffer(VkBuffer buffer, VkDeviceMemory memory, void *mapped, uint64_t serial, size_t budgetBytes) {
@@ -895,6 +1081,32 @@ void VlknBackend::cmdEndRenderPass(VkCommandBuffer cb) {
     m_renderPassActive = false;
 }
 
+bool VlknBackend::enableSubmissionFenceWait(uint32_t spinMicroseconds) {
+    if (!m_device || m_deviceLost || m_dispatch.isMock || !m_dispatch.vkGetDeviceProcAddr) return false;
+    auto create = (PFN_vkCreateFence)m_dispatch.vkGetDeviceProcAddr(m_device, "vkCreateFence");
+    auto destroy = (PFN_vkDestroyFence)m_dispatch.vkGetDeviceProcAddr(m_device, "vkDestroyFence");
+    auto reset = (PFN_vkResetFences)m_dispatch.vkGetDeviceProcAddr(m_device, "vkResetFences");
+    auto status = (PFN_vkGetFenceStatus)m_dispatch.vkGetDeviceProcAddr(m_device, "vkGetFenceStatus");
+    auto wait = (PFN_vkWaitForFences)m_dispatch.vkGetDeviceProcAddr(m_device, "vkWaitForFences");
+    if (!create || !destroy || !reset || !status || !wait) return false;
+    if (!m_submissionFence) {
+        VkFenceCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VkFence fence = VK_NULL_HANDLE;
+        VkResult result = create(m_device, &info, nullptr, &fence);
+        observeDeviceResult(result);
+        if (result != VK_SUCCESS) return false;
+        m_submissionFence = fence;
+    }
+    // Preserve an existing working mode if entry-point resolution fails.
+    m_destroySubmissionFence = destroy;
+    m_resetSubmissionFence = reset;
+    m_submissionFenceStatus = status;
+    m_waitSubmissionFence = wait;
+    m_fenceSpinMicroseconds = std::min(spinMicroseconds, 2000u);
+    return true;
+}
+
 Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     /* A prior submit may have succeeded even when its queue wait failed. Do
@@ -924,6 +1136,13 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
         m_renderPassActive = false;
     }
 
+    if (m_submissionFence) {
+        VkResult fenceResult = m_resetSubmissionFence(m_device, 1, &m_submissionFence);
+        if (fenceResult != VK_SUCCESS) {
+            observeDeviceResult(fenceResult);
+            return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        }
+    }
     VkResult res = m_dispatch.vkEndCommandBuffer(m_cmdBuffer);
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
@@ -942,8 +1161,7 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_cmdBuffer;
-
-    res = m_dispatch.vkQueueSubmit(m_queue, 1, &submitInfo, VK_NULL_HANDLE);
+    res = m_dispatch.vkQueueSubmit(m_queue, 1, &submitInfo, m_submissionFence);
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkQueueSubmit error: %d\n", res);
@@ -956,13 +1174,24 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     m_cmdBufferPending = true;
     const auto waitStart = m_measurePerformance ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     if (m_measurePerformance) ++m_performanceCounters.queueSubmissions;
-    res = m_dispatch.vkQueueWaitIdle(m_queue);
+    if (m_submissionFence) {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::microseconds(m_fenceSpinMicroseconds);
+        res = VK_NOT_READY;
+        while (m_fenceSpinMicroseconds && res == VK_NOT_READY &&
+               std::chrono::steady_clock::now() < deadline)
+            res = m_submissionFenceStatus(m_device, m_submissionFence);
+        if (res == VK_NOT_READY)
+            res = m_waitSubmissionFence(m_device, 1, &m_submissionFence, VK_TRUE, UINT64_MAX);
+    } else {
+        res = m_dispatch.vkQueueWaitIdle(m_queue);
+    }
     if (m_measurePerformance)
         m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - waitStart).count();
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
-        log_msg("[libqemu_svga3d] vkQueueWaitIdle error: %d\n", res);
+        log_msg("[libqemu_svga3d] Submission completion wait error: %d\n", res);
         /* The submit was accepted. Keep its buffer pending until waitIdle()
          * establishes completion; resetting it here would race the GPU. */
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
@@ -987,10 +1216,12 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(VkFormat colorFormat, VkFormat d
     return getOrCreateRenderPass({colorFormat, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED}, depthFormat);
 }
 
-VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat) {
+VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &colorFormats, VkFormat depthFormat,
+                                              uint32_t clearFlags) {
+    clearFlags &= SVGA3D_CLEAR_COLOR | SVGA3D_CLEAR_DEPTH | SVGA3D_CLEAR_STENCIL;
     std::lock_guard<std::mutex> lock(m_mutex);
     for (const auto &entry : m_renderPasses) {
-        if (entry.colorFormats == colorFormats && entry.depthFormat == depthFormat) {
+        if (entry.colorFormats == colorFormats && entry.depthFormat == depthFormat && entry.clearFlags == clearFlags) {
             return entry.renderPass;
         }
     }
@@ -1007,7 +1238,7 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &c
         auto &a = attachments[attachmentCount];
         a.format = colorFormats[i];
         a.samples = VK_SAMPLE_COUNT_1_BIT;
-        a.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        a.loadOp = (clearFlags & SVGA3D_CLEAR_COLOR) ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1023,12 +1254,13 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &c
     if (depthFormat != VK_FORMAT_UNDEFINED) {
         attachments[attachmentCount].format = depthFormat;
         attachments[attachmentCount].samples = VK_SAMPLE_COUNT_1_BIT;
-        attachments[attachmentCount].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        attachments[attachmentCount].loadOp = (clearFlags & SVGA3D_CLEAR_DEPTH) ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         attachments[attachmentCount].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         bool hasStencil = (depthFormat == VK_FORMAT_D24_UNORM_S8_UINT ||
                            depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT ||
                            depthFormat == VK_FORMAT_D16_UNORM_S8_UINT);
-        attachments[attachmentCount].stencilLoadOp = hasStencil ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[attachmentCount].stencilLoadOp = hasStencil ?
+            ((clearFlags & SVGA3D_CLEAR_STENCIL) ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD) : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         attachments[attachmentCount].stencilStoreOp = hasStencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[attachmentCount].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         attachments[attachmentCount].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -1062,7 +1294,7 @@ VkRenderPass VlknBackend::getOrCreateRenderPass(const std::array<VkFormat, 4> &c
         return VK_NULL_HANDLE;
     }
 
-    m_renderPasses.push_back({ colorFormats, depthFormat, rp });
+    m_renderPasses.push_back({ colorFormats, depthFormat, rp, clearFlags });
     return rp;
 }
 

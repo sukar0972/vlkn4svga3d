@@ -3,6 +3,7 @@
 #include "svga3_surface.h"
 #include "vlkn_backend.h"
 #include <cstdio>
+#include <unordered_map>
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 static unsigned barriers, imageCopies, bufferCopies;
@@ -22,6 +23,28 @@ static VkResult VKAPI_CALL captureSampler(VkDevice device,const VkSamplerCreateI
 }
 static VkImageAspectFlags clearAspect;
 static void VKAPI_CALL captureClear(VkCommandBuffer, uint32_t count, const VkClearAttachment *attachments, uint32_t, const VkClearRect *) { clearAspect = count ? attachments[count-1].aspectMask : 0; }
+static PFN_vkCreateRenderPass savedRenderPass;
+static PFN_vkCmdBeginRenderPass savedBeginRenderPass;
+static std::unordered_map<VkRenderPass, VkImageAspectFlags> loadClearAspects;
+static VkResult VKAPI_CALL captureRenderPass(VkDevice device, const VkRenderPassCreateInfo *info,
+                                            const VkAllocationCallbacks *allocator, VkRenderPass *out) {
+    const auto result=savedRenderPass(device,info,allocator,out);
+    if (result==VK_SUCCESS) {
+        VkImageAspectFlags aspects=0;
+        const auto *depth=info->pSubpasses[0].pDepthStencilAttachment;
+        if (depth && depth->attachment!=VK_ATTACHMENT_UNUSED) {
+            const auto &attachment=info->pAttachments[depth->attachment];
+            if (attachment.loadOp==VK_ATTACHMENT_LOAD_OP_CLEAR) aspects|=VK_IMAGE_ASPECT_DEPTH_BIT;
+            if (attachment.stencilLoadOp==VK_ATTACHMENT_LOAD_OP_CLEAR) aspects|=VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+        loadClearAspects[*out]=aspects;
+    }
+    return result;
+}
+static void VKAPI_CALL captureBeginRenderPass(VkCommandBuffer commands, const VkRenderPassBeginInfo *info, VkSubpassContents contents) {
+    clearAspect=loadClearAspects[info->renderPass];
+    savedBeginRenderPass(commands,info,contents);
+}
 static VkIndexType boundIndexType = VK_INDEX_TYPE_UINT32;
 static void VKAPI_CALL countBarriers(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags, uint32_t, const VkMemoryBarrier *, uint32_t, const VkBufferMemoryBarrier *, uint32_t count, const VkImageMemoryBarrier *images) { ++barriers;
     for (uint32_t i=0;i<count;++i) if (images[i].image==narrowImage && narrowImage) {
@@ -262,6 +285,12 @@ int main() {
     CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_AUTOGENMIPMAPS,&signedCap) && signedCap==0);
     auto savedClear = dispatch.vkCmdClearAttachments;
     dispatch.vkCmdClearAttachments = captureClear;
+    // Observe cleared aspects for both attachment load clears and rectangle
+    // clears, without requiring either command encoding.
+    savedRenderPass=dispatch.vkCreateRenderPass;
+    savedBeginRenderPass=dispatch.vkCmdBeginRenderPass;
+    dispatch.vkCreateRenderPass=captureRenderPass;
+    dispatch.vkCmdBeginRenderPass=captureBeginRenderPass;
     for (auto format : {SVGA3D_Z_D16,SVGA3D_Z_D24X8,SVGA3D_Z_D24S8}) {
         CHECK(dev->surfaceMgr->defineSurface(6,SVGA3D_SURFACE_HINT_DEPTHSTENCIL,format,&imageSize,1) == SVGA3_VLKN_SUCCESS);
         CHECK(ctx->setRenderTarget(SVGA3D_RT_DEPTH,6,0,0) == SVGA3_VLKN_SUCCESS);
@@ -288,6 +317,9 @@ int main() {
     cube->transitionLayout(dev->backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     CHECK(cube->currentLayout()==VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     dispatch.vkCmdClearAttachments = savedClear;
+    dispatch.vkCreateRenderPass=savedRenderPass;
+    dispatch.vkCmdBeginRenderPass=savedBeginRenderPass;
+    loadClearAspects.clear();
     dispatch.vkCmdPipelineBarrier = savedBarrier; dispatch.vkCmdCopyImage = savedImageCopy;
     dispatch.vkCmdCopyBuffer = savedBufferCopy; dispatch.vkCmdBindIndexBuffer = savedIndex;
     svga3_vlkn_device_destroy(dev);

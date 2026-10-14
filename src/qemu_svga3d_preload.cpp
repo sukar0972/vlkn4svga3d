@@ -131,8 +131,11 @@
 #define SVGA_CMD_RECT_FILL            2
 #endif
 #define SVGA_FIFO_NEXT                SVGA_FIFO_NEXT_CMD
-static constexpr uint32_t kPreloadHardwareVersion = SVGA3D_HWVERSION_WS65_B1;
-static_assert(kPreloadHardwareVersion == 0x00020000, "WS65_B1 protocol value");
+// Preserve the lab's vGPU9 hardware version: Linux vmwgfx/Xorg requires 2.1
+// for this screen-object guest path. Use its actual enum, rather than the old
+// locally redefined WS65_B1 name (whose protocol value is 2.0).
+static constexpr uint32_t kPreloadHardwareVersion = SVGA3D_HWVERSION_WS8_B1;
+static_assert(kPreloadHardwareVersion == 0x00020001, "WS8_B1 protocol value");
 #define SVGA_FIFO_BUSY                290
 
 struct vmsvga_rect_s {
@@ -170,7 +173,6 @@ static uint32_t saved_gmr_desc = 0;
 static uint32_t saved_irqmask = 0;
 static uint32_t saved_num_guest_displays = 1;
 static FILE *log_file = NULL;
-
 /* Production SVGA3=VLKN Vulkan Device State */
 static Svga3VlknDevice *g_vlknDev = nullptr;
 static bool g_renderer_lost = false;
@@ -513,6 +515,51 @@ static void find_guest_ram(void *vram_hva) {
     fclose(f);
 }
 
+/* Screen readback for the supported primary 32-bit framebuffer path.
+ * Snapshot before writing: source and destination may alias with different
+ * pitches. Every address is checked before GPU completion or CPU mutation. */
+static bool blit_screen_to_gmrfb(void *s, int32_t dx, int32_t dy,
+                               int32_t left, int32_t top, int32_t right,
+                               int32_t bottom, uint32_t screen) {
+    if (!g_screen_scanout_active || g_screen_deactivated || screen != 0 || !g_display_gmrfb_defined ||
+        g_display_gmrfb.ptr.gmrId != SVGA_GMR_FRAMEBUFFER ||
+        g_display_gmrfb.format.s.bitsPerPixel != 32 ||
+        g_display_gmrfb.format.s.colorDepth != 24 || dx < 0 || dy < 0 ||
+        left < 0 || top < 0 || right <= left || bottom <= top) return false;
+    const uint32_t width = g_screen_scanout_active ? g_screen_scanout_width : reg_value(s,SVGA_REG_WIDTH);
+    const uint32_t height = g_screen_scanout_active ? g_screen_scanout_height : reg_value(s,SVGA_REG_HEIGHT);
+    const uint64_t pitch = g_screen_scanout_active ? g_screen_scanout_pitch : reg_value(s,SVGA_REG_BYTES_PER_LINE);
+    const uint64_t offset = g_screen_scanout_active ? g_screen_scanout_offset : 0;
+    const uint64_t size = reg_value(s,SVGA_REG_VRAM_SIZE);
+    const uint64_t destPitch = g_display_gmrfb.bytesPerLine;
+    uint8_t *vram = *(uint8_t **)((char *)s + 8);
+    if (!vram || !pitch || !destPitch || (uint32_t)right > width ||
+        (uint32_t)bottom > height || (uint64_t)width*4 > pitch) return false;
+    const uint64_t rows = (uint64_t)bottom-top, rowBytes = ((uint64_t)right-left)*4;
+    if ((uint64_t)dx*4+rowBytes > destPitch) return false;
+    const uint64_t src = offset+(uint64_t)top*pitch+(uint64_t)left*4;
+    const uint64_t dst = (uint64_t)g_display_gmrfb.ptr.offset+(uint64_t)dy*destPitch+(uint64_t)dx*4;
+    if (src >= size || dst >= size || rows-1 > (size-src)/pitch ||
+        rows-1 > (size-dst)/destPitch ||
+        rowBytes > size-(src+(rows-1)*pitch) ||
+        rowBytes > size-(dst+(rows-1)*destPitch)) return false;
+    std::vector<uint8_t> snapshot;
+    try { snapshot.resize((size_t)(rows*rowBytes)); }
+    catch (const std::bad_alloc &) { return false; }
+    if (g_vlknDev && g_vlknDev->backend) {
+        if (g_renderer_lost || g_vlknDev->backend->flushCommandBuffer() != SVGA3_VLKN_SUCCESS) {
+            g_renderer_lost = true;
+            log_msg("[libqemu_svga3d] Renderer disabled after screen readback completion failure\n");
+            return false;
+        }
+    }
+    for (uint64_t row=0; row<rows; ++row)
+        memcpy(snapshot.data()+row*rowBytes,vram+src+row*pitch,(size_t)rowBytes);
+    for (uint64_t row=0; row<rows; ++row)
+        memcpy(vram+dst+row*destPitch,snapshot.data()+row*rowBytes,(size_t)rowBytes);
+    return true;
+}
+
 static void ensure_vlkn_device(void *s) {
     std::lock_guard<std::mutex> lock(g_vlkn_mutex);
     if (g_vlkn_initialized) return;
@@ -535,6 +582,19 @@ static void ensure_vlkn_device(void *s) {
         log_msg("[libqemu_svga3d] WARNING: svga3_vlkn_device_create failed; fallback to CPU!\n");
         return;
     }
+    // QEMU's non-hotpluggable VGA VRAM mapping lasts through process exit,
+    // including device loss. Ordinary core framebuffer owners keep staging.
+    g_vlknDev->backend->enableFramebufferImport(true);
+    const char *batchTransfers = getenv("SVGA3_VLKN_BATCH_IMAGE_TRANSFERS");
+    if (batchTransfers && strcmp(batchTransfers,"1") == 0) {
+        g_vlknDev->surfaceMgr->enableImageTransferBatching(true);
+        log_msg("[libqemu_svga3d] Eligible image transfer batching enabled; guest fences remain synchronous\n");
+    }
+    const char *spin = getenv("SVGA3_VLKN_FENCE_WAIT_US");
+    if ((!spin || strcmp(spin,"off") != 0) &&
+        g_vlknDev->backend->enableSubmissionFenceWait(spin ? strtoul(spin,nullptr,10) : 2000))
+        log_msg("[libqemu_svga3d] Synchronous submission fence enabled, spin=%s us\n", spin ? spin : "2000 (default)");
+
 
     if (g_guest_ram_base && g_guest_ram_size > 0) {
         svga3_vlkn_device_map_guest_ram(g_vlknDev, 0, g_guest_ram_base, g_guest_ram_size);
@@ -627,7 +687,10 @@ static void init_devcaps_record(uint32_t *fifo) {
 }
 
 static uint32_t peek_word(uint32_t *fifo, uint32_t stop, uint32_t min, uint32_t max, uint32_t i) {
-    return fifo[(min + ((uint64_t)stop-min+(uint64_t)i*4) % (max-min)) / 4];
+    uint64_t offset = uint64_t(stop) - min + uint64_t(i) * 4;
+    const uint32_t span = max - min;
+    if (offset >= span) offset %= span;
+    return fifo[(min + offset) / 4];
 }
 
 extern "C" void my_vmsvga_fifo_run(void *s) {
@@ -703,6 +766,13 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                 }
             }
             if (min >= 28) fifo[SVGA_FIFO_FENCE] = P(1);
+            if (g_vlknDev && fence_count % 1000 == 0) {
+                if (auto *c = g_vlknDev->backend->performanceCounters())
+                    log_msg("[libqemu_svga3d] Performance sample: fences=%u presents=%llu submissions=%llu wait_ns=%llu readback_bytes=%llu scanout_copy_bytes=%llu\n",
+                        fence_count, (unsigned long long)c->presentationCalls, (unsigned long long)c->queueSubmissions,
+                        (unsigned long long)c->queueWaitNanoseconds, (unsigned long long)c->readbackBytes,
+                        (unsigned long long)c->framebufferCopyBytes);
+            }
         } else if (cmd == SVGA_CMD_ESCAPE) {
             /* Video overlay no-ops */
         } else if (cmd == SVGA_CMD_DEFINE_SCREEN) {
@@ -792,9 +862,13 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                     redraw(s, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0), (uint32_t)(y1 - y0));
             }
         } else if (cmd == SVGA_CMD_BLIT_SCREEN_TO_GMRFB) {
-            static uint64_t unsupportedReadbacks=0;
-            if (++unsupportedReadbacks==1 || (unsupportedReadbacks&(unsupportedReadbacks-1))==0)
-                log_msg("[libqemu_svga3d] BLIT_SCREEN_TO_GMRFB is unsupported (total=%llu)\n",(unsigned long long)unsupportedReadbacks);
+            bool copied = blit_screen_to_gmrfb(s,(int32_t)P(1),(int32_t)P(2),
+                (int32_t)P(3),(int32_t)P(4),(int32_t)P(5),(int32_t)P(6),P(7));
+            if (!copied) {
+                static uint64_t rejectedReadbacks=0;
+                if (++rejectedReadbacks==1 || (rejectedReadbacks&(rejectedReadbacks-1))==0)
+                    log_msg("[libqemu_svga3d] BLIT_SCREEN_TO_GMRFB rejected (total=%llu)\n",(unsigned long long)rejectedReadbacks);
+            }
         } else if (cmd == SVGA_CMD_ANNOTATION_FILL || cmd == SVGA_CMD_ANNOTATION_COPY) {
             /* Handled / consumed */
         } else if ((cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) ||
@@ -822,19 +896,29 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                  * packet length was validated against available words. */
                 size_t wordsToCopy = packetBytes / 4;
                 thread_local std::vector<uint32_t> packetWords;
-                packetWords.resize(wordsToCopy);
+                // Retain the high-water size as well as capacity: shrinking
+                // then growing would zero-fill bytes immediately overwritten
+                // by the snapshot. The parser still sees only packetBytes.
+                if (packetWords.size() < wordsToCopy) packetWords.resize(wordsToCopy);
                 if (stop + packetBytes <= max) {
                     memcpy(packetWords.data(), (const uint8_t *)fifo + stop, wordsToCopy * 4);
                 } else {
-                    for (uint64_t w = 0; w < wordsToCopy; ++w) {
-                        packetWords[w] = P(w);
-                    }
+                    const size_t firstBytes = max - stop;
+                    memcpy(packetWords.data(), (const uint8_t *)fifo + stop, firstBytes);
+                    memcpy((uint8_t *)packetWords.data() + firstBytes,
+                           (const uint8_t *)fifo + min, packetBytes - firstBytes);
                 }
                 svga3_vlkn_fifo_execute(g_vlknDev, packetWords.data(), packetBytes, &bytesConsumed);
             }
         }
 
-        stop = min + ((uint64_t)stop - min + words * 4) % (max - min);
+        // A framed packet occupies less than one ring, so at most one wrap
+        // is possible. Keep division off the common command-consumer path.
+        {
+            uint64_t nextStop = uint64_t(stop) + words * 4;
+            if (nextStop >= max) nextStop -= max - min;
+            stop = uint32_t(nextStop);
+        }
         fifo[SVGA_FIFO_STOP] = stop;
         *(uint32_t *)((char *)s + OFFSET_FIFO_STOP) = stop;
         available -= words;
@@ -958,6 +1042,8 @@ extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, u
             return;
         }
         case SVGA_REG_SYNC:
+            my_vmsvga_fifo_run(s);
+            return;
         case SVGA_REG_BUSY:
             my_vmsvga_fifo_run(s);
             return;
@@ -1118,9 +1204,11 @@ extern "C" void my_input_event_sync(void) {
 
 static uint32_t guest_bmask;
 static uint32_t vnc_bmap[10] = { 0x01, 0x04, 0x02, 0x08, 0x10, 0x20, 0x40 };
-__attribute__((visibility("hidden"))) void *vnc_pointer_cont = NULL;
+// Assembly references these symbols outside the C++ call graph. Preserve
+// their names and definitions under link-time optimization.
+__attribute__((used, externally_visible, visibility("hidden"))) void *vnc_pointer_cont = NULL;
 
-extern "C" void my_vnc_pointer_event(void *vs, uint32_t button_mask, int x, int y) {
+extern "C" __attribute__((used, externally_visible)) void my_vnc_pointer_event(void *vs, uint32_t button_mask, int x, int y) {
     if (!vs || !orig_input_queue_abs) return;
     void *vnc_display = *(void **)((char *)vs + VS_VD);
     void *con = vnc_display ? *(void **)((char *)vnc_display + VD_CONSOLE) : NULL;
