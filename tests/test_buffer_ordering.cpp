@@ -4,6 +4,17 @@
 #include <cstring>
 #include <vector>
 #include <limits>
+
+#ifdef SVGA3_TEST_SUBMIT_DRAWS
+// Run the same pixel/order contracts with each draw in a separate submission.
+static Svga3VlknStatus drawAndSubmit(Svga3VlknDevice *dev, uint32_t cid,
+    SVGA3dPrimitiveType type, const SVGA3dVertexDecl *decls, uint32_t numDecls,
+    const SVGA3dPrimitiveRange *ranges, uint32_t numRanges) {
+  auto status = svga3_vlkn_context_draw(dev, cid, type, decls, numDecls, ranges, numRanges);
+  return status == SVGA3_VLKN_SUCCESS ? svga3_vlkn_device_submit(dev) : status;
+}
+#define svga3_vlkn_context_draw drawAndSubmit
+#endif
 #define DST(t, n) (0x800f0000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 #define SRC(t, n) (0x80e40000u | (((t) & 7) << 28) | (((t) & 24) << 8) | (n))
 static uint32_t floatBits(float value) { uint32_t bits; memcpy(&bits,&value,4); return bits; }

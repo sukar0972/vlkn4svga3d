@@ -176,7 +176,7 @@ time. Run `make benchmark-presentation BENCHMARK_ITERATIONS=200`; set
 executables on the same device for comparisons. These timings are not glmark2
 scores or predictions of guest FPS. Performance counters are disabled by default;
 `SVGA3_VLKN_PERF_COUNTERS` enables them at backend startup and logs totals on
-shutdown. Queue timing covers the submission queue wait, not every device idle.
+shutdown. Queue timing covers submission-fence waits, including command-buffer reuse; it excludes explicit device-idle waits.
 
 See [the presentation efficiency report](presentation-efficiency-20261005.md)
 for the audit, measurement conditions, and accuracy results.
@@ -272,3 +272,29 @@ comparable.
 
 
 The [renderer performance report](renderer-performance-20261004.md) records the renderer optimization, matched benchmark conditions, and retained Piglit/glmark2 accuracy.
+
+## Submission and public API checks
+
+`make test-public-api` compiles a C consumer and checks version negotiation,
+configuration diagnostics, limits and packet framing. `make test-install`
+stages the install and compiles an example using only installed headers and
+pkg-config metadata.
+
+`test_submissions` uses real Vulkan and validation to check more submissions
+than command-buffer slots, staging wrap, overwrite ordering, large temporary
+uploads and the wait-idle boundary. It is part of `make harness-loop` and CI.
+The backend keeps three command buffers and a fence per submission. Upload
+sources are copied before returning. CPU readback, staging reuse, guest fences
+and destruction drain submitted work before touching memory. Completion serials
+advance at drains, keeping constant-ring and resource-retirement lifetimes
+conservative while uploads overlap.
+
+`make acceptance` now creates a fresh evidence directory, records hashes of the
+actual source files, runs the mock and Vulkan suites, and reports only those
+results. `HARNESS_RESULTS_DIR` can select a separate harness output directory.
+It does not infer guest correctness or driver identity from fixed strings.
+
+The [native QEMU tests](../integrations/qemu/README.md) build a separate QEMU
+binary and exercise the actual device through qtest plus a bare-metal guest
+that boots and reboots. Guest desktop Piglit and glmark2 still require a
+separate run against the chosen VM integration.

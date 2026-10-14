@@ -118,6 +118,10 @@ typedef struct VlknDispatchTable {
     PFN_vkCmdResetQueryPool                  vkCmdResetQueryPool;
     PFN_vkGetQueryPoolResults                vkGetQueryPoolResults;
 
+    PFN_vkCreateFence                        vkCreateFence;
+    PFN_vkDestroyFence                       vkDestroyFence;
+    PFN_vkWaitForFences                       vkWaitForFences;
+    PFN_vkResetFences                         vkResetFences;
     PFN_vkQueueSubmit                        vkQueueSubmit;
     PFN_vkQueueWaitIdle                      vkQueueWaitIdle;
     PFN_vkDeviceWaitIdle                     vkDeviceWaitIdle;

@@ -627,45 +627,19 @@ static void ensure_vlkn_device(void *s) {
 }
 
 static uint32_t advertised_devcap(const DevCapInfo &cap) {
+    uint32_t value = 0;
+    if (!g_vlknDev || !svga3_vlkn_query_cap(g_vlknDev, cap.id, &value)) return 0;
     switch (cap.id) {
-    case SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4: {
-        uint32_t value = cap.expectedValue | SVGA3DFORMAT_OP_NOALPHABLEND;
-        if (g_vlknDev) svga3_vlkn_query_cap(g_vlknDev, cap.id, &value);
-        return value;
-    }
     case SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8:
     case SVGA3D_DEVCAP_SURFACEFMT_R5G6B5:
     case SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5:
-        /* Mesa and vmwgfx only treat a format as a scanout when DISPLAYMODE
-         * is set. 3DACCELERATION implies that bit on real SVGA3D devices. */
-        return cap.expectedValue
-            | SVGA3DFORMAT_OP_DISPLAYMODE
-            | SVGA3DFORMAT_OP_3DACCELERATION
-            | SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB
-            | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
-    case SVGA3D_DEVCAP_SURFACEFMT_DXT1:
-    case SVGA3D_DEVCAP_SURFACEFMT_DXT2:
-    case SVGA3D_DEVCAP_SURFACEFMT_DXT3:
-    case SVGA3D_DEVCAP_SURFACEFMT_DXT4:
-    case SVGA3D_DEVCAP_SURFACEFMT_DXT5:
-        return SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE;
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_DF24: return 0;
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_D16:
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8:
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8:
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_DF16:
-    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT:
-        /* Mesa requires SVGA3DFORMAT_OP_ZSTENCIL before it exposes a
-         * depth visual. 0x10 (SAME_FORMAT_RENDERTARGET) is not enough. */
-        return SVGA3DFORMAT_OP_ZSTENCIL
-            | SVGA3DFORMAT_OP_ZSTENCIL_WITH_ARBITRARY_COLOR_DEPTH
-            | SVGA3DFORMAT_OP_TEXTURE;
-    default: {
-        uint32_t value = 0;
-        svga3_vlkn_query_cap(g_vlknDev, cap.id, &value);
-        return value;
+        if (value & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET)
+            value |= SVGA3DFORMAT_OP_DISPLAYMODE | SVGA3DFORMAT_OP_3DACCELERATION
+                | SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
+        break;
+    default: break;
     }
-    }
+    return value;
 }
 
 static void init_devcaps_record(uint32_t *fifo) {

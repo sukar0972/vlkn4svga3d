@@ -1,0 +1,184 @@
+--- a/hw/display/vmware_vga.c
++++ b/hw/display/vmware_vga.c
+@@ -41,11 +41,18 @@
+ #define HW_MOUSE_ACCEL
+ 
+ #include "vga_int.h"
++#ifdef CONFIG_VLKN_SVGA3D
++#include "vlkn-svga.h"
++#endif
+ 
+ /* See http://vmware-svga.sf.net/ for some documentation on VMWare SVGA */
+ 
+ struct vmsvga_state_s {
+     VGACommonState vga;
++    bool vlkn_enabled;
++#ifdef CONFIG_VLKN_SVGA3D
++    VlknSvga *vlkn;
++#endif
+ 
+     int invalidated;
+     int enable;
+@@ -571,6 +578,10 @@
+     s->fifo_max  = le32_to_cpu(s->fifo[SVGA_FIFO_MAX]);
+     s->fifo_next = le32_to_cpu(s->fifo[SVGA_FIFO_NEXT]);
+     s->fifo_stop = le32_to_cpu(s->fifo[SVGA_FIFO_STOP]);
++#ifdef CONFIG_VLKN_SVGA3D
++    if (s->vlkn && (s->fifo_min < 4096 || s->fifo_stop < s->fifo_min || s->fifo_stop >= s->fifo_max ||
++                    s->fifo_next < s->fifo_min || s->fifo_next >= s->fifo_max)) return 0;
++#endif
+ 
+     /* Check range and alignment.  */
+     if ((s->fifo_min | s->fifo_max | s->fifo_next | s->fifo_stop) & 3) {
+@@ -613,6 +624,8 @@
+     return le32_to_cpu(vmsvga_fifo_read_raw(s));
+ }
+ 
++static inline void vmsvga_check_size(struct vmsvga_state_s *s);
++
+ static void vmsvga_fifo_run(struct vmsvga_state_s *s)
+ {
+     uint32_t cmd, colour;
+@@ -622,9 +635,26 @@
+     uint32_t cmd_start;
+ 
+     len = vmsvga_fifo_length(s);
++#ifdef CONFIG_VLKN_SVGA3D
++    if (s->vlkn && s->enable && s->new_width > 0 && s->new_height > 0) vmsvga_check_size(s);
++#endif
+     while (len > 0 && --maxloop > 0) {
+         /* May need to go back to the start of the command if incomplete */
+         cmd_start = s->fifo_stop;
++#ifdef CONFIG_VLKN_SVGA3D
++        if (s->vlkn) {
++            int used = vlkn_svga_dispatch(s->vlkn, s->fifo_ptr, s->fifo_min,
++                                          s->fifo_max, s->fifo_next, s->fifo_stop);
++            if (used < 0) break;
++            if (used > 0) {
++                s->fifo_stop = s->fifo_min + (s->fifo_stop - s->fifo_min + used) %
++                                               (s->fifo_max - s->fifo_min);
++                s->fifo[SVGA_FIFO_STOP] = cpu_to_le32(s->fifo_stop);
++                len -= used / 4;
++                continue;
++            }
++        }
++#endif
+ 
+         switch (cmd = vmsvga_fifo_read(s)) {
+         case SVGA_CMD_UPDATE:
+@@ -790,6 +820,9 @@
+         }
+     }
+ 
++#ifdef CONFIG_VLKN_SVGA3D
++    vlkn_svga_submit(s->vlkn);
++#endif
+     s->syncing = 0;
+ }
+ 
+@@ -907,6 +940,9 @@
+         caps |= SVGA_CAP_CURSOR | SVGA_CAP_CURSOR_BYPASS_2 |
+                 SVGA_CAP_CURSOR_BYPASS;
+ #endif
++#ifdef CONFIG_VLKN_SVGA3D
++        if (s->vlkn) caps |= vlkn_svga_reg(s->vlkn, SVGA_REG_CAPABILITIES);
++#endif
+         ret = caps;
+         break;
+ 
+@@ -950,11 +986,21 @@
+         ret = s->cursor.on;
+         break;
+ 
++#ifdef CONFIG_VLKN_SVGA3D
++    case 43: case 44: case 46: case 47:
++        ret = s->vlkn ? vlkn_svga_reg(s->vlkn, s->index) : 0;
++        break;
++#endif
+     case SVGA_REG_SCRATCH_SIZE:
+         ret = s->scratch_size;
+         break;
+ 
+     case SVGA_REG_MEM_REGS:
++#ifdef CONFIG_VLKN_SVGA3D
++        if (s->vlkn) { ret = vlkn_svga_reg(s->vlkn, s->index); break; }
++#endif
++        ret = 0;
++        break;
+     case SVGA_REG_NUM_DISPLAYS:
+     case SVGA_REG_PITCHLOCK:
+     case SVGA_PALETTE_BASE ... SVGA_PALETTE_END:
+@@ -1161,6 +1207,12 @@
+     struct pci_vmsvga_state_s *pci = VMWARE_SVGA(dev);
+     struct vmsvga_state_s *s = &pci->chip;
+ 
++#ifdef CONFIG_VLKN_SVGA3D
++    if (s->vlkn) {
++        vlkn_svga_reset(s->vlkn);
++        vlkn_svga_fifo_init(s->vlkn, (uint32_t *)s->fifo_ptr);
++    }
++#endif
+     s->index = 0;
+     s->enable = 0;
+     s->config = 0;
+@@ -1326,13 +1378,33 @@
+     vmsvga_init(DEVICE(dev), &s->chip,
+                 pci_address_space(dev), pci_address_space_io(dev));
+ 
++    if (s->chip.vlkn_enabled) {
++#ifdef CONFIG_VLKN_SVGA3D
++        s->chip.vlkn = vlkn_svga_new(dev, s->chip.vga.con, &s->chip.vga.vram, errp);
++        if (!s->chip.vlkn) return;
++        vlkn_svga_fifo_init(s->chip.vlkn, (uint32_t *)s->chip.fifo_ptr);
++#else
++        error_setg(errp, "QEMU was built without svga3-vlkn pkg-config support");
++        return;
++#endif
++    }
++
+     pci_register_bar(dev, 1, PCI_BASE_ADDRESS_MEM_PREFETCH,
+                      &s->chip.vga.vram);
+     pci_register_bar(dev, 2, PCI_BASE_ADDRESS_MEM_PREFETCH,
+                      &s->chip.fifo_ram);
+ }
+ 
++static void pci_vmsvga_exit(PCIDevice *dev) {
++#ifdef CONFIG_VLKN_SVGA3D
++    struct pci_vmsvga_state_s *s = VMWARE_SVGA(dev);
++    vlkn_svga_free(s->chip.vlkn);
++    s->chip.vlkn = NULL;
++#endif
++}
++
+ static Property vga_vmware_properties[] = {
++    DEFINE_PROP_BOOL("vlkn", struct pci_vmsvga_state_s, chip.vlkn_enabled, false),
+     DEFINE_PROP_UINT32("vgamem_mb", struct pci_vmsvga_state_s,
+                        chip.vga.vram_size_mb, 16),
+     DEFINE_PROP_BOOL("global-vmstate", struct pci_vmsvga_state_s,
+@@ -1346,6 +1418,7 @@
+     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+ 
+     k->realize = pci_vmsvga_realize;
++    k->exit = pci_vmsvga_exit;
+     k->romfile = "vgabios-vmware.bin";
+     k->vendor_id = PCI_VENDOR_ID_VMWARE;
+     k->device_id = SVGA_PCI_DEVICE_ID;
+--- a/hw/display/meson.build
++++ b/hw/display/meson.build
+@@ -19,7 +19,15 @@
+ system_ss.add(when: 'CONFIG_VGA_PCI', if_true: files('vga-pci.c'))
+ system_ss.add(when: 'CONFIG_VGA_ISA', if_true: files('vga-isa.c'))
+ system_ss.add(when: 'CONFIG_VGA_MMIO', if_true: files('vga-mmio.c'))
+-system_ss.add(when: 'CONFIG_VMWARE_VGA', if_true: files('vmware_vga.c'))
++vlkn_svga = dependency('svga3-vlkn', required: false)
++if vlkn_svga.found()
++  vlkn_svga = declare_dependency(dependencies: vlkn_svga,
++                                compile_args: ['-DCONFIG_VLKN_SVGA3D'])
++  system_ss.add(when: 'CONFIG_VMWARE_VGA',
++                if_true: [files('vmware_vga.c', 'vlkn-svga.c'), vlkn_svga])
++else
++  system_ss.add(when: 'CONFIG_VMWARE_VGA', if_true: files('vmware_vga.c'))
++endif
+ system_ss.add(when: 'CONFIG_BOCHS_DISPLAY', if_true: files('bochs-display.c'))
+ 
+ system_ss.add(when: 'CONFIG_EXYNOS4', if_true: files('exynos4210_fimd.c'))

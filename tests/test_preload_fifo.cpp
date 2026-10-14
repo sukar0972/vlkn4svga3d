@@ -91,12 +91,17 @@ static void flushLegacy(void *) { ++legacyFlushes; }
 static void screenWrite(void *, uint64_t, uint64_t, unsigned) {}
 
 int main() {
+  Svga3VlknConfig capConfig{}; capConfig.forceMockBackend = true;
+  g_vlknDev = svga3_vlkn_device_create(&capConfig);
+  if (!g_vlknDev) return 1;
   bool depthCaps=false,df24Disabled=false;
   for (const auto &cap:g_DevCaps) {
     if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_Z_D16) depthCaps=advertised_devcap(cap)!=0;
     if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_Z_DF24) df24Disabled=advertised_devcap(cap)==0;
   }
   if (!depthCaps || !df24Disabled) return 1;
+  svga3_vlkn_device_destroy(g_vlknDev);
+  g_vlknDev = nullptr;
   std::vector<uint64_t> storage(0x20000 / 8);
   auto *state = reinterpret_cast<char *>(storage.data());
   std::vector<uint32_t> ring(32768);

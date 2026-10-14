@@ -41,11 +41,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-RESULTS_DIR="$ROOT_DIR/.harness-loop"
+RESULTS_DIR="${HARNESS_RESULTS_DIR:-$ROOT_DIR/.harness-loop}"
 mkdir -p "$RESULTS_DIR"
 
 # ---------------------------------------------------------------- env: ICD ---
-DEFAULT_ICD="$HOME/workspace/svga-vlkn-harness/prefix/share/vulkan/icd.d/lvp_icd.x86_64.json"
+DEFAULT_ICD="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit 2>/dev/null)"
 HARNESS_ICD="${HARNESS_ICD:-$DEFAULT_ICD}"
 if [[ ! -f "$HARNESS_ICD" ]]; then
     echo "[harness-loop] FATAL: Vulkan ICD not found: $HARNESS_ICD" >&2
@@ -56,7 +56,7 @@ export VK_ICD_FILENAMES="$HARNESS_ICD"
 echo "[harness-loop] Using Vulkan ICD: $VK_ICD_FILENAMES"
 
 # ------------------------------------------------------- env: SPIRV-Tools ---
-DEFAULT_SPIRV_DIR="$HOME/workspace/spirv-tools/build/tools"
+DEFAULT_SPIRV_DIR="$(dirname "$(command -v spirv-val || echo /missing/spirv-val)")"
 SPIRV_TOOLS_DIR="${SPIRV_TOOLS_DIR:-$DEFAULT_SPIRV_DIR}"
 if [[ -x "$SPIRV_TOOLS_DIR/spirv-val" ]]; then
     export PATH="$SPIRV_TOOLS_DIR:$PATH"
@@ -73,6 +73,8 @@ HARNESS_TIMEOUT="${HARNESS_TIMEOUT:-900}"
 # suite is ICD-free but harmless to run with the ICD exported).
 ICD_FREE_SUITES=( test_translator_novulkan test_preload_fifo test_preload_fence )
 LAVAPIPE_SUITES=(
+    test_draw_submissions
+    test_submissions
     test_buffer_ordering
     test_dx_path
     test_shader_translation

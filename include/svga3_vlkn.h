@@ -75,17 +75,40 @@ typedef struct Svga3VlknDevice Svga3VlknDevice;
 typedef struct Svga3VlknContext Svga3VlknContext;
 typedef struct Svga3VlknSurface Svga3VlknSurface;
 
+#define SVGA3_VLKN_VERSION "0.1.0"
+#define SVGA3_VLKN_CONFIG_VERSION 1u
+
+/* Extensible configuration for new consumers. structSize and version must be
+ * initialized with svga3_vlkn_config_init(). The legacy config/API remains ABI
+ * compatible. Zero resource limits select defaults; ceilings are 4096/64. */
+typedef struct Svga3VlknConfigV1 {
+    uint32_t structSize;
+    uint32_t version;
+    Svga3VlknConfig device;
+} Svga3VlknConfigV1;
+
+void svga3_vlkn_config_init(Svga3VlknConfigV1 *config);
+/* On failure *outDevice is NULL. diagnostic is optional, caller-owned, and
+ * always terminated when diagnosticSize > 0. No C++ exceptions cross this API. */
+Svga3VlknStatus svga3_vlkn_device_create_ex(const Svga3VlknConfigV1 *config,
+    Svga3VlknDevice **outDevice, char *diagnostic, size_t diagnosticSize);
+const char *svga3_vlkn_version(void);
+
 /*
  * Device Lifecycle API
  */
 Svga3VlknDevice *svga3_vlkn_device_create(const Svga3VlknConfig *config);
 void             svga3_vlkn_device_destroy(Svga3VlknDevice *dev);
 Svga3VlknStatus  svga3_vlkn_device_reset(Svga3VlknDevice *dev);
+/* Submit recorded work without waiting for completion. Upload sources are
+ * copied before returning. wait_idle, guest fences and readbacks drain it. */
+Svga3VlknStatus svga3_vlkn_device_submit(Svga3VlknDevice *dev);
 Svga3VlknStatus  svga3_vlkn_device_wait_idle(Svga3VlknDevice *dev);
 void             svga3_vlkn_get_stats(Svga3VlknDevice *dev, Svga3VlknStats *outStats);
 
 /*
- * Capability queries (Oracle-validated)
+ * Capability queries (wire values; FLOAT caps such as MAX_POINT_SIZE carry
+ * IEEE-754 bits, as specified by SVGA3dDevCapResult)
  */
 uint32_t         svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t *outCapValue);
 
@@ -172,6 +195,10 @@ Svga3VlknStatus  svga3_vlkn_surface_present(Svga3VlknDevice *dev,
  * Processes a raw SVGA3D command buffer (as written by guest graphics drivers
  * into the FIFO register space).
  */
+/* Inspect one contiguous wire packet without executing it. Incomplete packets
+ * return INVALID_COMMAND_BUFFER and leave packetSize zero. */
+Svga3VlknStatus svga3_vlkn_fifo_packet_size(const void *buffer, size_t available,
+                                           size_t *packetSize);
 Svga3VlknStatus  svga3_vlkn_fifo_execute(Svga3VlknDevice *dev,
                                          const void *commandBuffer,
                                          size_t bufferSizeBytes,

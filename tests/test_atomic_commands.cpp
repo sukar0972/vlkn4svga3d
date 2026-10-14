@@ -58,7 +58,7 @@ static void VKAPI_CALL captureIndex(VkCommandBuffer, VkBuffer, VkDeviceSize, VkI
 static PFN_vkDestroyImage savedDestroyImage;
 static VkImage watchedImage;
 static unsigned watchedDestroys, waitCalls, failWaitAt;
-static VkResult VKAPI_CALL failQueueWait(VkQueue) { return ++waitCalls==failWaitAt ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_SUCCESS; }
+static VkResult VKAPI_CALL failQueueWait(VkDevice, uint32_t, const VkFence *, VkBool32, uint64_t) { return ++waitCalls==failWaitAt ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_SUCCESS; }
 static VkResult VKAPI_CALL failDeviceWait(VkDevice) { return VK_ERROR_OUT_OF_HOST_MEMORY; }
 static void VKAPI_CALL watchDestroyImage(VkDevice device,VkImage image,const VkAllocationCallbacks *alloc) {
     if (image==watchedImage) ++watchedDestroys;
@@ -69,7 +69,7 @@ static int checkDeferredImages() {
     auto *dev=svga3_vlkn_device_create(&cfg); CHECK(dev);
     auto &dispatch=dev->backend->dispatch();
     savedDestroyImage=dispatch.vkDestroyImage; dispatch.vkDestroyImage=watchDestroyImage;
-    auto savedWait=dispatch.vkQueueWaitIdle; auto savedIdle=dispatch.vkDeviceWaitIdle;
+    auto savedWait=dispatch.vkWaitForFences; auto savedIdle=dispatch.vkDeviceWaitIdle;
     SVGA3dSize size{4,4,1};
     for (bool volume : {false,true}) {
         CHECK(dev->surfaceMgr->defineSurface(1,0,SVGA3D_A8R8G8B8,&size,1)==SVGA3_VLKN_SUCCESS);
@@ -77,13 +77,13 @@ static int checkDeferredImages() {
         auto *surface=dev->surfaceMgr->getSurface(1);
         watchedImage=surface->image(); watchedDestroys=waitCalls=0; failWaitAt=volume?2:1;
         surface->transitionLayout(dev->backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        dispatch.vkQueueWaitIdle=failQueueWait;
+        dispatch.vkWaitForFences=failQueueWait;
         if (volume) CHECK(surface->ensureVolumeImage()!=SVGA3_VLKN_SUCCESS);
         else CHECK(dev->surfaceMgr->destroySurface(1)==SVGA3_VLKN_SUCCESS);
         CHECK(watchedDestroys==0);
         dispatch.vkDeviceWaitIdle=failDeviceWait;
         CHECK(dev->backend->waitIdle()!=SVGA3_VLKN_SUCCESS && watchedDestroys==0);
-        dispatch.vkDeviceWaitIdle=savedIdle; dispatch.vkQueueWaitIdle=savedWait;
+        dispatch.vkDeviceWaitIdle=savedIdle; dispatch.vkWaitForFences=savedWait;
         CHECK(dev->backend->waitIdle()==SVGA3_VLKN_SUCCESS && watchedDestroys==1);
         if (volume) CHECK(dev->surfaceMgr->destroySurface(1)==SVGA3_VLKN_SUCCESS);
     }
@@ -100,7 +100,7 @@ static VkResult VKAPI_CALL countLossSubmit(VkQueue q,uint32_t n,const VkSubmitIn
 static VkResult VKAPI_CALL countLossReset(VkCommandBuffer cb,VkCommandBufferResetFlags flags) {
     ++lossResetCalls; return realLossReset(cb,flags);
 }
-static VkResult VKAPI_CALL loseQueueWait(VkQueue) { return VK_ERROR_DEVICE_LOST; }
+static VkResult VKAPI_CALL loseQueueWait(VkDevice, uint32_t, const VkFence *, VkBool32, uint64_t) { return VK_ERROR_DEVICE_LOST; }
 static VkResult VKAPI_CALL loseDeviceWait(VkDevice) { return VK_ERROR_DEVICE_LOST; }
 static VkResult VKAPI_CALL loseBegin(VkCommandBuffer,const VkCommandBufferBeginInfo *) { return VK_ERROR_DEVICE_LOST; }
 static VkResult VKAPI_CALL loseEnd(VkCommandBuffer) { return VK_ERROR_DEVICE_LOST; }
@@ -119,7 +119,7 @@ static int checkStickyLossModes() {
         } else {
             CHECK(backend.getActiveCommandBuffer()!=VK_NULL_HANDLE);
             if (mode==1) dispatch.vkEndCommandBuffer=loseEnd;
-            if (mode==2) dispatch.vkQueueWaitIdle=loseQueueWait;
+            if (mode==2) dispatch.vkWaitForFences=loseQueueWait;
             if (mode==3) {
                 dispatch.vkDeviceWaitIdle=loseDeviceWait;
                 CHECK(backend.waitIdle()==SVGA3_VLKN_ERROR_DEVICE_LOST);
@@ -128,7 +128,7 @@ static int checkStickyLossModes() {
         CHECK(backend.isDeviceLost() && !backend.cmdBufferRecording());
         CHECK(backend.completedSubmissionSerial()==completed && lossResetCalls==0);
         unsigned submitted=lossSubmitCalls;
-        CHECK(submitted==(mode==2?1u:0u));
+        CHECK(submitted==((mode==2 || mode==3)?1u:0u));
         CHECK(backend.getActiveCommandBuffer()==VK_NULL_HANDLE);
         CHECK(backend.flushCommandBuffer()==SVGA3_VLKN_ERROR_DEVICE_LOST);
         CHECK(backend.waitIdle()==SVGA3_VLKN_ERROR_DEVICE_LOST);
@@ -147,7 +147,9 @@ int main() {
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
     auto *ctx = dev->contextMgr->getContext(1);
     uint32_t pointCap = 0;
-    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_POINT_SIZE,&pointCap) && pointCap == 1);
+    CHECK(svga3_vlkn_query_cap(dev,SVGA3D_DEVCAP_MAX_POINT_SIZE,&pointCap));
+    float pointSize; std::memcpy(&pointSize, &pointCap, sizeof(pointSize));
+    CHECK(pointSize == 1.0f);
     CHECK(ctx->setRenderState(SVGA3D_RS_POINTSIZE,0x3f800000) == SVGA3_VLKN_SUCCESS);
     CHECK(ctx->setRenderState(SVGA3D_RS_POINTSIZE,0x41000000) == SVGA3_VLKN_ERROR_INVALID_PARAM);
     CHECK(ctx->setRenderState(SVGA3D_RS_POINTSPRITEENABLE,1) == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND);
