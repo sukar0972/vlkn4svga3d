@@ -17,39 +17,14 @@
 
 namespace svga3_vlkn {
 
-/* Threading and command-buffer contract (issue #13).
- *
- * The backend owns a SINGLE global command buffer (m_cmdBuffer) and a single
- * queue (m_queue). Every flush waits for queue completion, using queue idle
- * or an explicitly enabled submission fence, so all recorded
- * work — transfers and draws alike — is fully serialized: correctness over
- * throughput. There is no separate transfer queue and no fence-based overlap.
- *
- * VlknBackend methods are NOT thread-safe as a whole. Callers must
- * externally serialize device-level operations. The internal mutexes protect
- * specific shared state only:
- *   - m_stagingMutex guards the staging buffer contents AND the bump
- *     allocator offset. Upload paths bump-allocate staging ranges and record
- *     their copies without flushing; the flush is deferred until a range
- *     would be reused (bump overflow forces a flush first), a reader runs
- *     (present / blit readback / guest readback / SVGA_CMD_FENCE), or an
- *     explicit sync point is reached. Every readback still submits before
- *     the host touches the data, so pixel order is unchanged. There is no
- *     second queue and no fence-based overlap: one queue, one command
- *     buffer, correctness over throughput.
- *   - m_mutex guards the render-pass cache.
- * Neither mutex protects the command-buffer recording state machine
- * (m_cmdBufferRecording / m_cmdBufferPending); concurrent
- * flushCommandBuffer() calls from two threads would corrupt it.
- *
- * Pre-flush hook: flushCommandBuffer() invokes m_preFlushHook exactly once
- * per flush using a copy/null/restore pattern, so the hook cannot observe a
- * stale registration. The hook runs with no backend lock held by the flush
- * itself, BUT the caller may hold m_stagingMutex (see above), which is a
- * non-recursive mutex. The hook must therefore not call transfer APIs
- * (uploadToBuffer / downloadFromBuffer) — that would deadlock. The
- * production hook (svga3_device.cpp) only ends render passes, which take the
- * context manager's recursive mutex and record no transfers. */
+/* Device-level calls are externally serialized. Three command buffers share
+ * one queue; each submission owns a fence until its buffer can be reused.
+ * Uploads retain disjoint staging ranges across submissions. Staging wraps,
+ * CPU readbacks, guest fences and resource destruction drain all submissions
+ * before reusing memory. Completion serials advance only at these drains, so
+ * context constant rings cannot reset over another in-flight draw.
+ * The pre-flush hook only ends render passes; it must not call transfer APIs
+ * because callers may hold the non-recursive staging mutex. */
 struct PerformanceCounters {
     uint64_t presentationCalls = 0;
     uint64_t readbackBytes = 0;
@@ -75,6 +50,7 @@ public:
 
     Svga3VlknStatus init(const Svga3VlknConfig *config);
     void shutdown();
+    const char *initializationError() const { return m_initializationError; }
     Svga3VlknStatus waitIdle();
     bool isDeviceLost() const { return m_deviceLost; }
     uint64_t completedSubmissionSerial() const { return m_completedSubmissionSerial; }
@@ -119,6 +95,8 @@ public:
     VkCommandBuffer getActiveCommandBuffer();
     void bindGraphicsPipeline(VkCommandBuffer commands, VkPipeline pipeline);
     void setGraphicsDrawState(VkCommandBuffer commands, const GraphicsDrawState &state);
+    // Submit without draining. At most three command buffers are in flight.
+    Svga3VlknStatus submitCommandBuffer();
     Svga3VlknStatus flushCommandBuffer();
     bool cmdBufferRecording() const { return m_cmdBufferRecording; }
     uint64_t recordingSerial() const { return m_recordingSerial; }
@@ -201,6 +179,7 @@ public:
 private:
     bool m_deviceLost = false;
     void observeDeviceResult(VkResult result);
+    const char *m_initializationError = "Vulkan initialization failed";
     bool m_measurePerformance = false;
     PerformanceCounters m_performanceCounters{};
     Svga3VlknStatus initInstance(const Svga3VlknConfig *config);
@@ -229,16 +208,26 @@ private:
     size_t m_framebufferSize = 0;
     VkPhysicalDeviceMemoryProperties m_memProps;
 
+    static constexpr uint32_t kSubmissionSlots = 3;
+    struct SubmissionSlot {
+        VkCommandBuffer commands = VK_NULL_HANDLE;
+        VkFence fence = VK_NULL_HANDLE;
+        bool pending = false;
+        bool needsReset = false;
+    };
+    std::array<SubmissionSlot, kSubmissionSlots> m_submissions{};
+    uint32_t m_currentSlot = 0;
+    uint64_t m_lastSubmittedSerial = 0;
+    Svga3VlknStatus prepareSubmissionSlot();
+    Svga3VlknStatus drainSubmissions();
+    VkResult waitForSubmission(VkFence fence);
     VkCommandPool m_cmdPool;
     VkCommandBuffer m_cmdBuffer;
-    VkFence m_submissionFence = VK_NULL_HANDLE;
-    PFN_vkDestroyFence m_destroySubmissionFence = nullptr;
     PFN_vkResetFences m_resetSubmissionFence = nullptr;
     PFN_vkGetFenceStatus m_submissionFenceStatus = nullptr;
     PFN_vkWaitForFences m_waitSubmissionFence = nullptr;
     uint32_t m_fenceSpinMicroseconds = 0;
     bool m_cmdBufferRecording;
-    bool m_cmdBufferPending;
     bool m_renderPassActive;
     VkPipeline m_boundGraphicsPipeline = VK_NULL_HANDLE;
     bool m_graphicsDrawStateValid = false;

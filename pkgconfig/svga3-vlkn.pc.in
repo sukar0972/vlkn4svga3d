@@ -1,0 +1,9 @@
+prefix=@PREFIX@
+libdir=${prefix}/lib
+includedir=${prefix}/include/svga3-vlkn
+
+Name: svga3-vlkn
+Description: SVGA3D protocol rendering on Vulkan
+Version: 0.1.0
+Libs: -L${libdir} -lsvga3_vlkn -lstdc++ -ldl -lm -pthread
+Cflags: -I${includedir} -pthread

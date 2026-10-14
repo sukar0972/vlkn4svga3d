@@ -21,11 +21,36 @@ make -j4 all
 
 Core consumers link `lib/libsvga3_vlkn.a` with `-ldl -pthread`. The QEMU device harness additionally links `lib/libsvga3_qemu_adapter.a` before the core archive. Public interfaces are in `include/svga3_vlkn.h` and `include/qemu_vmsvga.h`; internal headers are not a stable API.
 
+## Embedding and installation
+
+`make install PREFIX=/usr/local` installs the archives, public headers and
+`svga3-vlkn.pc`; `DESTDIR` supports staged packaging. Compile the C example with:
+
+```sh
+cc examples/embed.c $(pkg-config --cflags --libs svga3-vlkn) -o embed
+./embed --mock
+```
+
+New consumers should initialize `Svga3VlknConfigV1` with
+`svga3_vlkn_config_init()` and use `svga3_vlkn_device_create_ex()` for a status
+and diagnostic. The legacy create function remains available. Default limits
+are 4096 surfaces and 64 contexts; the versioned API rejects larger requests.
+The host-adapter callbacks run under device locks and must not reenter it.
+
+## Native QEMU integration
+
+The [QEMU 9.2.0 source adapter](integrations/qemu/README.md) builds into QEMU
+with `-device vmware-svga,vlkn=on`. It uses QEMU memory regions and display
+callbacks, with separate device, guest boot and reset tests. Its build and
+validation run in a container. Migration is blocked until renderer
+state can be serialized. This is a maintained source patch, not an upstream
+QEMU feature.
+
 ## QEMU lab adapter
 
 Build the binary-patch adapter explicitly with `make preload-lab`. It is excluded from `make all`. It targets one allowlisted QEMU build and checks instruction bytes before patching. A build-ID mismatch exits with code 78 before patching and logs the observed ID. Use it only for the designated VM; never configure global `LD_PRELOAD`.
 
-`SVGA3_VLKN_VALIDATE=1` requests validation and `=0` disables it. Without an override, debug builds request validation and release builds (`NDEBUG`) do not. Initialization fails when requested validation cannot be activated. `SVGA3_VLKN_GUEST_PROFILE=playbook-portrait` enables portrait overrides. Guest-RAM discovery still uses a lab mapping heuristic. Official QEMU integration remains follow-up work.
+`SVGA3_VLKN_VALIDATE=1` requests validation and `=0` disables it. Without an override, debug builds request validation and release builds (`NDEBUG`) do not. Initialization fails when requested validation cannot be activated. `SVGA3_VLKN_GUEST_PROFILE=playbook-portrait` enables portrait overrides. Guest-RAM discovery still uses a lab mapping heuristic. Use the source adapter above for integration development.
 
 Host integrations register RAM map/read/write and display-update callbacks through `svga3_vlkn_device_set_host_adapter`, replacing the former callback setters. The core copies the table; its opaque host state must remain valid until detached or device destruction. Callbacks run under core locks and must not reenter device APIs. Rendering, presentation copies and fence completion stay in the core.
 
@@ -43,7 +68,7 @@ The [testing guide](docs/testing.md) covers dependencies, individual targets, su
 
 ## Licensing
 
-VirtualBox-derived files carry GPL-2.0 notices; the license text is in [COPYING](COPYING). VMware protocol headers and bundled Khronos headers retain their own notices. No blanket license has been chosen for original project code.
+VirtualBox-derived files carry GPL-2.0 notices; the license text is in [COPYING](COPYING). VMware protocol headers and bundled Khronos headers retain their own notices. Original project code is GPL-2.0-or-later; see [licensing scope](LICENSE.md).
 
 Presentation supports the primary screen (ID 0 or invalid/legacy ID). Other screen IDs return an error. Source and scanout pixel widths must match; 16-to-32 and 32-to-16 presentation return unsupported-format rather than truncating pixels. Surface-to-screen blits scale with nearest-neighbor sampling and select the requested cube face. Preload GMRFB blits support framebuffer GMR with 32-bit pixels and 24-bit color depth; other configurations emit a rate-limited rejection log.
 

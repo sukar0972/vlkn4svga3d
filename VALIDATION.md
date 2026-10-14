@@ -1,5 +1,17 @@
 # Validation
 
+## Library completion — 2026-10-14
+
+The final library build retained the VM benchmark: glmark2 median **647**, versus
+**645** for the matched baseline. The selected corrected-fixture Piglit replay
+completed with **141 passes, five existing skips and no failures** on SVGA3D;
+the llvmpipe control passed all **146** cases. All 16 host Vulkan harness suites,
+36 Python tests, installed-consumer checks, and native QEMU device and bare-metal
+boot/reset tests passed. Native Linux desktop testing remains separate.
+
+See the [completion report](docs/library-completion-20261014.md) for changes,
+conditions, fixture qualifications, deployed hashes and retained evidence.
+
 ## Piglit fixture controls — 2026-10-10
 
 The two versioned Piglit fixture repairs passed two fresh-overlay controls of

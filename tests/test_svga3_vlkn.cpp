@@ -162,7 +162,7 @@ static void TestDeviceLifecycleAndCaps() {
                 dc.id == SVGA3D_DEVCAP_SUPERSAMPLE || dc.id == SVGA3D_DEVCAP_SURFACEFMT_UYVY ||
                 dc.id == SVGA3D_DEVCAP_SURFACEFMT_YUY2 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_NV12 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_AYUV;
             const bool signedFormat = dc.id == SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8 || dc.id == SVGA3D_DEVCAP_SURFACEFMT_V16U16;
-            const uint32_t expected = (dc.id == SVGA3D_DEVCAP_MAX_POINT_SIZE || dc.id == SVGA3D_DEVCAP_MAX_TEXTURES) ? 1 : dc.id == SVGA3D_DEVCAP_TEXTURE_OPS ? 9 : signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
+            const uint32_t expected = dc.id == SVGA3D_DEVCAP_MAX_POINT_SIZE ? 0x3f800000u : dc.id == SVGA3D_DEVCAP_MAX_TEXTURES ? 1 : dc.id == SVGA3D_DEVCAP_TEXTURE_OPS ? 9 : signedFormat ? SVGA3DFORMAT_OP_TEXTURE : dc.id == SVGA3D_DEVCAP_MAX_SURFACE_IDS ? svga3_vlkn::SVGA3_MAX_SURFACES : disabled ? 0 : compressedFormat ?
                 (SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE) : dc.expectedValue;
             TEST_CHECK(capVal == expected, "Cap value " + std::string(dc.name));
         } else {
@@ -180,6 +180,15 @@ static void TestDeviceLifecycleAndCaps() {
     dispatch.vkGetPhysicalDeviceFormatProperties = originalFormatProperties;
     svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4, &val);
     TEST_CHECK(!(val & SVGA3DFORMAT_OP_NOALPHABLEND), "4444 blending remains enabled on capable hardware");
+
+    dispatch.vkGetPhysicalDeviceFormatProperties = [](VkPhysicalDevice, VkFormat, VkFormatProperties *properties) { *properties = {}; };
+    val = 123;
+    TEST_CHECK(svga3_vlkn_query_cap(dev, SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8, &val) && val == 0,
+               "Unavailable Vulkan format is not advertised");
+    dispatch.vkGetPhysicalDeviceFormatProperties = originalFormatProperties;
+    val = 123;
+    TEST_CHECK(!svga3_vlkn_query_cap(dev, 0xffffffffu, &val) && val == 0,
+               "Unknown capability clears its output");
 
     /* Verify reset & wait idle */
     Svga3VlknStatus st = svga3_vlkn_device_reset(dev);
@@ -1458,19 +1467,6 @@ static void TestStressExecution(Svga3VlknDevice *dev) {
 }
 
 /* Exercise the fence helper used by the preload hook, including offscreen work. */
-static PFN_vkQueueSubmit savedQueueSubmit;
-static PFN_vkQueueWaitIdle savedQueueWaitIdle;
-static unsigned fenceSubmits, fenceWaits;
-static VkResult VKAPI_CALL countFenceSubmit(VkQueue queue, uint32_t count,
-                                           const VkSubmitInfo *info, VkFence fence) {
-    ++fenceSubmits;
-    return savedQueueSubmit(queue, count, info, fence);
-}
-static VkResult VKAPI_CALL countFenceWait(VkQueue queue) {
-    ++fenceWaits;
-    return savedQueueWaitIdle(queue);
-}
-
 static void TestFenceWithoutWindow() {
     Svga3VlknConfig cfg{};
     cfg.forceMockBackend = true;
@@ -1478,12 +1474,6 @@ static void TestFenceWithoutWindow() {
     TEST_CHECK(dev != nullptr, "Create fence regression device");
     if (!dev) return;
     auto &backend = *dev->backend;
-    auto &dispatch = backend.dispatch();
-    savedQueueSubmit = dispatch.vkQueueSubmit;
-    savedQueueWaitIdle = dispatch.vkQueueWaitIdle;
-    dispatch.vkQueueSubmit = countFenceSubmit;
-    dispatch.vkQueueWaitIdle = countFenceWait;
-
     for (bool offscreen : {false, true}) {
         if (offscreen) {
             SVGA3dSize size = {64, 64, 1};
@@ -1497,15 +1487,12 @@ static void TestFenceWithoutWindow() {
         } else {
             backend.getActiveCommandBuffer();
         }
-        fenceSubmits = fenceWaits = 0;
-        svga3_vlkn::svga3_vlkn_present_client_surfaces(dev, "fence");
-        TEST_CHECK(fenceSubmits == 1 && fenceWaits == 1,
-                   "Fence submits and waits even with no pending window");
-        backend.flushCommandBuffer();
-        TEST_CHECK(fenceSubmits == 1 && fenceWaits == 1, "Fence leaves no unsubmitted commands");
+        auto serial = backend.recordingSerial();
+        TEST_CHECK(svga3_vlkn::svga3_vlkn_present_client_surfaces(dev, "fence") == SVGA3_VLKN_SUCCESS,
+                   "Fence completes without a window");
+        TEST_CHECK(backend.completedSubmissionSerial() >= serial, "Fence covers all recorded offscreen work");
+        TEST_CHECK(!backend.cmdBufferRecording(), "Fence leaves no unsubmitted work");
     }
-    dispatch.vkQueueSubmit = savedQueueSubmit;
-    dispatch.vkQueueWaitIdle = savedQueueWaitIdle;
     svga3_vlkn_device_destroy(dev);
 }
 
@@ -1613,10 +1600,10 @@ static void TestBufferRenameBudgetAndFailure() {
 
 static VkResult g_injectedWaitResult = VK_SUCCESS;
 static VkResult g_injectedDeviceWaitResult = VK_SUCCESS;
-static PFN_vkQueueWaitIdle g_savedErrorQueueWait = nullptr;
+static PFN_vkWaitForFences g_savedErrorQueueWait = nullptr;
 static PFN_vkDeviceWaitIdle g_savedErrorDeviceWait = nullptr;
-static VkResult VKAPI_CALL injectQueueWaitResult(VkQueue queue) {
-    return g_injectedWaitResult == VK_SUCCESS ? g_savedErrorQueueWait(queue) : g_injectedWaitResult;
+static VkResult VKAPI_CALL injectQueueWaitResult(VkDevice device, uint32_t count, const VkFence *fences, VkBool32 all, uint64_t timeout) {
+    return g_injectedWaitResult == VK_SUCCESS ? g_savedErrorQueueWait(device, count, fences, all, timeout) : g_injectedWaitResult;
 }
 static VkResult VKAPI_CALL injectDeviceWaitResult(VkDevice device) {
     return g_injectedDeviceWaitResult == VK_SUCCESS ? g_savedErrorDeviceWait(device) : g_injectedDeviceWaitResult;
@@ -1630,9 +1617,9 @@ static void TestFlushPropagatesWaitFailures() {
     if (!dev) return;
     auto &backend = *dev->backend;
     auto &dispatch = backend.dispatch();
-    g_savedErrorQueueWait = dispatch.vkQueueWaitIdle;
+    g_savedErrorQueueWait = dispatch.vkWaitForFences;
     g_savedErrorDeviceWait = dispatch.vkDeviceWaitIdle;
-    dispatch.vkQueueWaitIdle = injectQueueWaitResult;
+    dispatch.vkWaitForFences = injectQueueWaitResult;
     dispatch.vkDeviceWaitIdle = injectDeviceWaitResult;
 
     const uint64_t serial = backend.completedSubmissionSerial();
@@ -1656,7 +1643,7 @@ static void TestFlushPropagatesWaitFailures() {
     TEST_CHECK(backend.completedSubmissionSerial() == serial + 1,
                "Completion serial advances once after confirmed completion");
 
-    dispatch.vkQueueWaitIdle = g_savedErrorQueueWait;
+    dispatch.vkWaitForFences = g_savedErrorQueueWait;
     dispatch.vkDeviceWaitIdle = g_savedErrorDeviceWait;
     svga3_vlkn_device_destroy(dev);
 }

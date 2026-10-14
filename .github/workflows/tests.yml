@@ -37,3 +37,29 @@ jobs:
           for suite in test_atomic_commands test_resource_limits test_query_state test_fifo_framing; do
             "./bin/$suite"
           done
+      - name: Verify installed C consumer
+        run: make test-install
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-vulkan-evidence
+          path: |
+            .harness-loop/
+            artifacts/
+
+  native-qemu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native QEMU test environment
+        run: docker build -t vlkn-native-qemu -f integrations/qemu/Dockerfile integrations/qemu
+      - name: Build source integration and boot the protocol guest
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work vlkn-native-qemu \
+            sh integrations/qemu/build.sh /work/artifacts/qemu-native
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-qemu-results
+          path: artifacts/qemu-native/results/

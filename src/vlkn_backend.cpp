@@ -39,7 +39,6 @@ VlknBackend::VlknBackend()
     , m_cmdPool(VK_NULL_HANDLE)
     , m_cmdBuffer(VK_NULL_HANDLE)
     , m_cmdBufferRecording(false)
-    , m_cmdBufferPending(false)
     , m_renderPassActive(false)
     , m_completedSubmissionSerial(0)
     , m_recordingSerial(0)
@@ -79,26 +78,32 @@ void VlknBackend::addValidationMessage(bool isError, const std::string &msg) {
 
 Svga3VlknStatus VlknBackend::init(const Svga3VlknConfig *config) {
     bool forceMock = config ? config->forceMockBackend : false;
+    m_initializationError = "Vulkan loader or required entry points unavailable";
     if (!vlkn_dispatch_init(&m_dispatch, forceMock)) {
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
+    m_initializationError = "Vulkan instance or requested validation layer unavailable";
     Svga3VlknStatus st = initInstance(config);
     if (st != SVGA3_VLKN_SUCCESS) {
         /* NO fallback to mock when real Vulkan is requested! */
         return st;
     }
 
+    m_initializationError = "No suitable Vulkan graphics device available";
     st = selectPhysicalDevice(config);
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
+    m_initializationError = "Vulkan device, command pool or descriptor pool creation failed";
     st = initDevice(config);
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
-    size_t stagingSize = (config && config->stagingBufferSize > 0) ? config->stagingBufferSize : (16 * 1024 * 1024);
+    size_t stagingSize = (config && config->stagingBufferSize > 0) ? config->stagingBufferSize : (64 * 1024 * 1024);
+    m_initializationError = "Staging buffer allocation or mapping failed";
     st = initStagingBuffer(stagingSize);
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
+    m_initializationError = "Fallback buffer allocation or mapping failed";
     st = initFallbackBuffer(1024 * 1024); /* 1MB static fallback vertex/index buffer */
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
@@ -122,10 +127,6 @@ void VlknBackend::shutdown() {
     }
     cleanupRetiredBuffers(true);
     releaseFramebufferImport();
-    if (m_submissionFence) {
-        m_destroySubmissionFence(m_device, m_submissionFence, nullptr);
-        m_submissionFence = VK_NULL_HANDLE;
-    }
 
     for (auto &rp : m_renderPasses) {
         if (rp.renderPass) {
@@ -162,6 +163,10 @@ void VlknBackend::shutdown() {
     }
     m_fallbackSize = 0;
 
+    for (auto &slot : m_submissions) {
+        if (slot.fence) m_dispatch.vkDestroyFence(m_device, slot.fence, nullptr);
+        slot.fence = VK_NULL_HANDLE;
+    }
     if (m_cmdPool) {
         m_dispatch.vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
         m_cmdPool = VK_NULL_HANDLE;
@@ -198,34 +203,59 @@ void VlknBackend::observeDeviceResult(VkResult result) {
 
 Svga3VlknStatus VlknBackend::waitIdle() {
     if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
-    if (m_device && m_dispatch.vkDeviceWaitIdle) {
-        VkResult res = m_dispatch.vkDeviceWaitIdle(m_device);
-        if (res != VK_SUCCESS) {
-            observeDeviceResult(res);
-            log_msg("[libqemu_svga3d] vkDeviceWaitIdle error: %d\n", res);
-            return SVGA3_VLKN_ERROR_DEVICE_LOST;
-        }
-        if (!m_cmdBufferRecording) {
-            m_completedSubmissionSerial = m_recordingSerial;
-            cleanupRetiredImages();
-            cleanupRetiredBuffers(false);
-        }
-        if (m_cmdBufferPending) {
-            m_completedSubmissionSerial = m_recordingSerial;
-            m_cmdBufferPending = false;
-            cleanupRetiredBuffers(false);
-            if (m_cmdBuffer && m_dispatch.vkResetCommandBuffer) {
-                res = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
-                if (res != VK_SUCCESS) {
-                    observeDeviceResult(res);
-                    log_msg("[libqemu_svga3d] vkResetCommandBuffer error after idle: %d\n", res);
-                    return SVGA3_VLKN_ERROR_DEVICE_LOST;
-                }
-            }
-        }
-    } else if (m_device) {
-        return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (!m_device) return SVGA3_VLKN_SUCCESS;
+    if (!m_dispatch.vkDeviceWaitIdle) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    Svga3VlknStatus status = submitCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) return status;
+    VkResult result = m_dispatch.vkDeviceWaitIdle(m_device);
+    observeDeviceResult(result);
+    if (result != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    for (auto &slot : m_submissions) slot.pending = false;
+    m_completedSubmissionSerial = m_lastSubmittedSerial;
+    m_stagingBump = 0;
+    cleanupRetiredBuffers(false);
+    cleanupRetiredImages();
+    return SVGA3_VLKN_SUCCESS;
+}
+
+Svga3VlknStatus VlknBackend::prepareSubmissionSlot() {
+    if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    auto &slot = m_submissions[m_currentSlot];
+    if (slot.pending) {
+        const auto start = std::chrono::steady_clock::now();
+        VkResult result = waitForSubmission(slot.fence);
+        if (m_measurePerformance)
+            m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+        observeDeviceResult(result);
+        if (result != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        slot.pending = false;
     }
+    m_cmdBuffer = slot.commands;
+    if (slot.needsReset) {
+        VkResult result = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
+        observeDeviceResult(result);
+        if (result != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        slot.needsReset = false;
+    }
+    return SVGA3_VLKN_SUCCESS;
+}
+
+Svga3VlknStatus VlknBackend::drainSubmissions() {
+    if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    const auto start = std::chrono::steady_clock::now();
+    for (auto &slot : m_submissions) {
+        if (!slot.pending) continue;
+        VkResult result = waitForSubmission(slot.fence);
+        observeDeviceResult(result);
+        if (result != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        slot.pending = false;
+    }
+    if (m_measurePerformance)
+        m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+    m_completedSubmissionSerial = m_lastSubmittedSerial;
+    m_stagingBump = 0;
+    cleanupRetiredBuffers(false);
+    cleanupRetiredImages();
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -390,7 +420,6 @@ Svga3VlknStatus VlknBackend::selectPhysicalDevice(const Svga3VlknConfig *config)
 }
 
 Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
-    (void)config;
     float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo = {};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -422,7 +451,8 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
     VkPhysicalDeviceCustomBorderColorFeaturesEXT borderFeatures = {};
     borderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
     const char *borderExtension = VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME;
-    if (!m_dispatch.isMock && m_dispatch.vkGetInstanceProcAddr) {
+    const uint32_t requestedVersion = config && config->apiVersion ? config->apiVersion : VK_API_VERSION_1_1;
+    if (requestedVersion >= VK_API_VERSION_1_1 && !m_dispatch.isMock && m_dispatch.vkGetInstanceProcAddr) {
         auto enumerate = (PFN_vkEnumerateDeviceExtensionProperties)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkEnumerateDeviceExtensionProperties");
         auto getFeatures = (PFN_vkGetPhysicalDeviceFeatures2)m_dispatch.vkGetInstanceProcAddr(m_instance, "vkGetPhysicalDeviceFeatures2");
         uint32_t count = 0;
@@ -507,18 +537,20 @@ Svga3VlknStatus VlknBackend::initDevice(const Svga3VlknConfig *config) {
         return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
 
-    /* Allocate initial Command Buffer */
-    VkCommandBufferAllocateInfo allocInfo = {};
+    VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.commandPool = m_cmdPool;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
-
-    res = m_dispatch.vkAllocateCommandBuffers(m_device, &allocInfo, &m_cmdBuffer);
-    if (res != VK_SUCCESS) {
-        observeDeviceResult(res);
-        return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    for (auto &slot : m_submissions) {
+        res = m_dispatch.vkAllocateCommandBuffers(m_device, &allocInfo, &slot.commands);
+        if (res != VK_SUCCESS) return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
+        res = m_dispatch.vkCreateFence(m_device, &fenceInfo, nullptr, &slot.fence);
+        if (res != VK_SUCCESS) return SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED;
     }
+    m_cmdBuffer = m_submissions[0].commands;
 
     /* Create Descriptor Pool for shader uniform buffers and texture samplers */
     VkDescriptorPoolSize poolSizes[] = {
@@ -744,15 +776,32 @@ Svga3VlknStatus VlknBackend::uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dst
         m_dispatch.vkUnmapMemory(m_device, tempMemory);
 
         VkCommandBuffer cb = getActiveCommandBuffer();
-        if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        if (!cb) {
+            retireBuffer(tempBuffer, tempMemory, nullptr, recordingSerial(), 0);
+            return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        }
         VkBufferCopy region = {};
         region.srcOffset = 0;
         region.dstOffset = dstOffset;
         region.size = size;
+        VkBufferMemoryBarrier dependency{};
+        dependency.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        dependency.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dependency.srcQueueFamilyIndex = dependency.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        dependency.buffer = dstBuffer;
+        dependency.offset = dstOffset;
+        dependency.size = size;
+        m_dispatch.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 1, &dependency, 0, nullptr);
         m_dispatch.vkCmdCopyBuffer(cb, tempBuffer, dstBuffer, 1, &region);
-        Svga3VlknStatus flushSt = flushCommandBuffer();
-
-        destroyBuffer(tempBuffer, tempMemory);
+        dependency.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dependency.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+        m_dispatch.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0, 0, nullptr, 1, &dependency, 0, nullptr);
+        const uint64_t serial = recordingSerial();
+        Svga3VlknStatus flushSt = submitCommandBuffer();
+        retireBuffer(tempBuffer, tempMemory, nullptr, serial, 0);
         return flushSt;
     }
 
@@ -772,8 +821,22 @@ Svga3VlknStatus VlknBackend::uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dst
     region.srcOffset = stagingOffset;
     region.dstOffset = dstOffset;
     region.size = size;
+    VkBufferMemoryBarrier dependency{};
+    dependency.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    dependency.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    dependency.srcQueueFamilyIndex = dependency.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    dependency.buffer = dstBuffer;
+    dependency.offset = dstOffset;
+    dependency.size = size;
+    m_dispatch.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 1, &dependency, 0, nullptr);
     m_dispatch.vkCmdCopyBuffer(cb, m_stagingBuffer, dstBuffer, 1, &region);
-    return flushCommandBuffer();
+    dependency.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    dependency.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    m_dispatch.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0, 0, nullptr, 1, &dependency, 0, nullptr);
+    return submitCommandBuffer();
 }
 
 Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffer, VkDeviceSize srcOffset, VkDeviceSize size) {
@@ -954,8 +1017,8 @@ void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffe
 
 VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
     if (m_deviceLost) return VK_NULL_HANDLE;
-    if (m_cmdBufferPending && waitIdle() != SVGA3_VLKN_SUCCESS) return VK_NULL_HANDLE;
     if (!m_cmdBufferRecording) {
+        if (prepareSubmissionSlot() != SVGA3_VLKN_SUCCESS) return VK_NULL_HANDLE;
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1089,17 +1152,7 @@ bool VlknBackend::enableSubmissionFenceWait(uint32_t spinMicroseconds) {
     auto status = (PFN_vkGetFenceStatus)m_dispatch.vkGetDeviceProcAddr(m_device, "vkGetFenceStatus");
     auto wait = (PFN_vkWaitForFences)m_dispatch.vkGetDeviceProcAddr(m_device, "vkWaitForFences");
     if (!create || !destroy || !reset || !status || !wait) return false;
-    if (!m_submissionFence) {
-        VkFenceCreateInfo info{};
-        info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        VkFence fence = VK_NULL_HANDLE;
-        VkResult result = create(m_device, &info, nullptr, &fence);
-        observeDeviceResult(result);
-        if (result != VK_SUCCESS) return false;
-        m_submissionFence = fence;
-    }
-    // Preserve an existing working mode if entry-point resolution fails.
-    m_destroySubmissionFence = destroy;
+    // Each slot already owns a fence. Preserve the old mode if resolution fails.
     m_resetSubmissionFence = reset;
     m_submissionFenceStatus = status;
     m_waitSubmissionFence = wait;
@@ -1107,16 +1160,24 @@ bool VlknBackend::enableSubmissionFenceWait(uint32_t spinMicroseconds) {
     return true;
 }
 
+VkResult VlknBackend::waitForSubmission(VkFence fence) {
+    if (!m_waitSubmissionFence)
+        return m_dispatch.vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
+    VkResult result = VK_NOT_READY;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(m_fenceSpinMicroseconds);
+    while (m_fenceSpinMicroseconds && result == VK_NOT_READY && std::chrono::steady_clock::now() < deadline)
+        result = m_submissionFenceStatus(m_device, fence);
+    return result == VK_NOT_READY ? m_waitSubmissionFence(m_device, 1, &fence, VK_TRUE, UINT64_MAX) : result;
+}
+
 Svga3VlknStatus VlknBackend::flushCommandBuffer() {
+    Svga3VlknStatus status = submitCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) return status;
+    return drainSubmissions();
+}
+
+Svga3VlknStatus VlknBackend::submitCommandBuffer() {
     if (m_deviceLost) return SVGA3_VLKN_ERROR_DEVICE_LOST;
-    /* A prior submit may have succeeded even when its queue wait failed. Do
-     * not reset or reuse that command buffer until device idle confirms it. */
-    if (m_cmdBufferPending) {
-        Svga3VlknStatus idleStatus = waitIdle();
-        if (idleStatus != SVGA3_VLKN_SUCCESS) return idleStatus;
-        /* Device is idle: no recorded staging range is still in flight. */
-        m_stagingBump = 0;
-    }
     if (!m_cmdBufferRecording) return SVGA3_VLKN_SUCCESS;
 
     /* Hook runs without the flush holding any backend lock, but transfer
@@ -1136,13 +1197,11 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
         m_renderPassActive = false;
     }
 
-    if (m_submissionFence) {
-        VkResult fenceResult = m_resetSubmissionFence(m_device, 1, &m_submissionFence);
-        if (fenceResult != VK_SUCCESS) {
-            observeDeviceResult(fenceResult);
-            return SVGA3_VLKN_ERROR_DEVICE_LOST;
-        }
-    }
+    auto &slot = m_submissions[m_currentSlot];
+    auto resetFence = m_resetSubmissionFence ? m_resetSubmissionFence : m_dispatch.vkResetFences;
+    VkResult fenceResult = resetFence(m_device, 1, &slot.fence);
+    observeDeviceResult(fenceResult);
+    if (fenceResult != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
     VkResult res = m_dispatch.vkEndCommandBuffer(m_cmdBuffer);
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
@@ -1161,7 +1220,8 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_cmdBuffer;
-    res = m_dispatch.vkQueueSubmit(m_queue, 1, &submitInfo, m_submissionFence);
+
+    res = m_dispatch.vkQueueSubmit(m_queue, 1, &submitInfo, slot.fence);
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkQueueSubmit error: %d\n", res);
@@ -1171,44 +1231,11 @@ Svga3VlknStatus VlknBackend::flushCommandBuffer() {
             log_msg("[libqemu_svga3d] vkResetCommandBuffer error after submit failure: %d\n", resetRes);
         return SVGA3_VLKN_ERROR_DEVICE_LOST;
     }
-    m_cmdBufferPending = true;
-    const auto waitStart = m_measurePerformance ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    slot.pending = true;
+    slot.needsReset = true;
+    m_lastSubmittedSerial = m_recordingSerial;
     if (m_measurePerformance) ++m_performanceCounters.queueSubmissions;
-    if (m_submissionFence) {
-        const auto deadline = std::chrono::steady_clock::now() +
-            std::chrono::microseconds(m_fenceSpinMicroseconds);
-        res = VK_NOT_READY;
-        while (m_fenceSpinMicroseconds && res == VK_NOT_READY &&
-               std::chrono::steady_clock::now() < deadline)
-            res = m_submissionFenceStatus(m_device, m_submissionFence);
-        if (res == VK_NOT_READY)
-            res = m_waitSubmissionFence(m_device, 1, &m_submissionFence, VK_TRUE, UINT64_MAX);
-    } else {
-        res = m_dispatch.vkQueueWaitIdle(m_queue);
-    }
-    if (m_measurePerformance)
-        m_performanceCounters.queueWaitNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - waitStart).count();
-    if (res != VK_SUCCESS) {
-        observeDeviceResult(res);
-        log_msg("[libqemu_svga3d] Submission completion wait error: %d\n", res);
-        /* The submit was accepted. Keep its buffer pending until waitIdle()
-         * establishes completion; resetting it here would race the GPU. */
-        return SVGA3_VLKN_ERROR_DEVICE_LOST;
-    }
-    m_completedSubmissionSerial = m_recordingSerial;
-    m_cmdBufferPending = false;
-    /* The wait above retired every recorded staging range. */
-    m_stagingBump = 0;
-    cleanupRetiredBuffers(false);
-    cleanupRetiredImages();
-    res = m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
-    if (res != VK_SUCCESS) {
-        observeDeviceResult(res);
-        log_msg("[libqemu_svga3d] vkResetCommandBuffer error: %d\n", res);
-        return SVGA3_VLKN_ERROR_DEVICE_LOST;
-    }
-
+    m_currentSlot = (m_currentSlot + 1) % kSubmissionSlots;
     return SVGA3_VLKN_SUCCESS;
 }
 

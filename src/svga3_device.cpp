@@ -40,7 +40,7 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_D24X8_BUFFER_FORMAT, 1, true },
     { SVGA3D_DEVCAP_QUERY_TYPES, 1, true },
     { SVGA3D_DEVCAP_TEXTURE_GRADIENT_SAMPLING, 0, true },
-    { SVGA3D_DEVCAP_MAX_POINT_SIZE, 1, true },
+    { SVGA3D_DEVCAP_MAX_POINT_SIZE, 0x3f800000u, true }, /* FLOAT: 1.0 */
     { SVGA3D_DEVCAP_MAX_SHADER_TEXTURES, 0, false },
     { SVGA3D_DEVCAP_MAX_TEXTURE_WIDTH, 8192, true },
     { SVGA3D_DEVCAP_MAX_TEXTURE_HEIGHT, 8192, true },
@@ -108,43 +108,109 @@ static const CapTableEntry kDeviceCaps[] = {
     { SVGA3D_DEVCAP_SURFACEFMT_BC5_UNORM, 0, false }
 };
 
+static SVGA3dSurfaceFormat capabilityFormat(uint32_t cap) {
+    switch (cap) {
+    case SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8: return SVGA3D_X8R8G8B8;
+    case SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8: return SVGA3D_A8R8G8B8;
+    case SVGA3D_DEVCAP_SURFACEFMT_A2R10G10B10: return SVGA3D_A2R10G10B10;
+    case SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5: return SVGA3D_X1R5G5B5;
+    case SVGA3D_DEVCAP_SURFACEFMT_A1R5G5B5: return SVGA3D_A1R5G5B5;
+    case SVGA3D_DEVCAP_SURFACEFMT_A4R4G4B4: return SVGA3D_A4R4G4B4;
+    case SVGA3D_DEVCAP_SURFACEFMT_R5G6B5: return SVGA3D_R5G6B5;
+    case SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE16: return SVGA3D_LUMINANCE16;
+    case SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE8_ALPHA8: return SVGA3D_LUMINANCE8_ALPHA8;
+    case SVGA3D_DEVCAP_SURFACEFMT_ALPHA8: return SVGA3D_ALPHA8;
+    case SVGA3D_DEVCAP_SURFACEFMT_LUMINANCE8: return SVGA3D_LUMINANCE8;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_D16: return SVGA3D_Z_D16;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8: return SVGA3D_Z_D24S8;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24X8: return SVGA3D_Z_D24X8;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT1: return SVGA3D_DXT1;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT2: return SVGA3D_DXT2;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT3: return SVGA3D_DXT3;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT4: return SVGA3D_DXT4;
+    case SVGA3D_DEVCAP_SURFACEFMT_DXT5: return SVGA3D_DXT5;
+    case SVGA3D_DEVCAP_SURFACEFMT_BUMPX8L8V8U8: return SVGA3D_BUMPX8L8V8U8;
+    case SVGA3D_DEVCAP_SURFACEFMT_A2W10V10U10: return SVGA3D_A2W10V10U10;
+    case SVGA3D_DEVCAP_SURFACEFMT_BUMPU8V8: return SVGA3D_BUMPU8V8;
+    case SVGA3D_DEVCAP_SURFACEFMT_Q8W8V8U8: return SVGA3D_Q8W8V8U8;
+    case SVGA3D_DEVCAP_SURFACEFMT_CxV8U8: return SVGA3D_CxV8U8;
+    case SVGA3D_DEVCAP_SURFACEFMT_R_S10E5: return SVGA3D_R_S10E5;
+    case SVGA3D_DEVCAP_SURFACEFMT_R_S23E8: return SVGA3D_R_S23E8;
+    case SVGA3D_DEVCAP_SURFACEFMT_RG_S10E5: return SVGA3D_RG_S10E5;
+    case SVGA3D_DEVCAP_SURFACEFMT_RG_S23E8: return SVGA3D_RG_S23E8;
+    case SVGA3D_DEVCAP_SURFACEFMT_ARGB_S10E5: return SVGA3D_ARGB_S10E5;
+    case SVGA3D_DEVCAP_SURFACEFMT_ARGB_S23E8: return SVGA3D_ARGB_S23E8;
+    case SVGA3D_DEVCAP_SURFACEFMT_V16U16: return SVGA3D_V16U16;
+    case SVGA3D_DEVCAP_SURFACEFMT_G16R16: return SVGA3D_G16R16;
+    case SVGA3D_DEVCAP_SURFACEFMT_A16B16G16R16: return SVGA3D_A16B16G16R16;
+    case SVGA3D_DEVCAP_SURFACEFMT_UYVY: return SVGA3D_UYVY;
+    case SVGA3D_DEVCAP_SURFACEFMT_YUY2: return SVGA3D_YUY2;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_DF16: return SVGA3D_Z_DF16;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_DF24: return SVGA3D_Z_DF24;
+    case SVGA3D_DEVCAP_SURFACEFMT_Z_D24S8_INT: return SVGA3D_Z_D24S8_INT;
+    case SVGA3D_DEVCAP_SURFACEFMT_BC4_UNORM: return SVGA3D_BC4_UNORM;
+    case SVGA3D_DEVCAP_SURFACEFMT_BC5_UNORM: return SVGA3D_BC5_UNORM;
+    default: return SVGA3D_FORMAT_INVALID;
+    }
+}
+
 extern "C" {
 
-Svga3VlknDevice *svga3_vlkn_device_create(const Svga3VlknConfig *config)
+const char *svga3_vlkn_version(void) { return SVGA3_VLKN_VERSION; }
+
+void svga3_vlkn_config_init(Svga3VlknConfigV1 *config) {
+    if (!config) return;
+    *config = {};
+    config->structSize = sizeof(*config);
+    config->version = SVGA3_VLKN_CONFIG_VERSION;
+    config->device.apiVersion = VK_API_VERSION_1_1;
+}
+
+Svga3VlknStatus svga3_vlkn_device_create_ex(const Svga3VlknConfigV1 *config,
+    Svga3VlknDevice **outDevice, char *diagnostic, size_t diagnosticSize)
 {
-    std::unique_ptr<Svga3VlknDevice> dev = std::make_unique<Svga3VlknDevice>();
-    dev->backend = std::make_unique<svga3_vlkn::VlknBackend>();
-
-    Svga3VlknConfig cfg;
-    if (config) {
-        cfg = *config;
-    } else {
-        memset(&cfg, 0, sizeof(cfg));
-        cfg.appName = "SVGA3=VLKN Application";
-        cfg.apiVersion = VK_API_VERSION_1_0;
-        cfg.stagingBufferSize = 64 * 1024 * 1024;
+    auto report = [&](Svga3VlknStatus status, const char *message) {
+        if (diagnostic && diagnosticSize) snprintf(diagnostic, diagnosticSize, "%s", message);
+        return status;
+    };
+    if (outDevice) *outDevice = nullptr;
+    if (!outDevice || (config && (config->structSize < sizeof(*config) ||
+                                  config->version != SVGA3_VLKN_CONFIG_VERSION)))
+        return report(SVGA3_VLKN_ERROR_INVALID_PARAM, "Invalid output pointer, configuration size or version");
+    Svga3VlknConfig cfg = config ? config->device : Svga3VlknConfig{};
+    if (cfg.maxSurfaces > 4096 || cfg.maxContexts > 64)
+        return report(SVGA3_VLKN_ERROR_INVALID_PARAM, "Resource limits exceed ceilings (4096 surfaces, 64 contexts)");
+    try {
+        auto dev = std::make_unique<Svga3VlknDevice>();
+        dev->backend = std::make_unique<svga3_vlkn::VlknBackend>();
+        Svga3VlknStatus st = dev->backend->init(&cfg);
+        if (st != SVGA3_VLKN_SUCCESS)
+            return report(st, dev->backend->initializationError());
+        dev->dxContextLimit = std::min(cfg.maxContexts ? cfg.maxContexts : svga3_vlkn::SVGA3_MAX_CONTEXTS, svga3_vlkn::SVGA3_MAX_CONTEXTS);
+        dev->surfaceMgr = std::make_unique<svga3_vlkn::VlknSurfaceManager>(dev->backend.get(), cfg.maxSurfaces ? cfg.maxSurfaces : svga3_vlkn::SVGA3_MAX_SURFACES);
+        dev->contextMgr = std::make_unique<svga3_vlkn::VlknContextManager>(dev->backend.get(), dev->surfaceMgr.get(), dev->dxContextLimit);
+        dev->guestMem = std::make_unique<svga3_vlkn::GuestMemoryManager>();
+        dev->surfaceMgr->setContextManager(dev->contextMgr.get());
+        auto *ctxMgr = dev->contextMgr.get();
+        dev->backend->setPreFlushHook([ctxMgr]() { ctxMgr->endAllRenderPasses(); });
+        *outDevice = dev.release();
+        return report(SVGA3_VLKN_SUCCESS, "");
+    } catch (const std::bad_alloc &) {
+        return report(SVGA3_VLKN_ERROR_OUT_OF_MEMORY, "Host allocation failed during device initialization");
+    } catch (const std::exception &error) {
+        return report(SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED, error.what());
+    } catch (...) {
+        return report(SVGA3_VLKN_ERROR_VULKAN_INIT_FAILED, "Unexpected device initialization failure");
     }
+}
 
-    dev->dxContextLimit = std::min(cfg.maxContexts ? cfg.maxContexts : svga3_vlkn::SVGA3_MAX_CONTEXTS, svga3_vlkn::SVGA3_MAX_CONTEXTS);
-    Svga3VlknStatus st = dev->backend->init(&cfg);
-    if (st != SVGA3_VLKN_SUCCESS) {
-        return nullptr;
-    }
-
-    dev->surfaceMgr = std::make_unique<svga3_vlkn::VlknSurfaceManager>(dev->backend.get(), cfg.maxSurfaces ? cfg.maxSurfaces : svga3_vlkn::SVGA3_MAX_SURFACES);
-    dev->contextMgr = std::make_unique<svga3_vlkn::VlknContextManager>(dev->backend.get(), dev->surfaceMgr.get(), dev->dxContextLimit);
-    dev->guestMem   = std::make_unique<svga3_vlkn::GuestMemoryManager>();
-
-    dev->surfaceMgr->setContextManager(dev->contextMgr.get());
-
-    svga3_vlkn::VlknContextManager *ctxMgr = dev->contextMgr.get();
-    dev->backend->setPreFlushHook([ctxMgr]() {
-        if (ctxMgr) {
-            ctxMgr->endAllRenderPasses();
-        }
-    });
-
-    return dev.release();
+Svga3VlknDevice *svga3_vlkn_device_create(const Svga3VlknConfig *config) {
+    Svga3VlknConfigV1 versioned;
+    svga3_vlkn_config_init(&versioned);
+    if (config) versioned.device = *config;
+    Svga3VlknDevice *dev = nullptr;
+    svga3_vlkn_device_create_ex(&versioned, &dev, nullptr, 0);
+    return dev;
 }
 
 void svga3_vlkn_device_destroy(Svga3VlknDevice *dev)
@@ -191,6 +257,12 @@ Svga3VlknStatus svga3_vlkn_device_reset(Svga3VlknDevice *dev)
     return SVGA3_VLKN_SUCCESS;
 }
 
+Svga3VlknStatus svga3_vlkn_device_submit(Svga3VlknDevice *dev) {
+    if (!dev || !dev->backend) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    std::lock_guard<std::mutex> lock(dev->mutex);
+    return dev->backend->submitCommandBuffer();
+}
+
 Svga3VlknStatus svga3_vlkn_device_wait_idle(Svga3VlknDevice *dev)
 {
     if (!dev || !dev->backend) return SVGA3_VLKN_ERROR_INVALID_PARAM;
@@ -208,6 +280,9 @@ void svga3_vlkn_get_stats(Svga3VlknDevice *dev, Svga3VlknStats *outStats)
 uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t *outCapValue)
 {
     if (!outCapValue) return 0;
+    *outCapValue = 0;
+    if (!dev || !dev->backend) return 0;
+    std::lock_guard<std::mutex> lock(dev->mutex);
 
     for (size_t i = 0; i < sizeof(kDeviceCaps) / sizeof(kDeviceCaps[0]); ++i) {
         if (kDeviceCaps[i].id == capIndex) {
@@ -278,6 +353,32 @@ uint32_t svga3_vlkn_query_cap(Svga3VlknDevice *dev, uint32_t capIndex, uint32_t 
             default:
                 break;
             }
+            const auto &limits = dev->backend->properties().limits;
+            switch (capIndex) {
+            case SVGA3D_DEVCAP_MAX_TEXTURE_WIDTH:
+            case SVGA3D_DEVCAP_MAX_TEXTURE_HEIGHT: val = std::min(val, limits.maxImageDimension2D); break;
+            case SVGA3D_DEVCAP_MAX_VOLUME_EXTENT: val = std::min(val, limits.maxImageDimension3D); break;
+            case SVGA3D_DEVCAP_MAX_RENDER_TARGETS:
+            case SVGA3D_DEVCAP_MAX_SIMULTANEOUS_RENDER_TARGETS: val = std::min(val, limits.maxColorAttachments); break;
+            default: break;
+            }
+            auto format = capabilityFormat(capIndex);
+            if (format != SVGA3D_FORMAT_INVALID && val) {
+                VkFormat vkFormat = svga3_format_to_vk(format);
+                VkFormatProperties properties{};
+                if (vkFormat != VK_FORMAT_UNDEFINED)
+                    dev->backend->dispatch().vkGetPhysicalDeviceFormatProperties(dev->backend->physicalDevice(), vkFormat, &properties);
+                const auto features = properties.optimalTilingFeatures;
+                if (!(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+                    val &= ~(SVGA3DFORMAT_OP_TEXTURE | SVGA3DFORMAT_OP_VOLUMETEXTURE | SVGA3DFORMAT_OP_CUBETEXTURE);
+                if (!(features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+                    val &= ~(SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET | SVGA3DFORMAT_OP_SAME_FORMAT_RENDERTARGET);
+                if (!(features & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+                    val &= ~(SVGA3DFORMAT_OP_ZSTENCIL | SVGA3DFORMAT_OP_ZSTENCIL_WITH_ARBITRARY_COLOR_DEPTH);
+                if ((val & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET) && !(features & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT))
+                    val |= SVGA3DFORMAT_OP_NOALPHABLEND;
+                if (svga3_vlkn::svga3_format_is_compressed(format) && !dev->backend->features().textureCompressionBC) val = 0;
+            }
             *outCapValue = val;
             return 1;
         }
@@ -305,7 +406,7 @@ bool svga3_vlkn_context_exists(Svga3VlknDevice *dev, uint32_t cid)
 {
     if (!dev || !dev->contextMgr) return false;
     std::lock_guard<std::mutex> lock(dev->mutex);
-    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (dev->backend->isDeviceLost()) return false;
     return dev->contextMgr->exists(cid);
 }
 
@@ -344,7 +445,7 @@ bool svga3_vlkn_surface_exists(Svga3VlknDevice *dev, uint32_t sid)
 {
     if (!dev || !dev->surfaceMgr) return false;
     std::lock_guard<std::mutex> lock(dev->mutex);
-    if (dev->backend->isDeviceLost()) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (dev->backend->isDeviceLost()) return false;
     return dev->surfaceMgr->exists(sid);
 }
 

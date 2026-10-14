@@ -896,6 +896,22 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
 
 extern "C" {
 
+Svga3VlknStatus svga3_vlkn_fifo_packet_size(const void *buffer, size_t available, size_t *packetSize) {
+    if (packetSize) *packetSize = 0;
+    if (!packetSize || !buffer) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    auto read = [&](uint64_t index) {
+        uint32_t value;
+        memcpy(&value, static_cast<const uint8_t *>(buffer) + index * 4, 4);
+        return value;
+    };
+    uint64_t words = 0;
+    auto result = svga3_vlkn::fifoFrame(available / 4, read, words);
+    if (result != svga3_vlkn::FifoFrameStatus::Complete)
+        return result == svga3_vlkn::FifoFrameStatus::Incomplete ? SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER : SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND;
+    *packetSize = size_t(words * 4);
+    return SVGA3_VLKN_SUCCESS;
+}
+
 Svga3VlknStatus svga3_vlkn_fifo_execute(Svga3VlknDevice *dev,
                                         const void *commandBuffer,
                                         size_t bufferSizeBytes,

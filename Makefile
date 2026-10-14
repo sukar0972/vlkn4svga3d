@@ -296,3 +296,38 @@ $(BIN_DIR)/test_atomic_commands: tests/test_atomic_commands.cpp $(VLKN_LIB) | $(
 
 $(BIN_DIR)/test_resource_limits: tests/test_resource_limits.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+# Public headers retain their relative Vulkan/protocol include paths.
+PREFIX ?= /usr/local
+.PHONY: install test-install
+install: $(VLKN_LIB) $(QEMU_ADAPTER_LIB)
+	install -d $(DESTDIR)$(PREFIX)/lib/pkgconfig $(DESTDIR)$(PREFIX)/include/svga3-vlkn/vmsvga
+	install -m 644 $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(DESTDIR)$(PREFIX)/lib/
+	install -m 644 include/svga3_vlkn.h include/qemu_vmsvga.h $(DESTDIR)$(PREFIX)/include/svga3-vlkn/
+	install -m 644 shim/include/vmsvga/*.h $(DESTDIR)$(PREFIX)/include/svga3-vlkn/vmsvga/
+	cp -R include/vulkan include/vk_video $(DESTDIR)$(PREFIX)/include/svga3-vlkn/
+	sed 's|@PREFIX@|$(PREFIX)|g' pkgconfig/svga3-vlkn.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/svga3-vlkn.pc
+
+# Compile and link a C consumer using only the staged install and pkg-config.
+test-install: $(VLKN_LIB) $(QEMU_ADAPTER_LIB)
+	$(MAKE) install DESTDIR=$(CURDIR)/build/install-check PREFIX=/usr
+	PKG_CONFIG_SYSROOT_DIR=$(CURDIR)/build/install-check PKG_CONFIG_LIBDIR=$(CURDIR)/build/install-check/usr/lib/pkgconfig $(CC) -Wall -Wextra examples/embed.c -o $(BUILD_DIR)/embed-check $$(PKG_CONFIG_SYSROOT_DIR=$(CURDIR)/build/install-check PKG_CONFIG_LIBDIR=$(CURDIR)/build/install-check/usr/lib/pkgconfig pkg-config --cflags --libs svga3-vlkn)
+	./$(BUILD_DIR)/embed-check --mock
+
+$(BUILD_DIR)/test_public_api.o: tests/test_public_api.c | $(BUILD_DIR)
+	$(CC) -std=c11 -Wall -Wextra $(INCLUDES_VLKN) -c $< -o $@
+$(BIN_DIR)/test_public_api: $(BUILD_DIR)/test_public_api.o $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+.PHONY: test-public-api
+test-public-api: $(BIN_DIR)/test_public_api
+	./$(BIN_DIR)/test_public_api
+all: $(BIN_DIR)/test_public_api
+test: test-public-api
+
+$(BIN_DIR)/test_submissions: tests/test_submissions.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+all: $(BIN_DIR)/test_submissions
+
+$(BIN_DIR)/test_draw_submissions: tests/test_buffer_ordering.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -DSVGA3_TEST_SUBMIT_DRAWS $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+all: $(BIN_DIR)/test_draw_submissions

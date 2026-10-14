@@ -913,8 +913,25 @@ static VkResult VKAPI_CALL mock_vkGetQueryPoolResults(VkDevice device, VkQueryPo
     return result;
 }
 
+static VkResult VKAPI_CALL mock_vkCreateFence(VkDevice, const VkFenceCreateInfo *, const VkAllocationCallbacks *, VkFence *out) {
+    *out = (VkFence)(uintptr_t)new bool(false);
+    return VK_SUCCESS;
+}
+static void VKAPI_CALL mock_vkDestroyFence(VkDevice, VkFence fence, const VkAllocationCallbacks *) {
+    delete (bool *)(uintptr_t)fence;
+}
+static VkResult VKAPI_CALL mock_vkWaitForFences(VkDevice, uint32_t count, const VkFence *fences, VkBool32, uint64_t) {
+    for (uint32_t i = 0; i < count; ++i) if (!*(bool *)(uintptr_t)fences[i]) return VK_TIMEOUT;
+    return VK_SUCCESS;
+}
+static VkResult VKAPI_CALL mock_vkResetFences(VkDevice, uint32_t count, const VkFence *fences) {
+    for (uint32_t i = 0; i < count; ++i) *(bool *)(uintptr_t)fences[i] = false;
+    return VK_SUCCESS;
+}
+
 static VkResult VKAPI_CALL mock_vkQueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* pSubmits, VkFence fence) {
-    (void)queue; (void)count; (void)pSubmits; (void)fence;
+    (void)queue; (void)count; (void)pSubmits;
+    if (fence) *(bool *)(uintptr_t)fence = true;
     return VK_SUCCESS;
 }
 
@@ -1087,6 +1104,10 @@ static void populate_mock_table(VlknDispatchTable *t) {
     t->vkCmdResetQueryPool = mock_vkCmdResetQueryPool;
     t->vkGetQueryPoolResults = mock_vkGetQueryPoolResults;
 
+    t->vkCreateFence = mock_vkCreateFence;
+    t->vkDestroyFence = mock_vkDestroyFence;
+    t->vkWaitForFences = mock_vkWaitForFences;
+    t->vkResetFences = mock_vkResetFences;
     t->vkQueueSubmit = mock_vkQueueSubmit;
     t->vkQueueWaitIdle = mock_vkQueueWaitIdle;
     t->vkDeviceWaitIdle = mock_vkDeviceWaitIdle;
@@ -1258,6 +1279,10 @@ bool vlkn_dispatch_init_device(VlknDispatchTable *table, VkInstance instance, Vk
     LOAD_DEV(vkCmdResetQueryPool);
     LOAD_DEV(vkGetQueryPoolResults);
 
+    LOAD_DEV(vkCreateFence);
+    LOAD_DEV(vkDestroyFence);
+    LOAD_DEV(vkWaitForFences);
+    LOAD_DEV(vkResetFences);
     LOAD_DEV(vkQueueSubmit);
     LOAD_DEV(vkQueueWaitIdle);
     LOAD_DEV(vkDeviceWaitIdle);
