@@ -59,6 +59,8 @@ The [QEMU integration guide](integrations/qemu/README.md) explains how to build 
 
 This requires the project's QEMU patch. Migration and snapshots are unsupported.
 
+`SVGA3_VLKN_GUEST_PROFILE=windows7-wddm` enables an experimental Windows 7 lab profile (PCI INTA completion interrupts, vertex shader model 2.0, native QEMU input). See the [Windows 7 lab notes](docs/windows7-lab.md). It targets the 7.14.1.1057 WDDM driver; newer drivers and general Windows application compatibility are not established.
+
 ## Test
 
 ```sh
