@@ -138,7 +138,8 @@ when VRAM or the console changes. Regression tests cover those cases.
 `make test`, the real Vulkan, QEMU, presentation and verified-rendering
 targets, `make preload-lab`, and `make test-install` passed. One complete
 host harness iteration passed all 16 suites on lavapipe with synchronization
-validation enabled. This validation did not repeat the Windows VM smoke
+validation enabled. External SPIR-V validation was skipped because
+`spirv-val` was unavailable locally; CI installs that tool. This validation did not repeat the Windows VM smoke
 checks after the integration review; the guest results above are from
 October 22. The OpenGL/D3D9 conflict and Minecraft rendering limitations
 remain open.
