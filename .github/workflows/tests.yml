@@ -6,7 +6,10 @@ on:
 
 jobs:
   mock-and-translator:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04: the sRGB pixel tests in test_draw_submissions are sensitive
+    # to lavapipe's sRGB implementation, which changed in Mesa 26.0 (ubuntu-latest
+    # moved to 26.04). Mesa 25.2.8 on 24.04 produces the expected values.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install build and SPIR-V validation tools
@@ -46,6 +49,8 @@ jobs:
           path: |
             .harness-loop/
             artifacts/
+          # .harness-loop/ is hidden; without this the action finds no files.
+          include-hidden-files: true
 
   native-qemu:
     runs-on: ubuntu-latest
