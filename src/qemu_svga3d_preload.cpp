@@ -36,6 +36,7 @@
 
 #include <vector>
 #include <mutex>
+#include <atomic>
 #include <algorithm>
 
 #include "svga3_vlkn.h"
@@ -43,6 +44,7 @@
 #include "svga3_fifo_framing.h"
 #include "svga3_guest_mem.h"
 #include "svga3d_tables.h"
+#include "vmsvga/svga3d_shaderdefs.h"
 
 /* QEMU VMware SVGA Offsets */
 #define OFFSET_INDEX            0x10a2c
@@ -62,6 +64,10 @@
 /* QEMU 10.1.2 Binary Patch Points */
 #define ADDR_PCIVMSVGA_REALIZE_SIZE1 0x470716
 #define ADDR_PCIVMSVGA_REALIZE_SIZE2 0x470735
+#define ADDR_PCIVMSVGA_REALIZE_IRQ_LINE 0x470686
+#define ADDR_PCIVMSVGA_REALIZE_CHIP 0x470655
+#define ADDR_PCI_IRQ_HANDLER        0x50cc70
+#define OFFSET_PCI_CHIP            0xac0
 #define ADDR_VMSVGA_UPDATE_RECT_FLUSH 0x471100
 #define ADDR_CREATE_DISPLAY_SURFACE   0x3ae8d0
 #define ADDR_REPLACE_DISPLAY_SURFACE  0x3af4e0
@@ -95,7 +101,8 @@
 /* Advertised SVGA register capabilities (0x00d2c0e2): RECT_COPY (bit 1),
  * CURSOR (5), CURSOR_BYPASS (6), CURSOR_BYPASS_2 (7), 3D (14),
  * EXTENDED_FIFO (15), PITCHLOCK (17), GMR (20), GMR2 (22), SCREEN_OBJECT_2 (23).
- * Undefined bit 0 and IRQMASK are clear; the lab path uses polling. */
+ * Undefined bit 0 is clear. The Windows profile additionally exposes IRQMASK;
+ * other profiles retain polling. */
 #ifndef SVGA_CAP_PITCHLOCK
 #define SVGA_CAP_PITCHLOCK            0x00020000
 #endif
@@ -147,6 +154,8 @@ static void (*orig_update_rect_flush)(void *s) = NULL;
 static void *(*orig_create_display_surface)(int, int, uint32_t, int, uint8_t *) = NULL;
 static void (*orig_replace_display_surface)(void *, void *) = NULL;
 static void (*orig_dpy_gfx_update)(void *, int, int, int, int) = NULL;
+static uint8_t *g_screen_scanout_vram = nullptr;
+static void *g_screen_scanout_console = nullptr;
 static bool g_screen_scanout_active = false;
 static bool g_screen_deactivated = false;
 static uint32_t g_screen_scanout_offset = 0;
@@ -171,6 +180,9 @@ static int64_t left_down_ns;
 static uint32_t saved_gmr_id = 0;
 static uint32_t saved_gmr_desc = 0;
 static uint32_t saved_irqmask = 0;
+static std::atomic<uint32_t> irq_status{0};
+static std::atomic<int> irq_level{0};
+static void (*orig_pci_irq_handler)(void *, int, int) = nullptr;
 static uint32_t saved_num_guest_displays = 1;
 static FILE *log_file = NULL;
 /* Production SVGA3=VLKN Vulkan Device State */
@@ -184,6 +196,47 @@ static std::mutex g_vlkn_mutex;
 static bool portrait_profile_enabled() {
     const char *profile = getenv("SVGA3_VLKN_GUEST_PROFILE");
     return profile && strcmp(profile, "playbook-portrait") == 0;
+}
+static bool windows_wddm_profile_enabled() {
+    const char *profile = getenv("SVGA3_VLKN_GUEST_PROFILE");
+    return profile && strcmp(profile, "windows7-wddm") == 0;
+}
+
+static uint32_t advertised_svga_capabilities() {
+    uint32_t caps = SVGA_CAPABILITIES_VALUE;
+    /* The replacement FIFO walker does not install cursor definitions in
+     * QEMU. Let Windows draw its cursor instead of selecting that no-op path. */
+    if (windows_wddm_profile_enabled())
+        caps = (caps & ~(SVGA_CAP_CURSOR | SVGA_CAP_CURSOR_BYPASS | SVGA_CAP_CURSOR_BYPASS_2)) |
+            SVGA_CAP_IRQMASK;
+    return caps;
+}
+
+static void update_irq(void *s) {
+    if (!windows_wddm_profile_enabled() || !orig_pci_irq_handler || !s) return;
+    const int level = (irq_status.load(std::memory_order_relaxed) & saved_irqmask) != 0;
+    int expected = irq_level.load(std::memory_order_relaxed);
+    if (level != expected) {
+        irq_level.store(level, std::memory_order_relaxed);
+        orig_pci_irq_handler(reinterpret_cast<void *>(uintptr_t(s) - OFFSET_PCI_CHIP), 0, level);
+    }
+}
+
+static void raise_irq(void *s, uint32_t flags) {
+    if (!windows_wddm_profile_enabled()) return;
+    /* Latch all events; update_irq gates delivery by saved_irqmask. Events
+     * raised while masked are retained and delivered on unmask. */
+    irq_status.fetch_or(flags, std::memory_order_relaxed);
+    update_irq(s);
+}
+
+static bool fence_goal_reached(uint32_t *fifo, uint32_t allocated) {
+    return fifo && allocated >= (SVGA_FIFO_FENCE_GOAL + 1) * 4 &&
+        allocated <= EXPANDED_FIFO_SIZE &&
+        fifo[SVGA_FIFO_MIN] <= allocated &&
+        fifo[SVGA_FIFO_MIN] > SVGA_FIFO_FENCE_GOAL * 4 &&
+        static_cast<int32_t>(__atomic_load_n(&fifo[SVGA_FIFO_FENCE], __ATOMIC_ACQUIRE) -
+                             __atomic_load_n(&fifo[SVGA_FIFO_FENCE_GOAL], __ATOMIC_ACQUIRE)) >= 0;
 }
 
 /* Explicit build-id allowlist for the binary-patch path. See the file-top
@@ -263,7 +316,9 @@ extern "C" void log_msg(const char *fmt, ...) {
         /* O_NOFOLLOW: /tmp is world-writable; a symlinked log path would
          * otherwise let an attacker redirect our log writes. Skip file
          * logging entirely if the path cannot be opened safely. */
-        int fd = open("/tmp/svga3d.log", O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
+        const char *path = windows_wddm_profile_enabled()
+            ? "/tmp/svga3d-windows7.log" : "/tmp/svga3d.log";
+        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
         if (fd >= 0) {
             log_file = fdopen(fd, "a");
             if (!log_file) {
@@ -311,15 +366,32 @@ static bool bind_screen_scanout(void *s, uint32_t width, uint32_t height,
         width > INT32_MAX || height > INT32_MAX || pitch > INT32_MAX || (pitch & 3) ||
         (uint64_t)width * 4 > pitch || offset >= vramSize ||
         (uint64_t)pitch * height > vramSize - offset) return false;
+    const uint64_t fbGpa = reg_value(s, SVGA_REG_FB_START);
     if (g_vlknDev) {
-        if (svga3_vlkn_device_set_framebuffer(g_vlknDev, vram,
-                reg_value(s, SVGA_REG_FB_START), vramSize, width, height, pitch, 4) != SVGA3_VLKN_SUCCESS ||
-            svga3_vlkn_device_set_scanout_offset(g_vlknDev, offset) != SVGA3_VLKN_SUCCESS) return false;
+        const auto &fb = g_vlknDev->guestMem->getFramebuffer();
+        if (fb.hva != vram || fb.gpa != fbGpa || fb.size != vramSize ||
+            fb.width != width || fb.height != height || fb.pitch != pitch ||
+            fb.bpp != 4 || fb.scanoutOffset != offset) {
+            if (svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, fbGpa,
+                    vramSize, width, height, pitch, 4) != SVGA3_VLKN_SUCCESS ||
+                svga3_vlkn_device_set_scanout_offset(g_vlknDev, offset) != SVGA3_VLKN_SUCCESS)
+                return false;
+        }
     }
+    /* Drivers re-emit DEFINE_SCREEN for state updates. Replacing an unchanged
+     * DisplaySurface forces console clients to resize/repaint and invalidates
+     * the renderer's framebuffer binding on every such notification. */
+    if (g_screen_scanout_active && !g_screen_deactivated &&
+        g_screen_scanout_vram == vram && g_screen_scanout_console == con &&
+        g_screen_scanout_width == width && g_screen_scanout_height == height &&
+        g_screen_scanout_pitch == pitch && g_screen_scanout_offset == offset)
+        return true;
     constexpr uint32_t PIXMAN_X8R8G8B8 = 0x20020888;
     void *surface = orig_create_display_surface(width, height, PIXMAN_X8R8G8B8, pitch, vram + offset);
     if (!surface) return false;
     orig_replace_display_surface(con, surface);
+    g_screen_scanout_vram = vram;
+    g_screen_scanout_console = con;
     g_screen_scanout_offset = offset;
     g_screen_scanout_width = width;
     g_screen_scanout_height = height;
@@ -340,6 +412,8 @@ static void unbind_screen_scanout(void *s, bool blank) {
     uint8_t *vram = *(uint8_t **)((char *)s + 8);
     void *con = *(void **)((char *)s + 0xa40);
     g_screen_scanout_active = false;
+    g_screen_scanout_vram = nullptr;
+    g_screen_scanout_console = nullptr;
     g_screen_deactivated = blank;
     g_screen_scanout_offset = 0;
     g_screen_scanout_width = 0;
@@ -629,13 +703,47 @@ static void ensure_vlkn_device(void *s) {
 static uint32_t advertised_devcap(const DevCapInfo &cap) {
     uint32_t value = 0;
     if (!g_vlknDev || !svga3_vlkn_query_cap(g_vlknDev, cap.id, &value)) return 0;
+    // Preserve the established format advertisement for polling guests.
+    if (!windows_wddm_profile_enabled()) {
+        if ((cap.id == SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8 ||
+             cap.id == SVGA3D_DEVCAP_SURFACEFMT_R5G6B5 ||
+             cap.id == SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5) &&
+            (value & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET))
+            value |= SVGA3DFORMAT_OP_DISPLAYMODE | SVGA3DFORMAT_OP_3DACCELERATION |
+                SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
+        return value;
+    }
     switch (cap.id) {
+    case SVGA3D_DEVCAP_VERTEX_SHADER_VERSION:
+        /* Windows VMware UMDs consume legacy SVGA version enumerants,
+         * rather than the packed shader versions used by the core/Linux
+         * adapter. Keep vertex and pixel versions consistent: the OpenGL
+         * ICD requires VS 3.0 and PS 3.0 to initialize its SVGA screen. */
+        if (windows_wddm_profile_enabled() && value == 0x300) {
+            const char *opengl = getenv("SVGA3_VLKN_WINDOWS_OPENGL");
+            value = opengl && strcmp(opengl, "1") == 0 ? SVGA3DVSVERSION_30 : SVGA3DVSVERSION_20;
+        }
+        break;
+    case SVGA3D_DEVCAP_FRAGMENT_SHADER_VERSION:
+        if (windows_wddm_profile_enabled() && value == 0x300) {
+            const char *opengl = getenv("SVGA3_VLKN_WINDOWS_OPENGL");
+            value = opengl && strcmp(opengl, "1") == 0 ? SVGA3DPSVERSION_30 : SVGA3DPSVERSION_20;
+        }
+        break;
     case SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8:
     case SVGA3D_DEVCAP_SURFACEFMT_R5G6B5:
-    case SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5:
         if (value & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET)
             value |= SVGA3DFORMAT_OP_DISPLAYMODE | SVGA3DFORMAT_OP_3DACCELERATION
+                | SVGA3DFORMAT_OP_SAME_FORMAT_RENDERTARGET
                 | SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
+        break;
+    /* WDDM rejects a HAL advertising both 565 and 1555 display modes.
+     * QEMU/Windows uses 565 for its 16-bit scanout; keep 1555 offscreen. */
+    case SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5:
+    case SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8:
+    case SVGA3D_DEVCAP_SURFACEFMT_A1R5G5B5:
+        if (value & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET)
+            value |= SVGA3DFORMAT_OP_SAME_FORMAT_UP_TO_ALPHA_RENDERTARGET;
         break;
     default: break;
     }
@@ -682,6 +790,7 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
     uint32_t next=__atomic_load_n(&fifo[SVGA_FIFO_NEXT], __ATOMIC_ACQUIRE), stop=fifo[3];
     if ((next|stop)&3 || stop<min || stop>=max || next<min || next>=max) return;
     uint32_t available = (next>=stop ? next-stop : max-stop+next-min)/4;
+    const uint32_t initialStop = stop;
 
     uint32_t cur_w = reg_value(s, SVGA_REG_WIDTH);
     uint32_t cur_h = reg_value(s, SVGA_REG_HEIGHT);
@@ -739,7 +848,9 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                     log_msg("[libqemu_svga3d] Renderer disabled after fence flush failure; retaining 2D FIFO service\n");
                 }
             }
-            if (min >= 28) fifo[SVGA_FIFO_FENCE] = P(1);
+            if (min >= 28) __atomic_store_n(&fifo[SVGA_FIFO_FENCE], P(1), __ATOMIC_RELEASE);
+            raise_irq(s, SVGA_IRQFLAG_ANY_FENCE |
+                (fence_goal_reached(fifo, allocated) ? SVGA_IRQFLAG_FENCE_GOAL : 0));
             if (g_vlknDev && fence_count % 1000 == 0) {
                 if (auto *c = g_vlknDev->backend->performanceCounters())
                     log_msg("[libqemu_svga3d] Performance sample: fences=%u presents=%llu submissions=%llu wait_ns=%llu readback_bytes=%llu scanout_copy_bytes=%llu\n",
@@ -764,9 +875,16 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                 if (screenId == 0 && (flags & SVGA_SCREEN_DEACTIVATE)) unbind_screen_scanout(s, true);
                 if (sw > 0 && sh > 0 && !(flags & SVGA_SCREEN_DEACTIVATE)) {
                     uint32_t pitch = P(10);
+                    const bool unchanged = screenId == 0 && g_screen_scanout_active &&
+                        !g_screen_deactivated &&
+                        g_screen_scanout_vram == *(uint8_t **)((char *)s + 8) &&
+                        g_screen_scanout_console == *(void **)((char *)s + 0xa40) &&
+                        g_screen_scanout_width == sw &&
+                        g_screen_scanout_height == sh && g_screen_scanout_pitch == pitch &&
+                        g_screen_scanout_offset == P(9) && P(8) == SVGA_GMR_FRAMEBUFFER;
                     if (screenId == 0 && !bind_screen_scanout(s, sw, sh, pitch, P(8), P(9)))
                         goto unsupported;
-                    if (screenId == 0) {
+                    if (screenId == 0 && !unchanged) {
                         /*
                          * This shim consumes screen-object commands instead
                          * of passing them to QEMU's FIFO parser. Mirror the
@@ -779,15 +897,8 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                         log_msg("[libqemu_svga3d] Mirrored primary screen mode to legacy scanout: %ux%u pitch=%u\n",
                                 sw, sh, pitch);
                     }
-                    redraw(s, (sx < 0) ? 0 : (uint32_t)sx, (sy < 0) ? 0 : (uint32_t)sy, sw, sh);
-                    if (g_vlknDev && screenId == 0) {
-                        if (!pitch) pitch = sw * 4;
-                        uint8_t *vram = *(uint8_t **)((char *)s + 8);
-                        uint32_t vram_sz = reg_value(s, SVGA_REG_VRAM_SIZE);
-                        if (!vram_sz) vram_sz = 128 * 1024 * 1024;
-                        svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, reg_value(s, SVGA_REG_FB_START), vram_sz, sw, sh, pitch, 4);
-                        svga3_vlkn_device_set_scanout_offset(g_vlknDev, g_screen_scanout_offset);
-                    }
+                    if (!unchanged)
+                        redraw(s, (sx < 0) ? 0 : (uint32_t)sx, (sy < 0) ? 0 : (uint32_t)sy, sw, sh);
                 }
             }
         } else if (cmd == SVGA_CMD_DESTROY_SCREEN) {
@@ -799,7 +910,9 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
             g_display_gmrfb.bytesPerLine = P(3);
             g_display_gmrfb.format.value = P(4);
             g_display_gmrfb_defined = true;
-            log_msg("[libqemu_svga3d] DEFINE_GMRFB: gmrId=%u offset=0x%x bytesPerLine=%u format=0x%x\n",
+            static unsigned gmrfb_definitions = 0;
+            if (++gmrfb_definitions <= 10 || gmrfb_definitions % 1000 == 0)
+                log_msg("[libqemu_svga3d] DEFINE_GMRFB: gmrId=%u offset=0x%x bytesPerLine=%u format=0x%x\n",
                     g_display_gmrfb.ptr.gmrId, g_display_gmrfb.ptr.offset,
                     g_display_gmrfb.bytesPerLine, g_display_gmrfb.format.value);
         } else if (cmd == SVGA_CMD_BLIT_GMRFB_TO_SCREEN) {
@@ -882,7 +995,15 @@ extern "C" void my_vmsvga_fifo_run(void *s) {
                     memcpy((uint8_t *)packetWords.data() + firstBytes,
                            (const uint8_t *)fifo + min, packetBytes - firstBytes);
                 }
-                svga3_vlkn_fifo_execute(g_vlknDev, packetWords.data(), packetBytes, &bytesConsumed);
+                const Svga3VlknStatus status = svga3_vlkn_fifo_execute(
+                    g_vlknDev, packetWords.data(), packetBytes, &bytesConsumed);
+                if (status != SVGA3_VLKN_SUCCESS) {
+                    static uint64_t rejected3d = 0;
+                    if (++rejected3d <= 32 || (rejected3d & (rejected3d - 1)) == 0)
+                        log_msg("[libqemu_svga3d] 3D command %u rejected: status=%d bytes=%zu consumed=%zu (total=%llu)\n",
+                                cmd, int(status), packetBytes, bytesConsumed,
+                                (unsigned long long)rejected3d);
+                }
             }
         }
 
@@ -913,11 +1034,13 @@ unsupported:
 
 done:
     *(int *)((char *)s + OFFSET_SYNCING) = 0;
+    if (stop != initialStop) raise_irq(s, SVGA_IRQFLAG_FIFO_PROGRESS);
     my_vmsvga_update_rect_flush(s);
 }
 
 extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size) {
     void *s = opaque;
+    if (windows_wddm_profile_enabled() && addr == SVGA_IRQSTATUS_PORT) return irq_status.load(std::memory_order_relaxed);
     if (addr == 0) {
         return *(int *)((char *)s + OFFSET_INDEX);
     }
@@ -925,7 +1048,7 @@ extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size
         int index = *(int *)((char *)s + OFFSET_INDEX);
         switch (index) {
         case SVGA_REG_CAPABILITIES:
-            return SVGA_CAPABILITIES_VALUE;
+            return advertised_svga_capabilities();
         case SVGA_REG_MEM_SIZE:
             return EXPANDED_FIFO_SIZE;
         case SVGA_REG_CONFIG_DONE:
@@ -972,6 +1095,11 @@ extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size
 
 extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, unsigned size) {
     void *s = opaque;
+    if (windows_wddm_profile_enabled() && addr == SVGA_IRQSTATUS_PORT) {
+        irq_status.fetch_and(~static_cast<uint32_t>(data), std::memory_order_relaxed);
+        update_irq(s);
+        return;
+    }
     if (addr == 0) {
         *(int *)((char *)s + OFFSET_INDEX) = (int)data;
         return;
@@ -980,6 +1108,11 @@ extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, u
         int index = *(int *)((char *)s + OFFSET_INDEX);
         switch (index) {
         case SVGA_REG_CONFIG_DONE: {
+            if (windows_wddm_profile_enabled()) {
+                irq_status.store(0, std::memory_order_relaxed);
+                saved_irqmask = 0;
+                update_irq(s);
+            }
             orig_io_write(opaque, addr, data, size);
             if (data) {
                 uint32_t *fifo = *(uint32_t **)((char *)s + OFFSET_FIFO);
@@ -1083,6 +1216,18 @@ extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, u
             return;
         case SVGA_REG_IRQMASK:
             saved_irqmask = (uint32_t)data;
+            if (windows_wddm_profile_enabled()) {
+                saved_irqmask &= SVGA_IRQFLAG_ANY_FENCE |
+                    SVGA_IRQFLAG_FIFO_PROGRESS | SVGA_IRQFLAG_FENCE_GOAL;
+                uint32_t *fifo = *(uint32_t **)((char *)s + OFFSET_FIFO);
+                const uint32_t allocated = *(uint32_t *)((char *)s + OFFSET_FIFO_SIZE);
+                if (fence_goal_reached(fifo, allocated))
+                    raise_irq(s, SVGA_IRQFLAG_FENCE_GOAL);
+                update_irq(s);
+                static unsigned maskWrites = 0;
+                if (++maskWrites <= 10)
+                    log_msg("[libqemu_svga3d] Windows IRQMASK=0x%x status=0x%x\n", saved_irqmask, irq_status.load(std::memory_order_relaxed));
+            }
             return;
         default:
             break;
@@ -1308,6 +1453,9 @@ static void svga3d_init(void) {
     const unsigned char expected_create[]={0xf3,0x0f,0x1e,0xfa,0x41,0x57,0x41,0x89,0xcf};
     const unsigned char expected_replace[]={0xf3,0x0f,0x1e,0xfa,0x41,0x56,0x41,0x55,0x49,0x89,0xf5};
     const unsigned char expected1[]={0xb9,0,0,1,0};
+    const unsigned char expected_irq_line[]={0xc6,0x40,0x3c,0xff};
+    const unsigned char expected_chip[]={0x49,0x8d,0xae,0xc0,0x0a,0x00,0x00};
+    const unsigned char expected_pci_irq[]={0xf3,0x0f,0x1e,0xfa,0x48,0x83,0xec,0x08,0x83,0xfe,0x03};
     const unsigned char expected2[]={0x41,0xc7,0x86,0x38,0x16,1,0,0,0,1,0};
     const unsigned char expected_fifo[]={0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x55,0x53,0x4c,0x8d,0x9c,0x24};
     const unsigned char expected_btn[]={0xf3,0x0f,0x1e,0xfa,0x41,0x57,0x41,0x56,0x49,0x89,0xfe};
@@ -1315,7 +1463,11 @@ static void svga3d_init(void) {
     const unsigned char expected_abs[]={0xf3,0x0f,0x1e,0xfa,0x53,0x48,0x63,0xc9,0x4d,0x63,0xc0,0xb8};
     const unsigned char expected_sync[]={0xf3,0x0f,0x1e,0xfa,0x48,0x83,0xec,0x08,0xe8};
     const unsigned char expected_ptr[]={0x49,0x8b,0x87,0xa0,0x51,0x01,0x00,0xf3,0x0f,0x7e,0x24,0x24,0x48,0x8b};
-    if (memcmp((void *)(qemu_base+ADDR_VMSVGA_UPDATE_RECT_FLUSH),expected_flush,sizeof(expected_flush)) ||
+    if ((windows_wddm_profile_enabled() &&
+         (memcmp((void *)(qemu_base+ADDR_PCIVMSVGA_REALIZE_IRQ_LINE),expected_irq_line,sizeof(expected_irq_line)) ||
+          memcmp((void *)(qemu_base+ADDR_PCIVMSVGA_REALIZE_CHIP),expected_chip,sizeof(expected_chip)) ||
+          memcmp((void *)(qemu_base+ADDR_PCI_IRQ_HANDLER),expected_pci_irq,sizeof(expected_pci_irq)))) ||
+        memcmp((void *)(qemu_base+ADDR_VMSVGA_UPDATE_RECT_FLUSH),expected_flush,sizeof(expected_flush)) ||
         memcmp((void *)(qemu_base+ADDR_CREATE_DISPLAY_SURFACE),expected_create,sizeof(expected_create)) ||
         memcmp((void *)(qemu_base+ADDR_REPLACE_DISPLAY_SURFACE),expected_replace,sizeof(expected_replace)) ||
         memcmp((void *)(qemu_base+ADDR_PCIVMSVGA_REALIZE_SIZE1),expected1,sizeof(expected1)) ||
@@ -1332,6 +1484,17 @@ static void svga3d_init(void) {
     /* 1. Patch pci_vmsvga_realize to allocate 4MB FIFO RAM and set fifo_size = 4MB */
     uintptr_t page_text = (qemu_base + ADDR_PCIVMSVGA_REALIZE_SIZE1) & ~0xFFF;
     if (mprotect((void *)page_text, 4096 * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        if (windows_wddm_profile_enabled()) {
+            /* Windows' graphics stack requires an interrupt resource before
+             * starting the WDDM miniport. Replace config[PCI_INTERRUPT_LINE]
+             * = 0xff with config[PCI_INTERRUPT_PIN] = 1 (INTA). Firmware then
+             * assigns the line. Completion interrupts use QEMU's PCI router. */
+            unsigned char *irq = (unsigned char *)(qemu_base + ADDR_PCIVMSVGA_REALIZE_IRQ_LINE);
+            irq[2] = 0x3d;
+            irq[3] = 1;
+            orig_pci_irq_handler = reinterpret_cast<void (*)(void *,int,int)>(qemu_base + ADDR_PCI_IRQ_HANDLER);
+            log_msg("[libqemu_svga3d] Windows WDDM profile: PCI INTA resource and FIFO completion interrupts enabled\n");
+        }
         unsigned char *p1 = (unsigned char *)(qemu_base + ADDR_PCIVMSVGA_REALIZE_SIZE1);
         p1[3] = 0x40; /* 0x01 -> 0x40 (4MB) */
 
@@ -1384,6 +1547,14 @@ static void svga3d_init(void) {
                 orig_io_read, my_vmsvga_io_read, orig_io_write, my_vmsvga_io_write);
     } else {
         perror("[libqemu_svga3d] mprotect io_ops failed"); _exit(78);
+    }
+
+    /* The Windows USB tablet works with QEMU's native input path. The lab's
+     * PlayBook tap dwell sleeps on the QEMU main thread and splits motion;
+     * installing those hooks here delays desktop clicks and dragging. */
+    if (windows_wddm_profile_enabled()) {
+        log_msg("[libqemu_svga3d] Windows WDDM profile: retaining native QEMU input handling\n");
+        return;
     }
 
     orig_input_update_buttons = (void (*)(void *, uint32_t *, uint32_t, uint32_t))make_orig_tramp(qemu_base + ADDR_QEMU_INPUT_UPDATE_BUTTONS, 22, -1, 0);

@@ -4,6 +4,27 @@
 #include <iostream>
 #include <cstring>
 
+static bool testUnboundAttachmentsWithSurfaceZero(Svga3VlknDevice *dev) {
+    // Mesa allocates SID 0 before creating its window render target. Unbound
+    // attachments must not alias that smaller resource or restrict the extent.
+    SVGA3dSize helper = {32, 32, 1}, target = {64, 64, 1};
+    if (svga3_vlkn_surface_define(dev, 0, 0, SVGA3D_X8R8G8B8, &helper, 1) != SVGA3_VLKN_SUCCESS ||
+        svga3_vlkn_surface_define(dev, 41, SVGA3D_SURFACE_HINT_RENDERTARGET,
+                                 SVGA3D_A8R8G8B8, &target, 1) != SVGA3_VLKN_SUCCESS ||
+        svga3_vlkn_context_create(dev, 42) != SVGA3_VLKN_SUCCESS ||
+        svga3_vlkn_context_set_render_target(dev, 42, SVGA3D_RT_COLOR0, 41, 0, 0) != SVGA3_VLKN_SUCCESS ||
+        svga3_vlkn_context_clear(dev, 42, SVGA3D_CLEAR_COLOR, 0xff33aa55, 1, 0, nullptr, 0) != SVGA3_VLKN_SUCCESS)
+        return false;
+    SVGA3dBox box = {48, 48, 0, 1, 1, 1};
+    uint32_t pixel = 0;
+    bool ok = svga3_vlkn_surface_dma_download(dev, 41, 0, &box, &pixel, sizeof(pixel)) == SVGA3_VLKN_SUCCESS &&
+        pixel == 0xff33aa55;
+    svga3_vlkn_context_destroy(dev, 42);
+    svga3_vlkn_surface_destroy(dev, 41);
+    svga3_vlkn_surface_destroy(dev, 0);
+    return ok;
+}
+
 int main() {
     std::cout << "Testing Real Vulkan Backend Initialization..." << std::endl;
 
@@ -115,6 +136,12 @@ int main() {
     std::cout << "SUCCESS: Buffer upload and download verified bit-exact on real Vulkan!" << std::endl;
 
     backend->destroyBuffer(buf, mem);
+    if (!testUnboundAttachmentsWithSurfaceZero(dev)) {
+        std::cerr << "FAIL: SID 0 helper texture restricted an unbound framebuffer attachment!" << std::endl;
+        svga3_vlkn_device_destroy(dev);
+        return 1;
+    }
+    std::cout << "SUCCESS: Unbound attachments do not alias valid surface zero!" << std::endl;
     svga3_vlkn_device_destroy(dev);
     std::cout << "All Real Vulkan Device sanity checks PASSED!" << std::endl;
     return 0;
