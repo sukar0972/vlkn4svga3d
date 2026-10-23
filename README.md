@@ -4,72 +4,70 @@
 
 # vlkn4svga3d
 
-Experimental SVGA3D-to-Vulkan rendering library and QEMU integration prototype. Internal APIs still use `svga3_vlkn`.
+An experimental Vulkan renderer for VMware SVGA3D, with a standalone C API and QEMU integration.
 
-The renderer handles a subset of legacy D3D9-style commands and shaders. Shader, format and guest compatibility remain incomplete. DX context lifecycle bookkeeping is isolated from legacy contexts; DX rendering is unsupported and no DX capability is advertised.
+The project translates legacy Direct3D 9-style graphics commands and shaders into Vulkan, allowing virtual machines using the VMware SVGA device to render through a host Vulkan driver.
 
-VM119 runs Debian with Mesa 22.3.6 and exposes OpenGL 2.1 through SVGA3D. The October 3–4 Piglit accuracy comparison completed all 146 cases: SVGA passed 85, failed 49, skipped five and timed out seven; llvmpipe passed all 146. Twenty-one former failures now pass, and all 64 previous passes remain passing. Five GPU hangs required VM recovery between cases. See [validation evidence](VALIDATION.md) for the method and limits.
+Support is incomplete. DirectX 10/11 rendering is unsupported, and guest compatibility varies.
+
+## Performance
+
+| Renderer | glmark2 score¹ | Relative score |
+| --- | ---: | --- |
+| **vlkn4svga3d** | **647** | ████████████████████ |
+| Mesa llvmpipe | 193 | ██████ |
+
+**Specs:** Intel Core i5-7500T · Intel HD Graphics 630 · Debian 12 guest · 2 vCPUs · 800×600.
+
+¹ Median scores from separate runs; terrain is unsupported by vlkn4svga3d.
 
 ## Build
 
-Requires a C++17 compiler, GNU Make, binutils, pthreads and libdl. Vulkan headers are bundled. Real rendering needs the Vulkan loader and a working driver. Tests that request validation also need the validation layer. Mesa lavapipe works for host tests.
+Requires a C++17 compiler, GNU Make, and a Vulkan driver. Vulkan headers are bundled.
+
+On Debian or Ubuntu:
 
 ```sh
-sudo apt install build-essential libvulkan1 mesa-vulkan-drivers vulkan-tools vulkan-validationlayers spirv-tools
+sudo apt install build-essential libvulkan1 mesa-vulkan-drivers
 make -j4 all
 ```
 
-Core consumers link `lib/libsvga3_vlkn.a` with `-ldl -pthread`. The QEMU device harness additionally links `lib/libsvga3_qemu_adapter.a` before the core archive. Public interfaces are in `include/svga3_vlkn.h` and `include/qemu_vmsvga.h`; internal headers are not a stable API.
+## Use as a library
 
-## Embedding and installation
+Install the library and public headers:
 
-`make install PREFIX=/usr/local` installs the archives, public headers and
-`svga3-vlkn.pc`; `DESTDIR` supports staged packaging. Compile the C example with:
+```sh
+sudo make install PREFIX=/usr/local
+```
+
+Build and run the [C example](examples/embed.c):
 
 ```sh
 cc examples/embed.c $(pkg-config --cflags --libs svga3-vlkn) -o embed
-./embed --mock
+./embed
 ```
 
-New consumers should initialize `Svga3VlknConfigV1` with
-`svga3_vlkn_config_init()` and use `svga3_vlkn_device_create_ex()` for a status
-and diagnostic. The legacy create function remains available. Default limits
-are 4096 surfaces and 64 contexts; the versioned API rejects larger requests.
-The host-adapter callbacks run under device locks and must not reenter it.
+The API is declared in [include/svga3_vlkn.h](include/svga3_vlkn.h). Initialize a configuration with `svga3_vlkn_config_init()`, then create a device with `svga3_vlkn_device_create_ex()`.
 
-## Native QEMU integration
+## Use with QEMU
 
-The [QEMU 9.2.0 source adapter](integrations/qemu/README.md) builds into QEMU
-with `-device vmware-svga,vlkn=on`. It uses QEMU memory regions and display
-callbacks, with separate device, guest boot and reset tests. Its build and
-validation run in a container. Migration is blocked until renderer
-state can be serialized. This is a maintained source patch, not an upstream
-QEMU feature.
-
-## QEMU lab adapter
-
-Build the binary-patch adapter explicitly with `make preload-lab`. It is excluded from `make all`. It targets one allowlisted QEMU build and checks instruction bytes before patching. A build-ID mismatch exits with code 78 before patching and logs the observed ID. Use it only for the designated VM; never configure global `LD_PRELOAD`.
-
-`SVGA3_VLKN_VALIDATE=1` requests validation and `=0` disables it. Without an override, debug builds request validation and release builds (`NDEBUG`) do not. Initialization fails when requested validation cannot be activated. `SVGA3_VLKN_GUEST_PROFILE=playbook-portrait` enables portrait overrides. Guest-RAM discovery still uses a lab mapping heuristic. Use the source adapter above for integration development.
-
-Host integrations register RAM map/read/write and display-update callbacks through `svga3_vlkn_device_set_host_adapter`, replacing the former callback setters. The core copies the table; its opaque host state must remain valid until detached or device destruction. Callbacks run under core locks and must not reenter device APIs. Rendering, presentation copies and fence completion stay in the core.
-
-## Tests
+The [QEMU integration guide](integrations/qemu/README.md) explains how to build the patched QEMU 9.2.0 device. Enable the renderer with:
 
 ```sh
-make test
-make harness-loop HARNESS_ICD=/usr/share/vulkan/icd.d/lvp_icd.json
-make test-piglit PIGLIT_ARGS="--ssh svga3d@10.0.0.144 --renderer compare --output artifacts/piglit-compare"
+-device vmware-svga,vlkn=on
 ```
 
-`make test` checks the mock backend and reference harness. `make harness-loop` exercises the host Vulkan path. Piglit runs inside the guest and compares SVGA pixels with llvmpipe. Neither `test-qemu` nor `test_qemu_integration` boots a guest.
+This requires the project's QEMU patch. Migration and snapshots are unsupported.
 
-The [testing guide](docs/testing.md) covers dependencies, individual targets, suite coverage, repeated harness runs and Piglit result handling. The [PR graphics gate policy](docs/pr-graphics-gate.md) defines Oracle queue rules, required accuracy/performance evidence and activation blockers; the graphics gate is not yet enforced on GitHub. [VALIDATION.md](VALIDATION.md) records measured results and their limits.
+## Test
 
-## Licensing
+```sh
+make test        # Basic checks using the mock backend
+make acceptance  # Broader suite, including Vulkan rendering
+```
 
-VirtualBox-derived files carry GPL-2.0 notices; the license text is in [COPYING](COPYING). VMware protocol headers and bundled Khronos headers retain their own notices. Original project code is GPL-2.0-or-later; see [licensing scope](LICENSE.md).
+Vulkan tests require a working driver and validation layers. See the [testing guide](docs/testing.md) for dependencies and individual suites.
 
-Presentation supports the primary screen (ID 0 or invalid/legacy ID). Other screen IDs return an error. Source and scanout pixel widths must match; 16-to-32 and 32-to-16 presentation return unsupported-format rather than truncating pixels. Surface-to-screen blits scale with nearest-neighbor sampling and select the requested cube face. Preload GMRFB blits support framebuffer GMR with 32-bit pixels and 24-bit color depth; other configurations emit a rate-limited rejection log.
+## License
 
-D24X8 uses a depth-only 24-bit UNORM image; stencil is unavailable. D15S1 and DF24 definitions return unsupported-format. DF24 capabilities are zero until its floating-depth/stencil representation is implemented. D24S8 retains separate packed depth and stencil DMA planes.
+GPL-2.0-or-later, with third-party notices. See [LICENSE.md](LICENSE.md) and [COPYING](COPYING).
