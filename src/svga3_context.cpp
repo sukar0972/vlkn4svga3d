@@ -221,6 +221,10 @@ VlknContext::VlknContext(VlknBackend *backend, VlknSurfaceManager *surfaceMgr, u
 {
     memset(m_renderTargets, 0, sizeof(m_renderTargets));
     memset(&m_depthStencilTarget, 0, sizeof(m_depthStencilTarget));
+    // Surface zero is a valid guest resource, not an unbound attachment.
+    // In particular, Mesa's SVGA driver creates small helper textures at SID 0.
+    for (auto &target : m_renderTargets) target.sid = SVGA3D_INVALID_ID;
+    m_depthStencilTarget.sid = SVGA3D_INVALID_ID;
     memset(m_stages, 0, sizeof(m_stages));
     for (uint32_t i = 0; i < SVGA3_MAX_TEXTURE_STAGES; ++i) {
         m_stages[i].sid = SVGA3D_INVALID_ID;
