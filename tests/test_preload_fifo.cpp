@@ -67,6 +67,12 @@ static void fakeAbsolute(void *, int axis, int value, int min, int max) {
   }
 }
 static void fakeSync() {}
+static std::vector<int> irqLevels;
+static void *irqDevice;
+static bool irqPinOk;
+static void fakePciIrq(void *dev, int pin, int level) {
+  irqDevice=dev; irqPinOk &= pin==0; irqLevels.push_back(level);
+}
 
 static unsigned displayCreates, displayReplaces, displayUpdates, legacyFlushes;
 static uint8_t *displayPixels;
@@ -91,15 +97,81 @@ static void flushLegacy(void *) { ++legacyFlushes; }
 static void screenWrite(void *, uint64_t, uint64_t, unsigned) {}
 
 int main() {
+  const char *profile = getenv("SVGA3_VLKN_GUEST_PROFILE");
+  const std::string savedProfile = profile ? profile : "";
+  setenv("SVGA3_VLKN_GUEST_PROFILE", "windows7-wddm", 1);
   Svga3VlknConfig capConfig{}; capConfig.forceMockBackend = true;
   g_vlknDev = svga3_vlkn_device_create(&capConfig);
   if (!g_vlknDev) return 1;
-  bool depthCaps=false,df24Disabled=false;
+  bool depthCaps=false,df24Disabled=false,displayCaps=true;
   for (const auto &cap:g_DevCaps) {
     if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_Z_D16) depthCaps=advertised_devcap(cap)!=0;
     if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_Z_DF24) df24Disabled=advertised_devcap(cap)==0;
+    if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8 ||
+        cap.id==SVGA3D_DEVCAP_SURFACEFMT_R5G6B5) {
+      const uint32_t required=SVGA3DFORMAT_OP_DISPLAYMODE | SVGA3DFORMAT_OP_3DACCELERATION |
+          SVGA3DFORMAT_OP_SAME_FORMAT_RENDERTARGET;
+      displayCaps &= (advertised_devcap(cap)&required)==required;
+    }
+    if (cap.id==SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5 ||
+        cap.id==SVGA3D_DEVCAP_SURFACEFMT_A8R8G8B8 ||
+        cap.id==SVGA3D_DEVCAP_SURFACEFMT_A1R5G5B5) {
+      const uint32_t value=advertised_devcap(cap);
+      displayCaps &= (value&SVGA3DFORMAT_OP_SAME_FORMAT_UP_TO_ALPHA_RENDERTARGET)!=0 &&
+          (value&SVGA3DFORMAT_OP_DISPLAYMODE)==0;
+    }
   }
-  if (!depthCaps || !df24Disabled) return 1;
+  printf("display formats support matching render targets without alpha display modes: %s\n",displayCaps?"PASS":"FAIL");
+  if (!depthCaps || !df24Disabled || !displayCaps) return 1;
+  const char *opengl = getenv("SVGA3_VLKN_WINDOWS_OPENGL");
+  const std::string savedOpenGL = opengl ? opengl : "";
+  bool shaderProfileOk = true;
+  for (const char *guestProfile : {"", "playbook-portrait"}) {
+    setenv("SVGA3_VLKN_GUEST_PROFILE", guestProfile, 1);
+    for (const auto &cap : g_DevCaps) {
+      uint32_t expected = 0;
+      if (!svga3_vlkn_query_cap(g_vlknDev, cap.id, &expected)) continue;
+      if ((cap.id == SVGA3D_DEVCAP_SURFACEFMT_X8R8G8B8 ||
+           cap.id == SVGA3D_DEVCAP_SURFACEFMT_R5G6B5 ||
+           cap.id == SVGA3D_DEVCAP_SURFACEFMT_X1R5G5B5) &&
+          (expected & SVGA3DFORMAT_OP_OFFSCREEN_RENDERTARGET))
+        expected |= SVGA3DFORMAT_OP_DISPLAYMODE | SVGA3DFORMAT_OP_3DACCELERATION |
+            SVGA3DFORMAT_OP_MEMBEROFGROUP_ARGB | SVGA3DFORMAT_OP_CONVERT_TO_ARGB;
+      shaderProfileOk &= advertised_devcap(cap) == expected;
+    }
+  }
+  unsigned shaderVersionsChecked = 0;
+  for (const auto &cap : g_DevCaps) {
+    if (cap.id != SVGA3D_DEVCAP_VERTEX_SHADER_VERSION &&
+        cap.id != SVGA3D_DEVCAP_FRAGMENT_SHADER_VERSION) continue;
+    ++shaderVersionsChecked;
+    unsetenv("SVGA3_VLKN_WINDOWS_OPENGL");
+    unsetenv("SVGA3_VLKN_GUEST_PROFILE");
+    const uint32_t normal = advertised_devcap(cap);
+    const uint32_t normalSvgaCaps = advertised_svga_capabilities();
+    setenv("SVGA3_VLKN_GUEST_PROFILE", "windows7-wddm", 1);
+    const uint32_t d3dVersion = cap.id == SVGA3D_DEVCAP_VERTEX_SHADER_VERSION
+        ? uint32_t(SVGA3DVSVERSION_20) : uint32_t(SVGA3DPSVERSION_20);
+    shaderProfileOk &= advertised_devcap(cap) == d3dVersion;
+    setenv("SVGA3_VLKN_WINDOWS_OPENGL", "1", 1);
+    const uint32_t legacyVersion = cap.id == SVGA3D_DEVCAP_VERTEX_SHADER_VERSION
+        ? uint32_t(SVGA3DVSVERSION_30) : uint32_t(SVGA3DPSVERSION_30);
+    shaderProfileOk &= normal == 0x300 && advertised_devcap(cap) == legacyVersion;
+    const uint32_t cursorCaps = SVGA_CAP_CURSOR | SVGA_CAP_CURSOR_BYPASS | SVGA_CAP_CURSOR_BYPASS_2;
+    shaderProfileOk &= (normalSvgaCaps & cursorCaps) == cursorCaps &&
+        advertised_svga_capabilities() == ((normalSvgaCaps & ~cursorCaps) | SVGA_CAP_IRQMASK);
+    uint32_t backendVersion = 0;
+    shaderProfileOk &= svga3_vlkn_query_cap(g_vlknDev, cap.id, &backendVersion) &&
+        backendVersion == normal;
+    unsetenv("SVGA3_VLKN_GUEST_PROFILE");
+    shaderProfileOk &= advertised_devcap(cap) == normal;
+  }
+  if (profile) setenv("SVGA3_VLKN_GUEST_PROFILE", savedProfile.c_str(), 1);
+  else unsetenv("SVGA3_VLKN_GUEST_PROFILE");
+  if (opengl) setenv("SVGA3_VLKN_WINDOWS_OPENGL", savedOpenGL.c_str(), 1);
+  else unsetenv("SVGA3_VLKN_WINDOWS_OPENGL");
+  printf("Windows shader profile is compatible without changing backend caps: %s\n", shaderProfileOk ? "PASS" : "FAIL");
+  if (!shaderProfileOk || shaderVersionsChecked != 2) return 1;
   svga3_vlkn_device_destroy(g_vlknDev);
   g_vlknDev = nullptr;
   std::vector<uint64_t> storage(0x20000 / 8);
@@ -151,6 +223,55 @@ int main() {
   incomplete &= fifo[3] == fifo[2] && fifo[SVGA_FIFO_BUSY] == 0;
   printf("incomplete packet completion can notify host: %s\n", incomplete ? "PASS" : "FAIL");
   ok &= incomplete;
+  setenv("SVGA3_VLKN_GUEST_PROFILE", "windows7-wddm", 1);
+  orig_pci_irq_handler=fakePciIrq;irqPinOk=true;irq_status=0;saved_irqmask=0;irq_level=0;
+  reset(4096);fifo[SVGA_FIFO_FENCE_GOAL]=100;
+  *reinterpret_cast<int *>(state+OFFSET_INDEX)=SVGA_REG_IRQMASK;
+  my_vmsvga_io_write(state,1,SVGA_IRQFLAG_ANY_FENCE|SVGA_IRQFLAG_FENCE_GOAL,4);
+  append(SVGA_CMD_FENCE);append(99);my_vmsvga_fifo_run(state);
+  bool irqOk=fifo[SVGA_FIFO_FENCE]==99 && irqLevels==std::vector<int>{1} &&
+      my_vmsvga_io_read(state,SVGA_IRQSTATUS_PORT,4)==SVGA_IRQFLAG_ANY_FENCE;
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_ANY_FENCE,4);
+  irqOk &= irqLevels==std::vector<int>({1,0});
+  append(SVGA_CMD_FENCE);append(100);my_vmsvga_fifo_run(state);
+  irqOk &= irq_status==(SVGA_IRQFLAG_ANY_FENCE|SVGA_IRQFLAG_FENCE_GOAL) && irq_level==1;
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_ANY_FENCE,4);
+  irqOk &= irq_status==SVGA_IRQFLAG_FENCE_GOAL && irq_level==1;
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_FENCE_GOAL,4);
+  irqOk &= irq_status==0 && irq_level==0;
+  // Unmasking an already completed goal must notify without another fence.
+  my_vmsvga_io_write(state,1,0,4);
+  my_vmsvga_io_write(state,1,SVGA_IRQFLAG_FENCE_GOAL,4);
+  irqOk &= irq_status==SVGA_IRQFLAG_FENCE_GOAL && irq_level==1;
+  my_vmsvga_io_write(state,1,0,4);
+  irqOk &= irq_level==0 && irqPinOk &&
+      uintptr_t(irqDevice)==uintptr_t(state)-OFFSET_PCI_CHIP;
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,~0u,4);
+  fifo[SVGA_FIFO_FENCE_GOAL]=0xffffffffu;
+  // Completion goal comparisons retain ordering across fence-ID wrap.
+  fifo[SVGA_FIFO_FENCE]=0;
+  irqOk &= fence_goal_reached(fifo, storage.size() * sizeof(storage[0]));
+  // Malformed MIN must never authorize reading beyond the allocation.
+  irqOk &= !fence_goal_reached(fifo, 16);
+  const uint32_t savedMin = fifo[SVGA_FIFO_MIN];
+  fifo[SVGA_FIFO_MIN] = EXPANDED_FIFO_SIZE + 4;
+  irqOk &= !fence_goal_reached(fifo, storage.size() * sizeof(storage[0]));
+  fifo[SVGA_FIFO_MIN] = savedMin;
+  fifo[SVGA_FIFO_FENCE_GOAL]=1;
+  irqOk &= !fence_goal_reached(fifo, storage.size() * sizeof(storage[0]));
+  my_vmsvga_io_write(state,1,SVGA_IRQFLAG_FIFO_PROGRESS,4);
+  append(SVGA_CMD_ESCAPE);append(0);append(0);my_vmsvga_fifo_run(state);
+  irqOk &= irq_status==SVGA_IRQFLAG_FIFO_PROGRESS && irq_level==1;
+  auto savedIoWrite=orig_io_write;orig_io_write=screenWrite;
+  *reinterpret_cast<int *>(state+OFFSET_INDEX)=SVGA_REG_CONFIG_DONE;
+  my_vmsvga_io_write(state,1,0,4);
+  irqOk &= irq_status==0 && saved_irqmask==0 && irq_level==0;
+  orig_io_write=savedIoWrite;
+  orig_pci_irq_handler=nullptr;
+  if (profile) setenv("SVGA3_VLKN_GUEST_PROFILE",savedProfile.c_str(),1);
+  else unsetenv("SVGA3_VLKN_GUEST_PROFILE");
+  printf("Windows completion IRQ levels, acknowledgements, mask and fence goals: %s\n",irqOk?"PASS":"FAIL");
+  ok &= irqOk;
   std::vector<uint64_t> vncState(0x16000 / 8);
   std::vector<uint64_t> display(0x60 / 8);
   auto *vs = reinterpret_cast<char *>(vncState.data());
@@ -183,6 +304,8 @@ int main() {
       !bind_screen_scanout(state,8,8,32,7,4096) && displayCreates == 0;
   scanoutOk &= bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,4096) &&
       displayPixels == vram.data()+4096 && displayCreates == 1 && displayReplaces == 1;
+  scanoutOk &= bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,4096) &&
+      displayCreates == 1 && displayReplaces == 1;
   g_display_gmrfb_defined = true;
   g_display_gmrfb.ptr = {SVGA_GMR_FRAMEBUFFER,8192};
   g_display_gmrfb.bytesPerLine = 32;
@@ -204,6 +327,13 @@ int main() {
       *reinterpret_cast<int *>(state+OFFSET_REDRAW_FIFO_LAST)==0;
   scanoutOk &= !bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,65536) &&
       g_screen_scanout_offset==4096 && displayCreates==1;
+  std::vector<uint8_t> remappedVram = vram;
+  *reinterpret_cast<uint8_t **>(state + 8) = remappedVram.data();
+  scanoutOk &= bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,4096) &&
+      displayPixels == remappedVram.data()+4096 && displayCreates==2;
+  *reinterpret_cast<uint8_t **>(state + 8) = vram.data();
+  scanoutOk &= bind_screen_scanout(state,8,8,32,SVGA_GMR_FRAMEBUFFER,4096) &&
+      displayPixels == vram.data()+4096 && displayCreates==3;
   auto unchanged = vram;
   g_display_gmrfb.ptr.gmrId=7;
   scanoutOk &= !blit_gmrfb_to_legacy(state,0,0,0,0,2,2,0) && vram==unchanged;
@@ -251,10 +381,11 @@ int main() {
   scanoutOk &= !g_screen_deactivated && displayPixels==vram.data();
   printf("screen backing-store bounds, ownership and display notification: %s\n",scanoutOk?"PASS":"FAIL");
   ok &= scanoutOk;
+  const unsigned createsBeforeTruncation = displayCreates;
   reset(4096);
   append(SVGA_CMD_DEFINE_SCREEN); append(20); append(0); append(3); append(8); append(8);
   my_vmsvga_fifo_run(state);
-  bool shortScreenOk=fifo[3]==4096 && displayCreates==3;
+  bool shortScreenOk=fifo[3]==4096 && displayCreates==createsBeforeTruncation;
   printf("truncated screen object rejected before side effects: %s\n",shortScreenOk?"PASS":"FAIL");
   ok &= shortScreenOk;
   orig_io_write=screenWrite;
@@ -265,6 +396,18 @@ int main() {
   my_vmsvga_fifo_run(state);
   bool screenPacketOk = fifo[3]==fifo[2] && fifo[SVGA_FIFO_FENCE]==43 &&
       g_screen_scanout_active && g_screen_scanout_offset==4096 && displayPixels==vram.data()+4096;
+  const unsigned repeatedCreates=displayCreates, repeatedReplaces=displayReplaces,
+      repeatedUpdates=displayUpdates;
+  // A repeated screen definition must preserve the surface and must not force
+  // a full-screen repaint; the following fence must still complete.
+  reset(4096);
+  for (uint32_t word : {uint32_t(SVGA_CMD_DEFINE_SCREEN), uint32_t(sizeof(SVGAScreenObject)),
+      0u, 3u, 8u, 8u, 0u, 0u, uint32_t(SVGA_GMR_FRAMEBUFFER), 4096u, 32u, 0u,
+      uint32_t(SVGA_CMD_FENCE), 44u}) append(word);
+  my_vmsvga_fifo_run(state);
+  screenPacketOk &= fifo[3]==fifo[2] && fifo[SVGA_FIFO_FENCE]==44 &&
+      displayCreates==repeatedCreates && displayReplaces==repeatedReplaces &&
+      displayUpdates==repeatedUpdates;
   reset(4096);
   append(SVGA_CMD_DESTROY_SCREEN); append(0); append(SVGA_CMD_FENCE); append(44);
   my_vmsvga_fifo_run(state);

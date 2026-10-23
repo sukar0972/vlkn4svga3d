@@ -52,6 +52,19 @@ Build the binary-patch adapter explicitly with `make preload-lab`. It is exclude
 
 `SVGA3_VLKN_VALIDATE=1` requests validation and `=0` disables it. Without an override, debug builds request validation and release builds (`NDEBUG`) do not. Initialization fails when requested validation cannot be activated. `SVGA3_VLKN_GUEST_PROFILE=playbook-portrait` enables portrait overrides. Guest-RAM discovery still uses a lab mapping heuristic. Use the source adapter above for integration development.
 
+`SVGA3_VLKN_GUEST_PROFILE=windows7-wddm` enables the lab Windows 7 profile:
+it delivers FIFO completion interrupts through PCI INTA and exposes vertex
+shader model 2.0 using the older VMware driver's version encoding. Native QEMU
+input handling is retained; unsupported hardware cursor capabilities are clear.
+Its log is `/tmp/svga3d-windows7.log`. This profile targets the older
+7.14.1.1057 WDDM driver; it does not establish support for newer drivers or
+general Windows application compatibility.
+Adding `SVGA3_VLKN_WINDOWS_OPENGL=1` enables an experimental OpenGL mode.
+WGL triangle rendering and pixel readback are verified on the host Intel GPU;
+the older guest ICD exposes OpenGL 2.1. This mode currently breaks the installed
+UMD's Direct3D9 HAL validation; the default mode retains Direct3D9 compatibility.
+See the [Windows 7 lab notes](docs/windows7-lab.md) for the tested setup.
+
 Host integrations register RAM map/read/write and display-update callbacks through `svga3_vlkn_device_set_host_adapter`, replacing the former callback setters. The core copies the table; its opaque host state must remain valid until detached or device destruction. Callbacks run under core locks and must not reenter device APIs. Rendering, presentation copies and fence completion stay in the core.
 
 ## Tests
