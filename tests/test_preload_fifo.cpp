@@ -243,7 +243,8 @@ int main() {
   irqOk &= irq_status==0 && irq_level==0;
   // Masked events remain pending until explicitly acknowledged.
   my_vmsvga_io_write(state,1,0,4);
-  raise_irq(state,SVGA_IRQFLAG_FIFO_PROGRESS);
+  append(SVGA_CMD_ESCAPE); append(0); append(0);
+  my_vmsvga_fifo_run(state);
   irqOk &= irq_status==SVGA_IRQFLAG_FIFO_PROGRESS && irq_level==0;
   my_vmsvga_io_write(state,1,SVGA_IRQFLAG_FIFO_PROGRESS,4);
   irqOk &= irq_level==1;
