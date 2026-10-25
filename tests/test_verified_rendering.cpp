@@ -10,7 +10,7 @@
  * 5. Switching render targets (multiple RTs with independent content).
  * 6. Two contexts with distinct state (multi-context isolation).
  * 7. Dynamic resource updates followed by another draw.
- * 8. Negative controls (deliberately altered shaders, constants, textures, expected images).
+ * 8. Pixel comparator rejection checks.
  *
  * All comparisons are performed against independently calculated analytical pixel values
  * with documented tolerances (never using the implementation under test).
