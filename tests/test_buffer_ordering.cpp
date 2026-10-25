@@ -208,7 +208,13 @@ static bool gamma_and_relative_regression() {
   ok &= svga3_vlkn_context_set_texture_stage_state(d,1,0,SVGA3D_TS_GAMMA,floatBits(2.2f))==SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_context_draw(d,1,range.primType,&decl,1,&range,1)==SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_surface_dma_download(d,1,0,nullptr,pixels,16)==SVGA3_VLKN_SUCCESS;
-  ok &= pixels[5]==0xff373737;
+  for (unsigned i=0;i<16;++i) {
+    bool matches=(pixels[i]>>24)==255;
+    for (unsigned shift : {0u,8u,16u})
+      matches &= std::abs(int((pixels[i]>>shift)&255)-55)<=1;
+    if (!matches) printf("XRGB sRGB pixel[%u]=%08x expected RGB=55 +/-1, alpha=255\n",i,pixels[i]);
+    ok &= matches;
+  }
   const uint32_t colorPS[]{0xffff0300,31u|(2u<<24),0x8000000a,DST(1,0),1u|(2u<<24),DST(8,0),SRC(1,0),0xffff};
   ok &= svga3_vlkn_context_define_shader(d,1,3,SVGA3D_SHADERTYPE_PS,colorPS,sizeof(colorPS)/4)==SVGA3_VLKN_SUCCESS;
   ok &= svga3_vlkn_context_set_shader(d,1,SVGA3D_SHADERTYPE_PS,3)==SVGA3_VLKN_SUCCESS;

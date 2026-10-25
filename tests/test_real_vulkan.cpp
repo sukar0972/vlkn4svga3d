@@ -1,3 +1,4 @@
+#include "validation_check.h"
 #include "svga3_vlkn.h"
 #include "svga3_device.h"
 #include "vlkn_backend.h"
@@ -82,23 +83,6 @@ int main() {
         fclose(fDriver);
     }
 
-    /* Write validation layer log artifact */
-    FILE *fVal = fopen("artifacts/vulkan_validation.log", "w");
-    if (fVal) {
-        fprintf(fVal, "Vulkan Validation Layer Execution Log\n");
-        fprintf(fVal, "======================================\n");
-        fprintf(fVal, "Validation Errors:   %u\n", backend->validationErrors());
-        fprintf(fVal, "Validation Warnings: %u\n", backend->validationWarnings());
-        fprintf(fVal, "Validation Messages Total: %zu\n", backend->validationMessages().size());
-        for (size_t i = 0; i < backend->validationMessages().size(); ++i) {
-            fprintf(fVal, "[%03zu] %s\n", i, backend->validationMessages()[i].c_str());
-        }
-        if (backend->validationMessages().empty()) {
-            fprintf(fVal, "CLEAN: Zero validation layer errors or warnings reported.\n");
-        }
-        fclose(fVal);
-    }
-
     /* Verify a buffer allocation and upload/download */
     VkBuffer buf;
     VkDeviceMemory mem;
@@ -142,7 +126,26 @@ int main() {
         return 1;
     }
     std::cout << "SUCCESS: Unbound attachments do not alias valid surface zero!" << std::endl;
+    const bool clean = finishValidation(dev);
+    /* Record validation messages after work and teardown, not just startup. */
+    FILE *fVal = fopen("artifacts/vulkan_validation.log", "w");
+    if (fVal) {
+        fprintf(fVal, "Vulkan Validation Layer Execution Log\n");
+        fprintf(fVal, "======================================\n");
+        fprintf(fVal, "Validation Errors:   %u\n", backend->validationErrors());
+        fprintf(fVal, "Validation Warnings: %u\n", backend->validationWarnings());
+        fprintf(fVal, "Validation Messages Total: %zu\n", backend->validationMessages().size());
+        for (size_t i = 0; i < backend->validationMessages().size(); ++i) {
+            fprintf(fVal, "[%03zu] %s\n", i, backend->validationMessages()[i].c_str());
+        }
+        if (backend->validationMessages().empty()) {
+            fprintf(fVal, "CLEAN: Zero validation layer errors or warnings reported.\n");
+        }
+        fclose(fVal);
+    }
+
     svga3_vlkn_device_destroy(dev);
+    if (!clean) return 1;
     std::cout << "All Real Vulkan Device sanity checks PASSED!" << std::endl;
     return 0;
 }

@@ -191,7 +191,7 @@ static void *g_vmsvga_state = nullptr;
 static void *g_guest_ram_base = nullptr;
 static size_t g_guest_ram_size = 0;
 static bool g_vlkn_initialized = false;
-static std::mutex g_vlkn_mutex;
+static std::recursive_mutex g_vlkn_mutex;
 static bool portrait_profile_enabled() {
     const char *profile = getenv("SVGA3_VLKN_GUEST_PROFILE");
     return profile && strcmp(profile, "playbook-portrait") == 0;
@@ -222,7 +222,7 @@ static void update_irq(void *s) {
 
 static void raise_irq(void *s, uint32_t flags) {
     if (!windows_wddm_profile_enabled()) return;
-    irq_status |= flags & saved_irqmask;
+    irq_status |= flags;
     update_irq(s);
 }
 
@@ -631,7 +631,7 @@ static bool blit_screen_to_gmrfb(void *s, int32_t dx, int32_t dy,
 }
 
 static void ensure_vlkn_device(void *s) {
-    std::lock_guard<std::mutex> lock(g_vlkn_mutex);
+    std::lock_guard<std::recursive_mutex> lock(g_vlkn_mutex);
     if (g_vlkn_initialized) return;
     g_vmsvga_state = s;
 
@@ -1035,6 +1035,7 @@ done:
 }
 
 extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size) {
+    std::lock_guard<std::recursive_mutex> lock(g_vlkn_mutex);
     void *s = opaque;
     if (windows_wddm_profile_enabled() && addr == SVGA_IRQSTATUS_PORT) return irq_status;
     if (addr == 0) {
@@ -1090,6 +1091,7 @@ extern "C" uint64_t my_vmsvga_io_read(void *opaque, uint64_t addr, unsigned size
 }
 
 extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, unsigned size) {
+    std::lock_guard<std::recursive_mutex> lock(g_vlkn_mutex);
     void *s = opaque;
     if (windows_wddm_profile_enabled() && addr == SVGA_IRQSTATUS_PORT) {
         irq_status &= ~static_cast<uint32_t>(data);
@@ -1216,7 +1218,7 @@ extern "C" void my_vmsvga_io_write(void *opaque, uint64_t addr, uint64_t data, u
                     SVGA_IRQFLAG_FIFO_PROGRESS | SVGA_IRQFLAG_FENCE_GOAL;
                 uint32_t *fifo = *(uint32_t **)((char *)s + OFFSET_FIFO);
                 const uint32_t allocated = *(uint32_t *)((char *)s + OFFSET_FIFO_SIZE);
-                if (fence_goal_reached(fifo, allocated))
+                if ((saved_irqmask & SVGA_IRQFLAG_FENCE_GOAL) && fence_goal_reached(fifo, allocated))
                     raise_irq(s, SVGA_IRQFLAG_FENCE_GOAL);
                 update_irq(s);
                 static unsigned maskWrites = 0;

@@ -229,15 +229,25 @@ int main() {
   *reinterpret_cast<int *>(state+OFFSET_INDEX)=SVGA_REG_IRQMASK;
   my_vmsvga_io_write(state,1,SVGA_IRQFLAG_ANY_FENCE|SVGA_IRQFLAG_FENCE_GOAL,4);
   append(SVGA_CMD_FENCE);append(99);my_vmsvga_fifo_run(state);
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_FIFO_PROGRESS,4);
   bool irqOk=fifo[SVGA_FIFO_FENCE]==99 && irqLevels==std::vector<int>{1} &&
       my_vmsvga_io_read(state,SVGA_IRQSTATUS_PORT,4)==SVGA_IRQFLAG_ANY_FENCE;
   my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_ANY_FENCE,4);
   irqOk &= irqLevels==std::vector<int>({1,0});
   append(SVGA_CMD_FENCE);append(100);my_vmsvga_fifo_run(state);
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_FIFO_PROGRESS,4);
   irqOk &= irq_status==(SVGA_IRQFLAG_ANY_FENCE|SVGA_IRQFLAG_FENCE_GOAL) && irq_level==1;
   my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_ANY_FENCE,4);
   irqOk &= irq_status==SVGA_IRQFLAG_FENCE_GOAL && irq_level==1;
   my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_FENCE_GOAL,4);
+  irqOk &= irq_status==0 && irq_level==0;
+  // Masked events remain pending until explicitly acknowledged.
+  my_vmsvga_io_write(state,1,0,4);
+  raise_irq(state,SVGA_IRQFLAG_FIFO_PROGRESS);
+  irqOk &= irq_status==SVGA_IRQFLAG_FIFO_PROGRESS && irq_level==0;
+  my_vmsvga_io_write(state,1,SVGA_IRQFLAG_FIFO_PROGRESS,4);
+  irqOk &= irq_level==1;
+  my_vmsvga_io_write(state,SVGA_IRQSTATUS_PORT,SVGA_IRQFLAG_FIFO_PROGRESS,4);
   irqOk &= irq_status==0 && irq_level==0;
   // Unmasking an already completed goal must notify without another fence.
   my_vmsvga_io_write(state,1,0,4);
