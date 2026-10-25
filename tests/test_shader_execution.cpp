@@ -410,6 +410,7 @@ int main() {
     TEST_CHECK(pBorder.r == 0 && pBorder.g == 0 && pBorder.b == 0, "Outer pixel is unaffected background color (0,0,0)");
     // Nearest-sampled quadrant texture, half intensity, half-size quad.
     // Check every pixel, including the background and all four edges.
+    unsigned scaledMismatches=0;
     for (unsigned y=0;y<RT_HEIGHT;++y) for (unsigned x=0;x<RT_WIDTH;++x) {
         const bool inside=x>=16 && x<48 && y>=16 && y<48;
         const int red=inside && ((x<32 && y<32) || (x>=32 && y>=32)) ? 128 : 0;
@@ -418,9 +419,12 @@ int main() {
         const Pixel actual=fb[y*RT_WIDTH+x];
         const bool matches=std::abs(int(actual.r)-red)<=1 &&
             std::abs(int(actual.g)-green)<=1 && std::abs(int(actual.b)-blue)<=1 && actual.a==255;
-        if (!matches) std::cerr << "Scaled quad mismatch at " << x << "," << y << std::endl;
-        TEST_CHECK(matches, "Scaled textured quad matches the complete expected image");
+        if (!matches && scaledMismatches++ < 8)
+            std::cerr << "Scaled quad mismatch at " << x << "," << y
+                      << ": RGB=" << int(actual.r) << "," << int(actual.g) << "," << int(actual.b)
+                      << " expected=" << red << "," << green << "," << blue << std::endl;
     }
+    TEST_CHECK(scaledMismatches==0, "Scaled textured quad matches the complete expected image");
 
     /* Restore VS Identity transform and full PS constant */
     svga3_vlkn_context_set_shader_const(dev, CID1, 0, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row0);
