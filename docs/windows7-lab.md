@@ -35,6 +35,6 @@ OpenGL ICD. An accelerated OpenGL 2.1 triangle and pixel readback worked in
 the lab. This mode breaks the installed driver's Direct3D 9 HAL validation;
 leave it unset for Direct3D 9.
 
-The Windows smoke tests were performed in a private lab. Their harnesses are
-not distributed here, and they have not been rerun on the current PR head.
-Host-side regression tests do not establish Windows application compatibility.
+The Windows smoke tests use private lab harnesses that are not distributed
+here. They cover a Direct3D 9 HAL triangle and desktop interactions; broad
+Windows application compatibility remains unverified.
