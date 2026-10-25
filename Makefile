@@ -359,3 +359,12 @@ test: test-fifo-properties
 .PHONY: test-install-vulkan
 test-install-vulkan: test-install
 	SVGA3_VLKN_VALIDATE=1 ./$(BUILD_DIR)/embed-check
+
+$(BIN_DIR)/test_volume_barriers: tests/test_volume_barriers.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+.PHONY: test-volume-barriers
+test-volume-barriers: $(BIN_DIR)/test_volume_barriers
+	./$(BIN_DIR)/test_volume_barriers
+
+test: test-volume-barriers
