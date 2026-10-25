@@ -22,7 +22,7 @@ The acceptance runner stops on the first failure and writes evidence under `arti
 Required packages for `make acceptance` (Debian/Ubuntu names; other distros equivalent):
 - a Vulkan ICD — e.g. `mesa-vulkan-drivers` (provides lavapipe for headless runs) plus `libvulkan1`
 - `vulkan-validationlayers` — needed by the suites that enable `VK_LAYER_KHRONOS_validation`
-- `spirv-tools` — optional; enables the `spirv-val` step in shader-translation suites (they report SKIP, not PASS, when it is absent)
+- `spirv-tools` — required by acceptance and the full harness; individual shader-translation targets can run without it but report skipped validation checks
 - `vulkan-tools` — optional; provides `vulkaninfo` for the pre-flight check above
 
 Individual targets:
@@ -298,3 +298,9 @@ The [native QEMU tests](../integrations/qemu/README.md) build a separate QEMU
 binary and exercise the actual device through qtest plus a bare-metal guest
 that boots and reboots. Guest desktop Piglit and glmark2 still require a
 separate run against the chosen VM integration.
+
+## Additional checks
+
+`make test-fifo-sanitize` checks FIFO header bounds and truncations under
+AddressSanitizer and UndefinedBehaviorSanitizer. `make test-install-vulkan`
+compiles an installed C consumer and initializes it with a real Vulkan driver.

@@ -16,7 +16,7 @@
 #                    lavapipe prefix used by local development). Missing ICD is
 #                    a hard error, not a skip.
 #   SPIRV_TOOLS_DIR  Directory holding spirv-val / spirv-dis. Prepended to PATH
-#                    so translator tests validate instead of SKIP-ing.
+#                    Required for the full harness.
 #   HARNESS_TIMEOUT  Per-suite timeout in seconds (default 900).
 # ==============================================================================
 set -uo pipefail
@@ -62,9 +62,8 @@ if [[ -x "$SPIRV_TOOLS_DIR/spirv-val" ]]; then
     export PATH="$SPIRV_TOOLS_DIR:$PATH"
     echo "[harness-loop] spirv-val enabled: $SPIRV_TOOLS_DIR/spirv-val"
 else
-    echo "[harness-loop] WARNING: spirv-val not found in $SPIRV_TOOLS_DIR;" >&2
-    echo "[harness-loop] WARNING: translator SPIR-V validation checks will SKIP, not validate." >&2
-    echo "[harness-loop] WARNING: set SPIRV_TOOLS_DIR to a dir containing spirv-val." >&2
+    echo "[harness-loop] FATAL: spirv-val is required; set SPIRV_TOOLS_DIR to its directory." >&2
+    exit 1
 fi
 
 HARNESS_TIMEOUT="${HARNESS_TIMEOUT:-900}"
