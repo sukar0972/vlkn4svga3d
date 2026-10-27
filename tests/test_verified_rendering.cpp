@@ -10,7 +10,7 @@
  * 5. Switching render targets (multiple RTs with independent content).
  * 6. Two contexts with distinct state (multi-context isolation).
  * 7. Dynamic resource updates followed by another draw.
- * 8. Negative controls (deliberately altered shaders, constants, textures, expected images).
+ * 8. Pixel comparator rejection checks.
  *
  * All comparisons are performed against independently calculated analytical pixel values
  * with documented tolerances (never using the implementation under test).
@@ -1691,9 +1691,9 @@ int main() {
     }
 
     /* --------------------------------------------------------------------------
-     * SCENE 8: Negative Controls (Deliberate alterations must trigger detection)
+     * SCENE 8: Pixel comparator unit checks
      * -------------------------------------------------------------------------- */
-    std::cout << "\n--- Scene 8: Negative Controls (Detect Deliberate Alterations) ---" << std::endl;
+    std::cout << "\n--- Scene 8: Pixel comparator unit checks ---" << std::endl;
     {
         /* Negative Control A: Altered Color Channel (Red changed to 200 instead of 255) */
         Pixel alteredColor = { 0, 128, 200, 255 };
@@ -1705,12 +1705,12 @@ int main() {
         bool matchB = pixelMatches(alteredAlpha, 255, 128, 0, 255);
         TEST_CHECK_NEGATIVE(!matchB, "Altered alpha channel (128 vs 255) rejected");
 
-        /* Negative Control C: Altered Geometry / Viewport (Pixel at (0, 0) checked against quad color) */
+        /* Comparator rejects a fabricated background pixel */
         Pixel bgPixel = { 0, 0, 0, 0 };
         bool matchC = pixelMatches(bgPixel, 255, 128, 0, 255);
         TEST_CHECK_NEGATIVE(!matchC, "Untouched background pixel (0,0,0) rejected when expecting quad color");
 
-        /* Negative Control D: Deliberate Shader Constant Modification Detection */
+        /* Comparator rejects a fabricated color for a different constant */
         /* If shader constant was Tint = (0.2, 1.0, 0.8), White * Tint would be (51, 255, 204) */
         Pixel renderedPixel = { 204, 255, 127, 255 }; /* Expected from Tint=(0.5, 1.0, 0.8) */
         bool matchD = pixelMatches(renderedPixel, 51, 255, 204, 255); /* Checking against Tint=(0.2, ...) */

@@ -331,3 +331,40 @@ all: $(BIN_DIR)/test_submissions
 $(BIN_DIR)/test_draw_submissions: tests/test_buffer_ordering.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -DSVGA3_TEST_SUBMIT_DRAWS $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
 all: $(BIN_DIR)/test_draw_submissions
+
+$(BIN_DIR)/test_validation_check: tests/test_validation_check.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+.PHONY: test-validation-check
+test-validation-check: $(BIN_DIR)/test_validation_check
+	./$(BIN_DIR)/test_validation_check
+	@./$(BIN_DIR)/test_validation_check warning; result=$$?; test $$result -eq 1
+	@./$(BIN_DIR)/test_validation_check error; result=$$?; test $$result -eq 1
+
+test: test-validation-check
+
+$(BIN_DIR)/test_fifo_properties: tests/test_fifo_properties.cpp include/internal/svga3_fifo_framing.h | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -o $@
+
+.PHONY: test-fifo-properties test-fifo-sanitize
+test-fifo-properties: $(BIN_DIR)/test_fifo_properties
+	./$(BIN_DIR)/test_fifo_properties
+
+test-fifo-sanitize: | $(BIN_DIR)
+	$(CXX) -std=c++17 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(INCLUDES_VLKN) tests/test_fifo_properties.cpp -o $(BIN_DIR)/test_fifo_properties_sanitize
+	./$(BIN_DIR)/test_fifo_properties_sanitize
+
+test: test-fifo-properties
+
+.PHONY: test-install-vulkan
+test-install-vulkan: test-install
+	SVGA3_VLKN_VALIDATE=1 ./$(BUILD_DIR)/embed-check
+
+$(BIN_DIR)/test_volume_barriers: tests/test_volume_barriers.cpp $(VLKN_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
+
+.PHONY: test-volume-barriers
+test-volume-barriers: $(BIN_DIR)/test_volume_barriers
+	./$(BIN_DIR)/test_volume_barriers
+
+test: test-volume-barriers

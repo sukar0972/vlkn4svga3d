@@ -1,3 +1,4 @@
+#include "validation_check.h"
 /*
  * SVGA3=VLKN - Comprehensive Shader Bytecode Execution & Pipeline Verification
  * Real Vulkan execution testing shader translation, parameter/constant changes,
@@ -407,7 +408,23 @@ int main() {
     std::cout << "  [PIXELS] Border (4,4) outside scaled quad: R=" << (int)pBorder.r << " G=" << (int)pBorder.g << " B=" << (int)pBorder.b << std::endl;
     std::cout << "  [PIXELS] Center (32,32) inside scaled quad: R=" << (int)pCenter.r << " G=" << (int)pCenter.g << " B=" << (int)pCenter.b << std::endl;
     TEST_CHECK(pBorder.r == 0 && pBorder.g == 0 && pBorder.b == 0, "Outer pixel is unaffected background color (0,0,0)");
-    TEST_CHECK(pCenter.r > 50 || pCenter.g > 50 || pCenter.b > 50, "Center pixel rendered transformed geometry");
+    // Nearest-sampled quadrant texture, half intensity, half-size quad.
+    // Check every pixel, including the background and all four edges.
+    unsigned scaledMismatches=0;
+    for (unsigned y=0;y<RT_HEIGHT;++y) for (unsigned x=0;x<RT_WIDTH;++x) {
+        const bool inside=x>=16 && x<48 && y>=16 && y<48;
+        const int red=inside && ((x<32 && y<32) || (x>=32 && y>=32)) ? 128 : 0;
+        const int green=inside && x>=32 ? 128 : 0;
+        const int blue=inside && x<32 && y>=32 ? 128 : 0;
+        const Pixel actual=fb[y*RT_WIDTH+x];
+        const bool matches=std::abs(int(actual.r)-red)<=1 &&
+            std::abs(int(actual.g)-green)<=1 && std::abs(int(actual.b)-blue)<=1 && actual.a==255;
+        if (!matches && scaledMismatches++ < 8)
+            std::cerr << "Scaled quad mismatch at " << x << "," << y
+                      << ": RGB=" << int(actual.r) << "," << int(actual.g) << "," << int(actual.b)
+                      << " expected=" << red << "," << green << "," << blue << std::endl;
+    }
+    TEST_CHECK(scaledMismatches==0, "Scaled textured quad matches the complete expected image");
 
     /* Restore VS Identity transform and full PS constant */
     svga3_vlkn_context_set_shader_const(dev, CID1, 0, SVGA3D_SHADERTYPE_VS, SVGA3D_CONST_TYPE_FLOAT, row0);
@@ -674,7 +691,9 @@ int main() {
     svga3_vlkn_surface_destroy(dev, SID_TEX);
     svga3_vlkn_surface_destroy(dev, SID_VB);
     svga3_vlkn_surface_destroy(dev, SID_RT2);
+    const bool clean = finishValidation(dev);
     svga3_vlkn_device_destroy(dev);
+    TEST_CHECK(clean, "Shader execution and teardown are validation-clean");
 
     std::cout << "\n======================================================================" << std::endl;
     std::cout << "SUCCESS: All 20+ Shader Translation & Execution Tests Passed Cleanly!" << std::endl;

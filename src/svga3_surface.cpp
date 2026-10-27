@@ -588,7 +588,8 @@ void VlknSurface::transitionLayout(VkCommandBuffer cb, VkImageLayout layout) {
         barrier.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT|VK_ACCESS_MEMORY_WRITE_BIT;
         barrier.srcQueueFamilyIndex=barrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         barrier.image=m_image;
-        barrier.subresourceRange={nativeAspectMask(),mip,levels,face,layers};
+        barrier.subresourceRange={nativeAspectMask(),mip,levels,face,
+            isVolumeImage() ? VK_REMAINING_ARRAY_LAYERS : layers};
         m_backend->dispatch().vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,0,0,nullptr,0,nullptr,1,&barrier);
     };
     if (m_subresourceLayouts.empty()) transition(m_currentLayout,0,m_mipLevels,0,m_arrayLayers);
@@ -952,7 +953,8 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = m_image;
-    barrier.subresourceRange = {aspects, mipLevel, 1, face, 1};
+    barrier.subresourceRange = {aspects, mipLevel, 1, face,
+        isVolumeImage() ? VK_REMAINING_ARRAY_LAYERS : 1};
     m_backend->dispatch().vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     VkBufferImageCopy regions[2] = {};
@@ -1276,7 +1278,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     barrier.subresourceRange.baseMipLevel = mipLevel;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = face;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.layerCount = isVolumeImage() ? VK_REMAINING_ARRAY_LAYERS : 1;
 
     m_backend->dispatch().vkCmdPipelineBarrier(
         cb,
@@ -1412,7 +1414,7 @@ Svga3VlknStatus VlknSurface::dmaDownloadToStaging(uint32_t mipLevel,
     barrier.subresourceRange.baseMipLevel = mipLevel;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = face;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.layerCount = isVolumeImage() ? VK_REMAINING_ARRAY_LAYERS : 1;
 
     // A prior transfer-source layout has only readers since its last
     // transition. Preserve every write-to-read dependency on other layouts.
@@ -1601,7 +1603,7 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     barrier.subresourceRange.baseMipLevel = mipLevel;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = face;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.layerCount = isVolumeImage() ? VK_REMAINING_ARRAY_LAYERS : 1;
 
     m_backend->dispatch().vkCmdPipelineBarrier(
         cb,

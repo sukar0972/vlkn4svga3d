@@ -39,5 +39,5 @@ ld -m elf_i386 -T integrations/qemu/guest-smoke.ld "$out/guest-start.o" "$out/gu
 export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp}"
 export SVGA3_VLKN_VALIDATE=1
-export VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
+export VK_LAYER_VALIDATE_SYNC=1
 python3 -B integrations/qemu/test_native.py "$out/qemu-build/qemu-system-x86_64" --kernel "$out/guest.elf" --output "$out/results"
