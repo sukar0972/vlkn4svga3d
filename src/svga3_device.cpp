@@ -1054,6 +1054,7 @@ Svga3VlknStatus svga3_vlkn_guest_read(
     size_t size)
 {
     if (!dev || !dev->guestMem) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    std::lock_guard<std::mutex> lock(dev->mutex);
     return dev->guestMem->readGuest(ptr, dstHost, size);
 }
 
@@ -1064,6 +1065,7 @@ Svga3VlknStatus svga3_vlkn_guest_write(
     size_t size)
 {
     if (!dev || !dev->guestMem) return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    std::lock_guard<std::mutex> lock(dev->mutex);
     return dev->guestMem->writeGuest(ptr, srcHost, size);
 }
 

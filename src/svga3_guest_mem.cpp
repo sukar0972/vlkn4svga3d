@@ -204,6 +204,9 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
     bool isPPN64 = (flags & SVGA_REMAP_GMR2_PPN64) != 0;
     bool isSinglePPN = (flags & SVGA_REMAP_GMR2_SINGLE_PPN) != 0;
     bool isViaGMR = (flags & SVGA_REMAP_GMR2_VIA_GMR) != 0;
+    if (isViaGMR && isSinglePPN) {
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
 
     if (isSinglePPN) {
         uint64_t singlePpn = 0;

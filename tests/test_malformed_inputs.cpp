@@ -64,6 +64,7 @@ int main() {
         std::memcpy(page + 8, invalid, sizeof(invalid));
         SVGAGuestPtr descriptors{3, 8};
         TEST_CHECK(mem.remapGMR2(3, SVGA_REMAP_GMR2_PPN64 | SVGA_REMAP_GMR2_VIA_GMR, 0, 2, &descriptors, sizeof(descriptors)) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject unsafe VIA_GMR PPNs");
+        TEST_CHECK(mem.remapGMR2(3, SVGA_REMAP_GMR2_VIA_GMR | SVGA_REMAP_GMR2_SINGLE_PPN, 0, 1, &descriptors, sizeof(descriptors)) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject conflicting VIA_GMR and SINGLE_PPN flags");
         ptr.offset = 0;
         TEST_CHECK(mem.readGuest(ptr, &result, 1) == SVGA3_VLKN_SUCCESS && result == value, "VIA_GMR failure preserves mapping");
     }
