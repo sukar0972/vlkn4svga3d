@@ -101,13 +101,14 @@ void QemuVmsvgaDevice::displayUpdateCallback(void *opaque, int32_t x, int32_t y,
 {
     auto *dev = reinterpret_cast<QemuVmsvgaDevice*>(opaque);
     if (dev) {
+        std::lock_guard<std::mutex> lock(dev->m_displayMutex);
         dev->m_displayUpdates.push_back({x, y, w, h});
     }
 }
 
 bool QemuVmsvgaDevice::init(bool enableValidation, bool forceMock)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     if (m_vlknDev) {
         svga3_vlkn_device_destroy(m_vlknDev);
@@ -139,7 +140,7 @@ bool QemuVmsvgaDevice::init(bool enableValidation, bool forceMock)
 
 void QemuVmsvgaDevice::reset()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     std::memset(m_regs, 0, sizeof(m_regs));
     m_regs[SVGA_REG_ID] = SVGA_ID_2;
@@ -173,7 +174,7 @@ void QemuVmsvgaDevice::reset()
 
     m_indexReg = 0;
     m_gmrId = 0;
-    m_displayUpdates.clear();
+    clearDisplayUpdates();
 
     initFifoRegs();
 
@@ -204,7 +205,7 @@ void QemuVmsvgaDevice::pciConfigWrite(uint8_t offset, uint32_t val, int size)
 uint32_t QemuVmsvgaDevice::ioRead(uint16_t portOffset, int size)
 {
     (void)size;
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     switch (portOffset) {
         case SVGA_INDEX_PORT:
@@ -231,7 +232,7 @@ uint32_t QemuVmsvgaDevice::ioRead(uint16_t portOffset, int size)
 void QemuVmsvgaDevice::ioWrite(uint16_t portOffset, uint32_t val, int size)
 {
     (void)size;
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     switch (portOffset) {
         case SVGA_INDEX_PORT:
@@ -323,20 +324,21 @@ void QemuVmsvgaDevice::ioWrite(uint16_t portOffset, uint32_t val, int size)
 
 bool QemuVmsvgaDevice::mapGuestRam(uint64_t gpa, void *hva, size_t size)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_vlknDev) return false;
     return svga3_vlkn_device_map_guest_ram(m_vlknDev, gpa, hva, size) == SVGA3_VLKN_SUCCESS;
 }
 
 bool QemuVmsvgaDevice::unmapGuestRam(uint64_t gpa)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_vlknDev) return false;
     return svga3_vlkn_device_unmap_guest_ram(m_vlknDev, gpa) == SVGA3_VLKN_SUCCESS;
 }
 
 void QemuVmsvgaDevice::fifoRun()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!m_vlknDev) return;
 
     m_totalFifoRuns++;
