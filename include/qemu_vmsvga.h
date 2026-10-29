@@ -118,8 +118,14 @@ public:
     struct DisplayUpdateRect {
         int32_t x, y, w, h;
     };
-    const std::vector<DisplayUpdateRect>& displayUpdates() const { return m_displayUpdates; }
-    void clearDisplayUpdates() { m_displayUpdates.clear(); }
+    std::vector<DisplayUpdateRect> displayUpdates() const {
+        std::lock_guard<std::mutex> lock(m_displayMutex);
+        return m_displayUpdates;
+    }
+    void clearDisplayUpdates() {
+        std::lock_guard<std::mutex> lock(m_displayMutex);
+        m_displayUpdates.clear();
+    }
 
     /* Statistics */
     uint64_t totalFifoRuns() const { return m_totalFifoRuns; }
@@ -155,7 +161,8 @@ private:
     uint64_t m_totalFifoRuns = 0;
     uint64_t m_totalFencesProcessed = 0;
     uint64_t m_totalWraparoundsHandled = 0;
-    std::mutex m_mutex;
+    std::recursive_mutex m_mutex;
+    mutable std::mutex m_displayMutex;
 };
 
 /*

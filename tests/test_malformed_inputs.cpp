@@ -87,6 +87,43 @@ int main() {
             TEST_CHECK(ctx->setTransform(static_cast<SVGA3dTransformType>(id), matrix) == SVGA3_VLKN_ERROR_INVALID_PARAM, "Reject forged transform ID");
     }
 
+    /* Zero-primitive and topology-specific draw vertex count tracking. */
+    {
+        SVGA3dSize rtSize = { 16, 16, 1 };
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 80, SVGA3D_SURFACE_HINT_RENDERTARGET, SVGA3D_A8R8G8B8, &rtSize, 1) == SVGA3_VLKN_SUCCESS,
+                   "Define RT surface for vertex stats test");
+        TEST_CHECK(svga3_vlkn_context_set_render_target(dev, 8, SVGA3D_RT_COLOR0, 80, 0, 0) == SVGA3_VLKN_SUCCESS,
+                   "Bind RT surface for vertex stats test");
+
+        SVGA3dVertexDecl decl{};
+        decl.identity.usage = SVGA3D_DECLUSAGE_POSITION;
+        decl.identity.type = SVGA3D_DECLTYPE_FLOAT3;
+        decl.array.stride = 12;
+
+        Svga3VlknStats before{}, after{};
+        svga3_vlkn_get_stats(dev, &before);
+
+        SVGA3dPrimitiveRange zeroStrip{};
+        zeroStrip.primType = SVGA3D_PRIMITIVE_TRIANGLESTRIP;
+        zeroStrip.primitiveCount = 0;
+        TEST_CHECK(svga3_vlkn_context_draw(dev, 8, SVGA3D_PRIMITIVE_TRIANGLESTRIP, &decl, 1, &zeroStrip, 1) == SVGA3_VLKN_SUCCESS,
+                   "Zero-primitive TRIANGLESTRIP draw succeeds");
+        svga3_vlkn_get_stats(dev, &after);
+        TEST_CHECK(after.verticesRendered == before.verticesRendered,
+                   "Zero-primitive TRIANGLESTRIP records 0 vertices");
+
+        SVGA3dPrimitiveRange stripRange{};
+        stripRange.primType = SVGA3D_PRIMITIVE_TRIANGLESTRIP;
+        stripRange.primitiveCount = 4;
+        TEST_CHECK(svga3_vlkn_context_draw(dev, 8, SVGA3D_PRIMITIVE_TRIANGLESTRIP, &decl, 1, &stripRange, 1) == SVGA3_VLKN_SUCCESS,
+                   "4-primitive TRIANGLESTRIP draw succeeds");
+        svga3_vlkn_get_stats(dev, &after);
+        TEST_CHECK(after.verticesRendered - before.verticesRendered == 6,
+                   "4-primitive TRIANGLESTRIP records 6 vertices (N + 2), not 12");
+
+        svga3_vlkn_surface_destroy(dev, 80);
+    }
+
     /* H5: ADD declaring 1 operand (needs dest + 2 src = 3).
      * Before the fix, pass-2 read tokens[pc+4] past the validated range. */
     {

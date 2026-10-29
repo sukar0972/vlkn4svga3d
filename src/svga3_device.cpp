@@ -469,7 +469,7 @@ Svga3VlknStatus svga3_vlkn_surface_dma_upload(Svga3VlknDevice *dev,
         uint32_t h = box ? box->h : surf->height();
         uint32_t d = box ? box->d : surf->depth();
         size_t bpp = svga3_vlkn::svga3_format_bytes_per_pixel(surf->svgaFormat());
-        dev->stats.dmaBytesTransferred += (w * h * d * (bpp ? bpp : 4));
+        dev->stats.dmaBytesTransferred += static_cast<uint64_t>(w) * h * d * (bpp ? bpp : 4);
     }
     return st;
 }
@@ -494,7 +494,7 @@ Svga3VlknStatus svga3_vlkn_surface_dma_download(Svga3VlknDevice *dev,
         uint32_t h = box ? box->h : surf->height();
         uint32_t d = box ? box->d : surf->depth();
         size_t bpp = svga3_vlkn::svga3_format_bytes_per_pixel(surf->svgaFormat());
-        dev->stats.dmaBytesTransferred += (w * h * d * (bpp ? bpp : 4));
+        dev->stats.dmaBytesTransferred += static_cast<uint64_t>(w) * h * d * (bpp ? bpp : 4);
     }
     return st;
 }
@@ -894,13 +894,14 @@ Svga3VlknStatus svga3_vlkn_context_draw(Svga3VlknDevice *dev,
     dev->contextMgr->endAllRenderPassesExcept(cid);
     svga3_vlkn::VlknContext *ctx = dev->contextMgr->getContext(cid);
     if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
+    uint64_t prevVertices = ctx->vertexCount();
     Svga3VlknStatus st = ctx->draw(primitiveType, decls, numDecls, ranges, numRanges);
     if (st == SVGA3_VLKN_SUCCESS) {
         dev->stats.drawCallsSubmitted += numRanges;
         for (uint32_t i = 0; i < numRanges; ++i) {
             dev->stats.primitivesRendered += ranges[i].primitiveCount;
-            dev->stats.verticesRendered += ranges[i].primitiveCount * 3;
         }
+        dev->stats.verticesRendered += ctx->vertexCount() - prevVertices;
     }
     return st;
 }
