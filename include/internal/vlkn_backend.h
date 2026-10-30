@@ -110,6 +110,26 @@ public:
     void cmdBeginRenderPass(VkCommandBuffer cb, const VkRenderPassBeginInfo *pBegin, VkSubpassContents contents);
     void cmdEndRenderPass(VkCommandBuffer cb);
 
+    /* Active query tracking on the currently recording command buffer */
+    VkQueryPool activeQueryPool() const { return m_activeQueryPool; }
+    uint32_t activeQuerySlot() const { return m_activeQuerySlot; }
+    uint64_t activeQueryAccumulated() const { return m_activeQueryAccumulated; }
+    bool activeQueryFailed() const { return m_activeQueryFailed; }
+    void setActiveQuery(VkQueryPool pool, uint32_t slot) {
+        m_activeQueryPool = pool;
+        m_activeQuerySlot = slot;
+        m_activeQueryAccumulated = 0;
+        m_activeQueryFailed = false;
+    }
+    void clearActiveQuery(VkQueryPool pool) {
+        if (m_activeQueryPool == pool) {
+            m_activeQueryPool = VK_NULL_HANDLE;
+            m_activeQuerySlot = 0;
+            m_activeQueryAccumulated = 0;
+            m_activeQueryFailed = false;
+        }
+    }
+
     /* Accessors */
     VlknDispatchTable& dispatch() { return m_dispatch; }
     VkInstance instance() const { return m_instance; }
@@ -229,6 +249,10 @@ private:
     uint32_t m_fenceSpinMicroseconds = 0;
     bool m_cmdBufferRecording;
     bool m_renderPassActive;
+    VkQueryPool m_activeQueryPool = VK_NULL_HANDLE;
+    uint32_t m_activeQuerySlot = 0;
+    uint64_t m_activeQueryAccumulated = 0;
+    bool m_activeQueryFailed = false;
     VkPipeline m_boundGraphicsPipeline = VK_NULL_HANDLE;
     bool m_graphicsDrawStateValid = false;
     GraphicsDrawState m_graphicsDrawState{};

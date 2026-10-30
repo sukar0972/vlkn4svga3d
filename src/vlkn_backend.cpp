@@ -197,6 +197,10 @@ void VlknBackend::observeDeviceResult(VkResult result) {
         m_deviceLost = true;
         m_cmdBufferRecording = false;
         m_renderPassActive = false;
+        m_activeQueryPool = VK_NULL_HANDLE;
+        m_activeQuerySlot = 0;
+        m_activeQueryAccumulated = 0;
+        m_activeQueryFailed = false;
         log_msg("[libqemu_svga3d] Vulkan device lost; disabling 3D until device recreation\n");
     }
 }
@@ -777,7 +781,7 @@ Svga3VlknStatus VlknBackend::uploadToBuffer(VkBuffer dstBuffer, VkDeviceSize dst
 
         VkCommandBuffer cb = getActiveCommandBuffer();
         if (!cb) {
-            retireBuffer(tempBuffer, tempMemory, nullptr, recordingSerial(), 0);
+            destroyBuffer(tempBuffer, tempMemory);
             return SVGA3_VLKN_ERROR_DEVICE_LOST;
         }
         VkBufferCopy region = {};
@@ -851,16 +855,20 @@ Svga3VlknStatus VlknBackend::downloadFromBuffer(void *dstData, VkBuffer srcBuffe
         if (st != SVGA3_VLKN_SUCCESS) return st;
 
         VkCommandBuffer cb = getActiveCommandBuffer();
-        if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        if (!cb) {
+            destroyBuffer(tempBuffer, tempMemory);
+            return SVGA3_VLKN_ERROR_DEVICE_LOST;
+        }
         VkBufferCopy region = {};
         region.srcOffset = srcOffset;
         region.dstOffset = 0;
         region.size = size;
         m_dispatch.vkCmdCopyBuffer(cb, srcBuffer, tempBuffer, 1, &region);
         recordHostReadBarrier(cb, tempBuffer, 0, size);
+        const uint64_t serial = recordingSerial();
         st = flushCommandBuffer();
         if (st != SVGA3_VLKN_SUCCESS) {
-            destroyBuffer(tempBuffer, tempMemory);
+            retireBuffer(tempBuffer, tempMemory, nullptr, serial, 0);
             return st;
         }
 
@@ -1018,6 +1026,26 @@ void VlknBackend::recordHostReadBarrier(VkCommandBuffer commands, VkBuffer buffe
 VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
     if (m_deviceLost) return VK_NULL_HANDLE;
     if (!m_cmdBufferRecording) {
+        if (m_activeQueryPool != VK_NULL_HANDLE && !m_activeQueryFailed && m_activeQuerySlot == 15) {
+            for (auto &slot : m_submissions) {
+                if (!slot.pending) continue;
+                VkResult wRes = waitForSubmission(slot.fence);
+                observeDeviceResult(wRes);
+                if (wRes != VK_SUCCESS) { m_activeQueryFailed = true; return VK_NULL_HANDLE; }
+                slot.pending = false;
+            }
+            m_completedSubmissionSerial = m_lastSubmittedSerial;
+            cleanupRetiredBuffers(false);
+            cleanupRetiredImages();
+            uint64_t slotResults[16] = {};
+            VkResult qRes = m_dispatch.vkGetQueryPoolResults(
+                m_device, m_activeQueryPool, 0, 16, sizeof(slotResults), slotResults,
+                sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+            observeDeviceResult(qRes);
+            if (qRes != VK_SUCCESS) { m_activeQueryFailed = true; return VK_NULL_HANDLE; }
+            for (uint64_t v : slotResults) m_activeQueryAccumulated += v;
+            m_activeQuerySlot = UINT32_MAX;
+        }
         if (prepareSubmissionSlot() != SVGA3_VLKN_SUCCESS) return VK_NULL_HANDLE;
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1029,6 +1057,11 @@ VkCommandBuffer VlknBackend::getActiveCommandBuffer() {
         m_boundGraphicsPipeline = VK_NULL_HANDLE;
         m_graphicsDrawStateValid = false;
         ++m_recordingSerial;
+        if (m_activeQueryPool != VK_NULL_HANDLE && !m_activeQueryFailed) {
+            m_activeQuerySlot = (m_activeQuerySlot == UINT32_MAX) ? 0 : (m_activeQuerySlot + 1);
+            m_dispatch.vkCmdResetQueryPool(m_cmdBuffer, m_activeQueryPool, m_activeQuerySlot, 1);
+            m_dispatch.vkCmdBeginQuery(m_cmdBuffer, m_activeQueryPool, m_activeQuerySlot, 0);
+        }
     }
     return m_cmdBuffer;
 }
@@ -1192,22 +1225,27 @@ Svga3VlknStatus VlknBackend::submitCommandBuffer() {
         if (!m_cmdBufferRecording) return SVGA3_VLKN_SUCCESS;
     }
 
-    if (m_renderPassActive) {
-        m_dispatch.vkCmdEndRenderPass(m_cmdBuffer);
-        m_renderPassActive = false;
-    }
-
     auto &slot = m_submissions[m_currentSlot];
     auto resetFence = m_resetSubmissionFence ? m_resetSubmissionFence : m_dispatch.vkResetFences;
     VkResult fenceResult = resetFence(m_device, 1, &slot.fence);
     observeDeviceResult(fenceResult);
     if (fenceResult != VK_SUCCESS) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+
+    if (m_renderPassActive) {
+        m_dispatch.vkCmdEndRenderPass(m_cmdBuffer);
+        m_renderPassActive = false;
+    }
+    if (m_activeQueryPool != VK_NULL_HANDLE && !m_activeQueryFailed) {
+        m_dispatch.vkCmdEndQuery(m_cmdBuffer, m_activeQueryPool, m_activeQuerySlot);
+    }
+
     VkResult res = m_dispatch.vkEndCommandBuffer(m_cmdBuffer);
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkEndCommandBuffer error: %d\n", res);
         m_cmdBufferRecording = false;
         m_renderPassActive = false;
+        if (m_activeQueryPool != VK_NULL_HANDLE) m_activeQueryFailed = true;
         VkResult resetRes = m_deviceLost ? VK_ERROR_DEVICE_LOST : m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
         observeDeviceResult(resetRes);
         if (resetRes != VK_SUCCESS)
@@ -1225,6 +1263,7 @@ Svga3VlknStatus VlknBackend::submitCommandBuffer() {
     if (res != VK_SUCCESS) {
         observeDeviceResult(res);
         log_msg("[libqemu_svga3d] vkQueueSubmit error: %d\n", res);
+        if (m_activeQueryPool != VK_NULL_HANDLE) m_activeQueryFailed = true;
         VkResult resetRes = m_deviceLost ? VK_ERROR_DEVICE_LOST : m_dispatch.vkResetCommandBuffer(m_cmdBuffer, 0);
         observeDeviceResult(resetRes);
         if (resetRes != VK_SUCCESS)

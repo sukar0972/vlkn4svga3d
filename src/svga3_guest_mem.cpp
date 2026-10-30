@@ -6,6 +6,7 @@
 
 #include "svga3_guest_mem.h"
 #include <iostream>
+#include <new>
 
 extern "C" void log_msg(const char *fmt, ...);
 
@@ -83,6 +84,8 @@ void GuestMemoryManager::clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_ramBlocks.clear();
     m_gmrs.clear();
+    m_totalGmrPages = 0;
+    m_fb = FramebufferInfo{};
 }
 
 void GuestMemoryManager::setAdapter(const Svga3HostAdapter *adapter)
@@ -162,11 +165,23 @@ Svga3VlknStatus GuestMemoryManager::defineGMR2(uint32_t gmrId, uint32_t numPages
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
-    GuestMemoryRegion &region = m_gmrs[gmrId];
-    region.gmrId = gmrId;
-    region.numPages = numPages;
-    region.ppns.assign(numPages, 0);
-    region.isDefined = true;
+    auto existing = m_gmrs.find(gmrId);
+    const uint64_t oldPages = (existing != m_gmrs.end()) ? existing->second.numPages : 0;
+    if (m_totalGmrPages - oldPages + numPages > SVGA3_MAX_GMR_PAGES) {
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
+
+    try {
+        std::vector<uint64_t> newPpns(numPages, 0);
+        GuestMemoryRegion &region = m_gmrs[gmrId];
+        region.gmrId = gmrId;
+        region.numPages = numPages;
+        region.ppns = std::move(newPpns);
+        region.isDefined = true;
+        m_totalGmrPages = m_totalGmrPages - oldPages + numPages;
+    } catch (const std::bad_alloc&) {
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -241,10 +256,13 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
         if (outBytesConsumed) *outBytesConsumed = sizeof(SVGAGuestPtr);
 
         if (isPPN64) {
-            std::vector<uint64_t> pageList(numPages);
+            std::vector<uint64_t> pageList;
+            try {
+                pageList.resize(numPages);
+            } catch (const std::bad_alloc&) {
+                return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+            }
             size_t bytesToRead = numPages * sizeof(uint64_t);
-            // Read using internal unlock/relock or helper
-            // Note: readGuest acquires m_mutex, so call locked variant
             size_t bytesLeft = bytesToRead;
             size_t curOffset = srcPtr.offset;
             uint8_t *curDst = reinterpret_cast<uint8_t*>(pageList.data());
@@ -277,7 +295,12 @@ Svga3VlknStatus GuestMemoryManager::remapGMR2(uint32_t gmrId,
                 region.ppns[offsetPages + i] = pageList[i];
             }
         } else {
-            std::vector<uint32_t> pageList(numPages);
+            std::vector<uint32_t> pageList;
+            try {
+                pageList.resize(numPages);
+            } catch (const std::bad_alloc&) {
+                return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+            }
             size_t bytesToRead = numPages * sizeof(uint32_t);
             size_t bytesLeft = bytesToRead;
             size_t curOffset = srcPtr.offset;
@@ -349,12 +372,20 @@ Svga3VlknStatus GuestMemoryManager::registerLegacyGMR(uint32_t gmrId, uint32_t d
     }
 
     std::lock_guard<std::mutex> lock(m_mutex);
+    auto existing = m_gmrs.find(gmrId);
+    const uint64_t oldPages = (existing != m_gmrs.end()) ? existing->second.numPages : 0;
+
     if (descriptorPPN == 0) {
-        m_gmrs.erase(gmrId);
+        if (existing != m_gmrs.end()) {
+            m_totalGmrPages -= oldPages;
+            m_gmrs.erase(existing);
+        }
         log_msg("[libqemu_svga3d] GMR id=%u unregistered\n", gmrId);
         return SVGA3_VLKN_SUCCESS;
     }
 
+    const uint64_t maxAllowedPages = SVGA3_MAX_GMR_PAGES - (m_totalGmrPages - oldPages);
+    constexpr uint64_t maxPpn = UINT64_MAX >> SVGA3_PAGE_SHIFT;
     uint64_t curGpa = static_cast<uint64_t>(descriptorPPN) << SVGA3_PAGE_SHIFT;
     std::vector<uint64_t> ppns;
     uint32_t descCount = 0;
@@ -374,13 +405,19 @@ Svga3VlknStatus GuestMemoryManager::registerLegacyGMR(uint32_t gmrId, uint32_t d
         }
 
         if (desc.ppn != 0 && desc.numPages != 0) {
-            for (uint32_t p = 0; p < desc.numPages; ++p) {
-                ppns.push_back(static_cast<uint64_t>(desc.ppn) + p);
-                if (ppns.size() > SVGA3_MAX_GMR_PAGES) {
-                    log_msg("[libqemu_svga3d] registerLegacyGMR error: ppns.size() %zu > max %u (gmrId=%u)\n",
-                            ppns.size(), SVGA3_MAX_GMR_PAGES, gmrId);
-                    return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (desc.numPages > maxAllowedPages || ppns.size() > maxAllowedPages - desc.numPages ||
+                static_cast<uint64_t>(desc.ppn) + (desc.numPages - 1) > maxPpn) {
+                log_msg("[libqemu_svga3d] registerLegacyGMR error: descriptor pages %u exceed max %llu (gmrId=%u)\n",
+                        desc.numPages, (unsigned long long)maxAllowedPages, gmrId);
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            }
+            try {
+                ppns.reserve(ppns.size() + desc.numPages);
+                for (uint32_t p = 0; p < desc.numPages; ++p) {
+                    ppns.push_back(static_cast<uint64_t>(desc.ppn) + p);
                 }
+            } catch (const std::bad_alloc&) {
+                return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
             }
             /* The SVGA device will never automatically cross a page boundary.
              * If curGpa reaches a 4KB page boundary, we must terminate unless
@@ -399,13 +436,18 @@ Svga3VlknStatus GuestMemoryManager::registerLegacyGMR(uint32_t gmrId, uint32_t d
         }
     }
 
-    GuestMemoryRegion &region = m_gmrs[gmrId];
-    region.gmrId = gmrId;
-    region.numPages = static_cast<uint32_t>(ppns.size());
-    region.ppns = std::move(ppns);
-    region.isDefined = true;
-    log_msg("[libqemu_svga3d] GMR id=%u registered: %u pages (%zu KB), %u descs parsed\n",
-            gmrId, region.numPages, (size_t)region.numPages * 4, descCount);
+    try {
+        GuestMemoryRegion &region = m_gmrs[gmrId];
+        region.gmrId = gmrId;
+        region.numPages = static_cast<uint32_t>(ppns.size());
+        region.ppns = std::move(ppns);
+        region.isDefined = true;
+        m_totalGmrPages = m_totalGmrPages - oldPages + region.numPages;
+        log_msg("[libqemu_svga3d] GMR id=%u registered: %u pages (%zu KB), %u descs parsed\n",
+                gmrId, region.numPages, (size_t)region.numPages * 4, descCount);
+    } catch (const std::bad_alloc&) {
+        return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+    }
     return SVGA3_VLKN_SUCCESS;
 }
 
@@ -413,6 +455,7 @@ Svga3VlknStatus GuestMemoryManager::destroyGMR(uint32_t gmrId) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_gmrs.find(gmrId);
     if (it != m_gmrs.end()) {
+        m_totalGmrPages -= it->second.numPages;
         m_gmrs.erase(it);
         return SVGA3_VLKN_SUCCESS;
     }

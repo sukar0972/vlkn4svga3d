@@ -194,22 +194,28 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             const auto *pCmd = reinterpret_cast<const SVGA3dCmdSetRenderState*>(payload);
             size_t offset = sizeof(SVGA3dCmdSetRenderState);
 
+            size_t remaining = payloadSize - offset;
+            if (remaining % sizeof(SVGA3dRenderState) != 0) {
+                return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
+            }
+
             VlknContext *ctx = dev->contextMgr->getContext(pCmd->cid);
             if (!ctx) {
                 return SVGA3_VLKN_ERROR_NOT_FOUND;
             }
 
-            size_t remaining = payloadSize - offset;
-            uint32_t numStates = remaining / sizeof(SVGA3dRenderState);
+            uint32_t numStates = static_cast<uint32_t>(remaining / sizeof(SVGA3dRenderState));
             const auto *states = reinterpret_cast<const SVGA3dRenderState*>(payload + offset);
             offset += numStates * sizeof(SVGA3dRenderState);
 
+            Svga3VlknStatus st = SVGA3_VLKN_SUCCESS;
             for (uint32_t i = 0; i < numStates; ++i) {
-                ctx->setRenderState(states[i].state, states[i].uintValue);
+                st = ctx->setRenderState(states[i].state, states[i].uintValue);
+                if (st != SVGA3_VLKN_SUCCESS) break;
             }
 
             *bytesRead = offset;
-            return SVGA3_VLKN_SUCCESS;
+            return st;
         }
 
         case SVGA_3D_CMD_SETRENDERTARGET: {
@@ -241,11 +247,15 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
             const auto *pCmd = reinterpret_cast<const SVGA3dCmdSetTextureState*>(payload);
             size_t offset = sizeof(SVGA3dCmdSetTextureState);
 
+            size_t remaining = payloadSize - offset;
+            if (remaining % sizeof(SVGA3dTextureState) != 0) {
+                return SVGA3_VLKN_ERROR_INVALID_COMMAND_BUFFER;
+            }
+
             VlknContext *ctx = dev->contextMgr->getContext(pCmd->cid);
             if (!ctx) return SVGA3_VLKN_ERROR_NOT_FOUND;
 
-            size_t remaining = payloadSize - offset;
-            uint32_t numStates = remaining / sizeof(SVGA3dTextureState);
+            uint32_t numStates = static_cast<uint32_t>(remaining / sizeof(SVGA3dTextureState));
             const auto *states = reinterpret_cast<const SVGA3dTextureState*>(payload + offset);
             offset += numStates * sizeof(SVGA3dTextureState);
 
@@ -259,16 +269,18 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 }
             }
 
+            Svga3VlknStatus st = SVGA3_VLKN_SUCCESS;
             for (uint32_t i = 0; i < numStates; ++i) {
                 if (states[i].name == SVGA3D_TS_BIND_TEXTURE) {
-                    ctx->setTexture(states[i].stage, states[i].value);
+                    st = ctx->setTexture(states[i].stage, states[i].value);
                 } else {
-                    ctx->setTextureStageState(states[i].stage, states[i].name, states[i].value);
+                    st = ctx->setTextureStageState(states[i].stage, states[i].name, states[i].value);
                 }
+                if (st != SVGA3_VLKN_SUCCESS) break;
             }
 
             *bytesRead = offset;
-            return SVGA3_VLKN_SUCCESS;
+            return st;
         }
 
         case SVGA_3D_CMD_SETTRANSFORM: {
@@ -953,14 +965,16 @@ Svga3VlknStatus svga3_vlkn_fifo_execute(Svga3VlknDevice *dev,
         } else {
             st = svga3_vlkn::processFifoPacket(dev, cmd, ptr + headerBytes, payloadSize, &packetRead);
         }
-        // Known, framed 2D commands with no core implementation are skipped.
-        // Unknown wire IDs were rejected above before advancing anything.
+        // Known, framed 2D commands with no core implementation and unimplemented
+        // DX wire commands are skipped. Known D3D9 commands propagate errors.
         size_t packetBytes = words * 4;
         ptr += packetBytes;
         remaining -= packetBytes;
         totalConsumed += packetBytes;
         dev->stats.totalCommandsProcessed++;
-        if (st != SVGA3_VLKN_SUCCESS && st != SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND) {
+        const bool isDx = (cmd >= SVGA_3D_CMD_DX_BASE && cmd < SVGA_3D_CMD_DX_MAX);
+        const bool skipUnsupported = (st == SVGA3_VLKN_ERROR_UNSUPPORTED_COMMAND) && (!is3D || isDx);
+        if (st != SVGA3_VLKN_SUCCESS && !skipUnsupported) {
             if (bytesConsumed) *bytesConsumed = totalConsumed;
             return st;
         }
