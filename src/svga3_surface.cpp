@@ -355,6 +355,20 @@ Svga3VlknStatus VlknSurface::allocate() {
         return st;
     }
 
+    if (m_isCubeMap && (m_width != m_height || m_depth != 1)) {
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+    const auto &limits = m_backend->properties().limits;
+    const uint32_t maxDim = m_isCubeMap ? limits.maxImageDimensionCube
+        : ((m_depth > 1 || m_volumeImage) ? limits.maxImageDimension3D : limits.maxImageDimension2D);
+    if (m_width > maxDim || m_height > maxDim || ((m_depth > 1 || m_volumeImage) && m_depth > maxDim)) {
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
+    const uint32_t maxExtent = std::max({m_width, m_height, m_depth});
+    const uint32_t maxValidMips = maxExtent ? (32u - static_cast<uint32_t>(__builtin_clz(maxExtent))) : 1u;
+    if (m_mipLevels > maxValidMips) {
+        return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    }
     VkFormatProperties formatProperties{};
     m_backend->dispatch().vkGetPhysicalDeviceFormatProperties(m_backend->physicalDevice(),m_vkFormat,&formatProperties);
     if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
@@ -511,7 +525,9 @@ Svga3VlknStatus VlknSurface::allocate() {
 Svga3VlknStatus VlknSurface::ensureVolumeImage() {
     if (m_depth > 1 || m_volumeImage) return SVGA3_VLKN_SUCCESS;
     if (!m_image || m_isCubeMap || m_buffer) return SVGA3_VLKN_ERROR_INVALID_PARAM;
-    transitionLayout(m_backend->getActiveCommandBuffer(),VK_IMAGE_LAYOUT_GENERAL);
+    VkCommandBuffer preCb = m_backend->getActiveCommandBuffer();
+    if (!preCb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    transitionLayout(preCb,VK_IMAGE_LAYOUT_GENERAL);
     auto status = m_backend->flushCommandBuffer();
     if (status != SVGA3_VLKN_SUCCESS) return status;
     VkImage oldImage = m_image;
@@ -529,7 +545,14 @@ Svga3VlknStatus VlknSurface::ensureVolumeImage() {
         return status;
     }
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
-    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (!cb) {
+        std::vector<VkImageView> views{oldView};
+        for (auto &view : m_rtViews) views.push_back(view.second);
+        views.insert(views.end(), m_previousSampledViews.begin(), m_previousSampledViews.end());
+        m_rtViews.clear(); m_previousSampledViews.clear();
+        m_backend->retireImage(oldImage, oldMemory, std::move(views));
+        return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    }
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -943,7 +966,11 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
     const VkImageAspectFlags aspects = nativeAspectMask();
     const VkImageLayout transferLayout = upload ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
-    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (!cb) {
+        m_backend->dispatch().vkUnmapMemory(m_backend->device(), memory);
+        m_backend->destroyBuffer(buffer, memory);
+        return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    }
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = subresourceLayout(mipLevel,face) == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -975,6 +1002,7 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
     setSubresourceLayout(mipLevel,face,barrier.newLayout);
     if (!upload) m_backend->recordHostReadBarrier(cb, buffer, 0, bytes);
+    const uint64_t serial = m_backend->recordingSerial();
     st = m_backend->flushCommandBuffer();
     if (st == SVGA3_VLKN_SUCCESS && !upload) {
         for (size_t i = 0; i < pixels; ++i) {
@@ -988,8 +1016,12 @@ Svga3VlknStatus VlknSurface::dmaPackedDepth(bool upload, uint32_t mipLevel,
             memcpy(guest + (i / area.w) * stride + (i % area.w) * 4, &packed, 4);
         }
     }
-    m_backend->dispatch().vkUnmapMemory(m_backend->device(), memory);
-    m_backend->destroyBuffer(buffer, memory);
+    if (st == SVGA3_VLKN_SUCCESS) {
+        m_backend->dispatch().vkUnmapMemory(m_backend->device(), memory);
+        m_backend->destroyBuffer(buffer, memory);
+    } else {
+        m_backend->retireBuffer(buffer, memory, mapped, serial, 0);
+    }
     return st;
 }
 
@@ -1143,6 +1175,10 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
         }
         Svga3VlknStatus ensSt = ensureBufferSize((size_t)maxOffset64);
         if (ensSt != SVGA3_VLKN_SUCCESS) return ensSt;
+        if (m_lastBoundDrawSerial > m_backend->completedSubmissionSerial()) {
+            Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
+            if (flushSt != SVGA3_VLKN_SUCCESS) return flushSt;
+        }
     }
 
     /* Allocate staging buffer space: bump-allocate the persistent buffer so
@@ -1265,7 +1301,12 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
      * Acquire the recording buffer only after allocation and host writes. */
     /* Transition image to TRANSFER_DST_OPTIMAL */
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
-    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (!cb) {
+        if (!usingPersistentStaging) {
+            m_backend->destroyBuffer(stagingBuf, stagingMem);
+        }
+        return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    }
 
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1323,8 +1364,13 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
     setSubresourceLayout(mipLevel,face,barrier.newLayout);
     if (!usingPersistentStaging) {
         /* Temporary buffer: must complete before it can be destroyed. */
+        const uint64_t serial = m_backend->recordingSerial();
         Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
-        m_backend->destroyBuffer(stagingBuf, stagingMem);
+        if (flushSt == SVGA3_VLKN_SUCCESS) {
+            m_backend->destroyBuffer(stagingBuf, stagingMem);
+        } else {
+            m_backend->retireBuffer(stagingBuf, stagingMem, nullptr, serial, 0);
+        }
         return flushSt;
     }
     /* Persistent staging: leave the copy unflushed. The next reader (present,
@@ -1589,7 +1635,10 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
     if (st != SVGA3_VLKN_SUCCESS) return st;
 
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
-    if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    if (!cb) {
+        m_backend->destroyBuffer(stagingBuf, stagingMem);
+        return SVGA3_VLKN_ERROR_DEVICE_LOST;
+    }
 
     /* Transition image to TRANSFER_SRC_OPTIMAL */
     VkImageMemoryBarrier barrier = {};
@@ -1646,10 +1695,10 @@ Svga3VlknStatus VlknSurface::dmaDownload(uint32_t mipLevel,
 
     setSubresourceLayout(mipLevel,face,barrier.newLayout);
     m_backend->recordHostReadBarrier(cb, stagingBuf, 0, totalBytes);
+    const uint64_t serial = m_backend->recordingSerial();
     Svga3VlknStatus flushSt = m_backend->flushCommandBuffer();
     if (flushSt != SVGA3_VLKN_SUCCESS) {
-        /* The copy never executed: drop the staging buffer. */
-        m_backend->destroyBuffer(stagingBuf, stagingMem);
+        m_backend->retireBuffer(stagingBuf, stagingMem, nullptr, serial, 0);
         return flushSt;
     }
 
@@ -1821,37 +1870,103 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
     if (numBoxes && !boxes) return SVGA3_VLKN_ERROR_INVALID_PARAM;
     if (src->image() && dst->image() && src->vkFormat() != dst->vkFormat())
         return SVGA3_VLKN_ERROR_INVALID_PARAM;
+    const bool srcCompressed = src->image() && svga3_format_is_compressed(src->svgaFormat());
+    const bool dstCompressed = dst->image() && svga3_format_is_compressed(dst->svgaFormat());
+    bool hasImageOverlap = false;
+    bool hasBufferOverlap = false;
     for (uint32_t i = 0; i < numBoxes; ++i) {
         const auto &b = boxes[i];
+        const uint32_t bh = b.h ? b.h : 1;
+        const uint32_t bd = b.d ? b.d : 1;
         if (src->buffer() && dst->buffer()) {
             size_t bytes = b.w;
             if (src->image()) {
-                if (__builtin_mul_overflow(bytes, size_t(b.h ? b.h : 1), &bytes) ||
-                    __builtin_mul_overflow(bytes, size_t(b.d ? b.d : 1), &bytes) ||
+                if (__builtin_mul_overflow(bytes, size_t(bh), &bytes) ||
+                    __builtin_mul_overflow(bytes, size_t(bd), &bytes) ||
                     __builtin_mul_overflow(bytes, svga3_format_bytes_per_pixel(src->svgaFormat()), &bytes))
                     return SVGA3_VLKN_ERROR_INVALID_PARAM;
             }
             if (b.srcx > src->bufferSize() || bytes > src->bufferSize() - b.srcx ||
                 b.x > dst->bufferSize() || bytes > dst->bufferSize() - b.x)
                 return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (src == dst && bytes > 0 &&
+                uint64_t(b.srcx) < uint64_t(b.x) + bytes &&
+                uint64_t(b.x) < uint64_t(b.srcx) + bytes) {
+                hasBufferOverlap = true;
+            }
         }
-        if (src->image() && dst->image() &&
-            (uint64_t(b.srcx) + b.w > srcMipInfo->width ||
-             uint64_t(b.srcy) + (b.h ? b.h : 1) > srcMipInfo->height ||
-             uint64_t(b.srcz) + (b.d ? b.d : 1) > srcMipInfo->depth ||
-             uint64_t(b.x) + b.w > dstMipInfo->width ||
-             uint64_t(b.y) + (b.h ? b.h : 1) > dstMipInfo->height ||
-             uint64_t(b.z) + (b.d ? b.d : 1) > dstMipInfo->depth))
-            return SVGA3_VLKN_ERROR_INVALID_PARAM;
+        if (src->image() && dst->image()) {
+            if (!b.w || !b.h ||
+                uint64_t(b.srcx) + b.w > srcMipInfo->width ||
+                uint64_t(b.srcy) + bh > srcMipInfo->height ||
+                uint64_t(b.srcz) + bd > srcMipInfo->depth ||
+                uint64_t(b.x) + b.w > dstMipInfo->width ||
+                uint64_t(b.y) + bh > dstMipInfo->height ||
+                uint64_t(b.z) + bd > dstMipInfo->depth)
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (srcCompressed && ((b.srcx % 4) || (b.srcy % 4) ||
+                ((b.w % 4) && uint64_t(b.srcx) + b.w != srcMipInfo->width) ||
+                ((bh % 4) && uint64_t(b.srcy) + bh != srcMipInfo->height)))
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (dstCompressed && ((b.x % 4) || (b.y % 4) ||
+                ((b.w % 4) && uint64_t(b.x) + b.w != dstMipInfo->width) ||
+                ((bh % 4) && uint64_t(b.y) + bh != dstMipInfo->height)))
+                return SVGA3_VLKN_ERROR_INVALID_PARAM;
+            if (src == dst && srcMip == dstMip && srcFace == dstFace &&
+                uint64_t(b.srcx) < uint64_t(b.x) + b.w && uint64_t(b.x) < uint64_t(b.srcx) + b.w &&
+                uint64_t(b.srcy) < uint64_t(b.y) + bh && uint64_t(b.y) < uint64_t(b.srcy) + bh &&
+                uint64_t(b.srcz) < uint64_t(b.z) + bd && uint64_t(b.z) < uint64_t(b.srcz) + bd) {
+                hasImageOverlap = true;
+            }
+        }
+    }
+
+    size_t snapshotBytes = 0;
+    struct BudgetReservation {
+        VlknBackend *backend; size_t &bytes;
+        ~BudgetReservation() { if (bytes) backend->resourceBudgets().releaseSurfaceBytes(bytes); }
+    } reservation{m_backend, snapshotBytes};
+    std::unique_ptr<VlknSurface> snapshot;
+    if (hasImageOverlap) {
+        SVGA3dSize size{srcMipInfo->width, srcMipInfo->height, srcMipInfo->depth};
+        snapshot = std::make_unique<VlknSurface>(m_backend, SVGA3D_INVALID_ID, 0, src->svgaFormat(), &size, 1);
+        size_t bytes = snapshot->budgetedBytes();
+        if (!m_backend->resourceBudgets().tryReserveSurfaceBytes(bytes)) return SVGA3_VLKN_ERROR_OUT_OF_MEMORY;
+        snapshotBytes = bytes;
+        auto st = snapshot->allocate();
+        if (st != SVGA3_VLKN_SUCCESS) return st;
+        if (src->isVolumeImage() && !snapshot->isVolumeImage()) {
+            st = snapshot->ensureVolumeImage();
+            if (st != SVGA3_VLKN_SUCCESS) return st;
+        }
     }
 
     if (m_contextMgr) m_contextMgr->endAllRenderPasses();
+    if (hasBufferOverlap) {
+        auto fst = m_backend->flushCommandBuffer();
+        if (fst != SVGA3_VLKN_SUCCESS) return fst;
+    }
     VkCommandBuffer cb = m_backend->getActiveCommandBuffer();
     if (!cb) return SVGA3_VLKN_ERROR_DEVICE_LOST;
-    const VkImageLayout srcLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    const VkImageLayout dstLayout = src == dst ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    const VkImageLayout srcLayout = (src == dst && !snapshot) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    const VkImageLayout dstLayout = (src == dst && !snapshot) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     if (src->image()) src->transitionLayout(cb, srcLayout);
-    if (dst->image() && dst != src) dst->transitionLayout(cb, dstLayout);
+    if (snapshot) {
+        snapshot->transitionLayout(cb, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkImageCopy snapCopy{};
+        snapCopy.srcSubresource = {src->isDepthStencil() ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, srcMip, srcFace, 1};
+        snapCopy.dstSubresource = {snapCopy.srcSubresource.aspectMask, 0, 0, 1};
+        snapCopy.extent = {srcMipInfo->width, srcMipInfo->height, srcMipInfo->depth};
+        m_backend->dispatch().vkCmdCopyImage(cb, src->image(), srcLayout, snapshot->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &snapCopy);
+        if (svga3_format_has_stencil(src->svgaFormat())) {
+            snapCopy.srcSubresource.aspectMask = snapCopy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+            m_backend->dispatch().vkCmdCopyImage(cb, src->image(), srcLayout, snapshot->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &snapCopy);
+        }
+        snapshot->transitionLayout(cb, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        dst->transitionLayout(cb, dstLayout);
+    } else if (dst->image() && dst != src) {
+        dst->transitionLayout(cb, dstLayout);
+    }
 
     for (uint32_t i = 0; i < numBoxes; ++i) {
         const SVGA3dCopyBox &b = boxes[i];
@@ -1874,11 +1989,28 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
             uint64_t srcEnd = (uint64_t)b.srcx + copyBytes;
             uint64_t dstEnd = (uint64_t)b.x + copyBytes;
             if (srcEnd <= src->bufferSize() && dstEnd <= dst->bufferSize()) {
-                VkBufferCopy bufCopy = {};
-                bufCopy.srcOffset = b.srcx;
-                bufCopy.dstOffset = b.x;
-                bufCopy.size = copyBytes;
-                m_backend->dispatch().vkCmdCopyBuffer(cb, src->buffer(), dst->buffer(), 1, &bufCopy);
+                if (hasBufferOverlap && copyBytes > 0) {
+                    void *srcMap = src->bufferMapped();
+                    bool needUnmap = false;
+                    if (!srcMap && src->bufferMemory()) {
+                        if (m_backend->dispatch().vkMapMemory(m_backend->device(), src->bufferMemory(), 0, src->bufferSize(), 0, &srcMap) == VK_SUCCESS) {
+                            needUnmap = true;
+                        }
+                    }
+                    if (srcMap) {
+                        auto *mapped = static_cast<uint8_t*>(srcMap);
+                        memmove(mapped + b.x, mapped + b.srcx, copyBytes);
+                        if (needUnmap) {
+                            m_backend->dispatch().vkUnmapMemory(m_backend->device(), src->bufferMemory());
+                        }
+                    }
+                } else if (copyBytes > 0) {
+                    VkBufferCopy bufCopy = {};
+                    bufCopy.srcOffset = b.srcx;
+                    bufCopy.dstOffset = b.x;
+                    bufCopy.size = copyBytes;
+                    m_backend->dispatch().vkCmdCopyBuffer(cb, src->buffer(), dst->buffer(), 1, &bufCopy);
+                }
             }
         }
 
@@ -1896,10 +2028,12 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
                 log_msg("[libqemu_svga3d] copy error: box %u out of image bounds\n", i);
                 return SVGA3_VLKN_ERROR_INVALID_PARAM;
             }
+            VkImage copySrcImage = snapshot ? snapshot->image() : src->image();
+            VkImageLayout copySrcLayout = snapshot ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : srcLayout;
             VkImageCopy copyRegion = {};
             copyRegion.srcSubresource.aspectMask = src->isDepthStencil() ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-            copyRegion.srcSubresource.mipLevel = srcMip;
-            copyRegion.srcSubresource.baseArrayLayer = srcFace;
+            copyRegion.srcSubresource.mipLevel = snapshot ? 0 : srcMip;
+            copyRegion.srcSubresource.baseArrayLayer = snapshot ? 0 : srcFace;
             copyRegion.srcSubresource.layerCount = 1;
             copyRegion.srcOffset.x = (int32_t)b.srcx;
             copyRegion.srcOffset.y = (int32_t)b.srcy;
@@ -1919,13 +2053,13 @@ Svga3VlknStatus VlknSurfaceManager::copy(uint32_t srcSid,
 
             m_backend->dispatch().vkCmdCopyImage(
                 cb,
-                src->image(), srcLayout,
+                copySrcImage, copySrcLayout,
                 dst->image(), dstLayout,
                 1, &copyRegion
             );
             if (svga3_format_has_stencil(src->svgaFormat()) && svga3_format_has_stencil(dst->svgaFormat())) {
                 copyRegion.srcSubresource.aspectMask = copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-                m_backend->dispatch().vkCmdCopyImage(cb, src->image(), srcLayout, dst->image(), dstLayout, 1, &copyRegion);
+                m_backend->dispatch().vkCmdCopyImage(cb, copySrcImage, copySrcLayout, dst->image(), dstLayout, 1, &copyRegion);
             }
         }
     }

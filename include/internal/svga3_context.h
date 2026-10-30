@@ -115,6 +115,7 @@ struct PipelineKey {
     uint32_t numVertexDecls;
     VkRenderPass renderPass;
     uint64_t vertexDeclHash;
+    std::array<uint64_t, SVGA3_MAX_VERTEX_DECLS> vertexDecls;
     uint32_t boundVS;
     uint32_t boundPS;
     uint32_t ffTextureStage0;
@@ -180,6 +181,7 @@ public:
     ~VlknContext();
 
     uint32_t cid() const { return m_cid; }
+    bool isValid() const { return m_initValid; }
 
     /* Render States */
     Svga3VlknStatus setRenderState(SVGA3dRenderStateName state, uint32_t value);
@@ -402,12 +404,21 @@ private:
     VkImage m_whiteImage;
     VkDeviceMemory m_whiteMemory;
     VkImageView m_whiteView;
+    VkImage m_whiteCubeImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_whiteCubeMemory = VK_NULL_HANDLE;
+    VkImageView m_whiteCubeView = VK_NULL_HANDLE;
+    VkImage m_white3DImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_white3DMemory = VK_NULL_HANDLE;
+    VkImageView m_white3DView = VK_NULL_HANDLE;
     VkSampler m_dummySampler;
+    bool m_initValid = false;
 
     /* Query Pool */
     VkQueryPool m_queryPool;
     bool m_queryActive;
     bool m_queryEnded;
+    uint32_t m_querySlotCount = 0;
+    uint64_t m_queryAccumulated = 0;
     Svga3VlknStatus m_queryFailure = SVGA3_VLKN_SUCCESS;
     uint32_t m_lastQueryResult;
 
