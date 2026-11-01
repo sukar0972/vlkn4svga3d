@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 CXX ?= g++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra -pthread -fPIC -MMD -MP
 
@@ -46,6 +48,7 @@ ORACLE_OBJS = \
 # translation, Vulkan backend. No QEMU code, no QEMU headers.
 VLKN_OBJS = \
     $(BUILD_DIR)/vlkn_dispatch.o \
+    $(BUILD_DIR)/vlkn_mock_dispatch.o \
     $(BUILD_DIR)/vlkn_backend.o \
     $(BUILD_DIR)/svga3_surface.o \
     $(BUILD_DIR)/svga3_context.o \
@@ -79,7 +82,12 @@ LIB_QEMU_SVGA3D = $(LIB_DIR)/libqemu_svga3d.so
 
 .PHONY: preload-lab preload-lab-release all clean test test-oracle test-vlkn test-real-vulkan test-shader-translation test-shader test-guest-mem test-verified-rendering test-presentation test-qemu test-piglit harness-loop acceptance dump
 
-all: $(BIN_DIR)/test_resource_limits $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence $(BIN_DIR)/test_buffer_ordering $(ORACLE_TARGET) $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(VLKN_TEST_TARGET) $(REAL_VULKAN_TEST_TARGET) $(SHADER_TRANSLATION_TEST_TARGET) $(TRANSLATOR_NOVULKAN_TEST_TARGET) $(SHADER_TEST_TARGET) $(GUEST_MEM_TEST_TARGET) $(VERIFIED_RENDERING_TEST_TARGET) $(PRESENTATION_TEST_TARGET) $(QEMU_TEST_TARGET) $(MALFORMED_INPUT_TEST_TARGET)
+build-tests: $(BIN_DIR)/test_resource_limits $(BIN_DIR)/test_atomic_commands $(BIN_DIR)/test_query_state $(BIN_DIR)/test_fifo_framing $(DX_TEST_TARGET) $(BIN_DIR)/test_preload_fifo $(BIN_DIR)/test_preload_fence $(BIN_DIR)/test_buffer_ordering $(VLKN_LIB) $(QEMU_ADAPTER_LIB) $(VLKN_TEST_TARGET) $(REAL_VULKAN_TEST_TARGET) $(SHADER_TRANSLATION_TEST_TARGET) $(TRANSLATOR_NOVULKAN_TEST_TARGET) $(SHADER_TEST_TARGET) $(GUEST_MEM_TEST_TARGET) $(VERIFIED_RENDERING_TEST_TARGET) $(PRESENTATION_TEST_TARGET) $(QEMU_TEST_TARGET) $(MALFORMED_INPUT_TEST_TARGET)
+
+.PHONY: all production build-tests oracle
+all: production
+production: $(VLKN_LIB) $(QEMU_ADAPTER_LIB)
+oracle: $(ORACLE_TARGET)
 
 # Oracle Binary
 $(ORACLE_TARGET): $(ORACLE_OBJS) | $(BIN_DIR) $(DATA_DIR)
@@ -96,6 +104,13 @@ $(BUILD_DIR)/vbox_shim.o: shim/src/vbox_shim.cpp | $(BUILD_DIR)
 
 $(BUILD_DIR)/svga3d-oracle.o: tools/svga3d-oracle.cpp tools/include/svga3d_tables.h shim/include/mock/mock_d3d9.h | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES_ORACLE) -c $< -o $@
+
+# Mock implementation stays separately compiled to preserve the public forceMock API.
+$(BUILD_DIR)/vlkn_mock_dispatch.o: src/vlkn_mock_dispatch.cpp include/internal/vlkn_mock_dispatch.h | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
+
+$(BUILD_DIR)/guest_vmsvga_driver.o: tests/support/guest_vmsvga_driver.cpp tests/support/guest_vmsvga_driver.h | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) -c $< -o $@
 
 # SVGA3=VLKN Library
 $(VLKN_LIB): $(VLKN_OBJS) | $(LIB_DIR)
@@ -167,8 +182,8 @@ $(VERIFIED_RENDERING_TEST_TARGET): tests/test_verified_rendering.cpp $(VLKN_LIB)
 $(PRESENTATION_TEST_TARGET): tests/test_presentation.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
 
-$(QEMU_TEST_TARGET): tests/test_qemu_integration.cpp $(VLKN_LIB) $(QEMU_ADAPTER_LIB) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_qemu_adapter -lsvga3_vlkn -ldl -o $@
+$(QEMU_TEST_TARGET): tests/test_qemu_integration.cpp $(BUILD_DIR)/guest_vmsvga_driver.o $(VLKN_LIB) $(QEMU_ADAPTER_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< $(BUILD_DIR)/guest_vmsvga_driver.o -L$(LIB_DIR) -lsvga3_qemu_adapter -lsvga3_vlkn -ldl -o $@
 
 $(LIB_QEMU_SVGA3D): src/qemu_svga3d_preload.cpp $(VLKN_LIB) | $(LIB_DIR)
 	$(CXX) $(CXXFLAGS) -shared -I. $(INCLUDES_VLKN) $< -L$(LIB_DIR) -Wl,--whole-archive -lsvga3_vlkn -Wl,--no-whole-archive -static-libstdc++ -static-libgcc -ldl -lpthread -o $@
@@ -211,7 +226,7 @@ harness-loop:
 	@chmod +x scripts/harness_loop.sh
 	./scripts/harness_loop.sh $(HARNESS_LOOP_ARGS)
 
-acceptance: all
+acceptance: build-tests
 	@chmod +x scripts/run_acceptance_suite.sh
 	./scripts/run_acceptance_suite.sh
 
@@ -285,8 +300,8 @@ $(BIN_DIR)/benchmark_presentation: tools/benchmark_presentation.cpp $(VLKN_LIB) 
 benchmark-presentation: $(BIN_DIR)/benchmark_presentation
 	./$(BIN_DIR)/benchmark_presentation $(BENCHMARK_ITERATIONS)
 
-$(BIN_DIR)/test_fifo_framing: tests/test_fifo_framing.cpp $(VLKN_LIB) $(QEMU_ADAPTER_LIB) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_qemu_adapter -lsvga3_vlkn -ldl -o $@
+$(BIN_DIR)/test_fifo_framing: tests/test_fifo_framing.cpp $(BUILD_DIR)/guest_vmsvga_driver.o $(VLKN_LIB) $(QEMU_ADAPTER_LIB) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< $(BUILD_DIR)/guest_vmsvga_driver.o -L$(LIB_DIR) -lsvga3_qemu_adapter -lsvga3_vlkn -ldl -o $@
 
 $(BIN_DIR)/test_query_state: tests/test_query_state.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
@@ -321,16 +336,16 @@ $(BIN_DIR)/test_public_api: $(BUILD_DIR)/test_public_api.o $(VLKN_LIB) | $(BIN_D
 .PHONY: test-public-api
 test-public-api: $(BIN_DIR)/test_public_api
 	./$(BIN_DIR)/test_public_api
-all: $(BIN_DIR)/test_public_api
+build-tests: $(BIN_DIR)/test_public_api
 test: test-public-api
 
 $(BIN_DIR)/test_submissions: tests/test_submissions.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
-all: $(BIN_DIR)/test_submissions
+build-tests: $(BIN_DIR)/test_submissions
 
 $(BIN_DIR)/test_draw_submissions: tests/test_buffer_ordering.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -DSVGA3_TEST_SUBMIT_DRAWS $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@
-all: $(BIN_DIR)/test_draw_submissions
+build-tests: $(BIN_DIR)/test_draw_submissions
 
 $(BIN_DIR)/test_validation_check: tests/test_validation_check.cpp $(VLKN_LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES_VLKN) $< -L$(LIB_DIR) -lsvga3_vlkn -ldl -o $@

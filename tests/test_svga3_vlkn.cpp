@@ -1,3 +1,4 @@
+#include "vlkn_mock_dispatch.h"
 /*
  * SVGA3=VLKN - Comprehensive Multi-Thousand Test Suite and Oracle Verification Harness
  *

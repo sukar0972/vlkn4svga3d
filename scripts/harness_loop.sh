@@ -119,8 +119,8 @@ for (( iter=1; iter<=ITERATIONS; iter++ )); do
 
     # ------------------------------------------------------------- build ---
     if [[ $SKIP_BUILD -eq 0 ]]; then
-        echo "[harness-loop] building (make -j$(nproc) all) ..."
-        if ! make -j"$(nproc)" all >"$iter_dir/build.log" 2>&1; then
+        echo "[harness-loop] building (make -j$(nproc) build-tests) ..."
+        if ! make -j"$(nproc)" build-tests >"$iter_dir/build.log" 2>&1; then
             echo "[harness-loop] FATAL: build failed -- log: $iter_dir/build.log" >&2
             tail -25 "$iter_dir/build.log" | sed 's/^/[harness-loop]   /' >&2
             exit 1

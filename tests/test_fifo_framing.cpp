@@ -1,3 +1,4 @@
+#include "support/guest_vmsvga_driver.h"
 #include "qemu_vmsvga.h"
 #include "svga3_device.h"
 #include "vlkn_backend.h"

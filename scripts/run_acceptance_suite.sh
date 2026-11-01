@@ -22,7 +22,7 @@ result = {'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text
 pathlib.Path(sys.argv[1], 'source.json').write_text(json.dumps(result, indent=2) + '\n')
 PY
 printf 'Evidence: %s\n' "$RUN_DIR"
-make -j"${BUILD_JOBS:-4}" all test-install > "$RUN_DIR/build.log" 2>&1
+make -j"${BUILD_JOBS:-4}" build-tests test-install > "$RUN_DIR/build.log" 2>&1
 make test > "$RUN_DIR/mock.log" 2>&1
 ./scripts/harness_loop.sh --skip-build > "$RUN_DIR/harness.log" 2>&1
 cp artifacts/vulkan_driver_info.log artifacts/vulkan_validation.log "$RUN_DIR/"

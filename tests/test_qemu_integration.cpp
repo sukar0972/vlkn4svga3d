@@ -1,3 +1,4 @@
+#include "support/guest_vmsvga_driver.h"
 /*
  * SVGA3=VLKN - Deliverable 6: Isolated QEMU Integration Environment Test Suite
  *

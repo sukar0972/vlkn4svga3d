@@ -32,6 +32,14 @@ sudo apt install build-essential libvulkan1 mesa-vulkan-drivers
 make -j4 all
 ```
 
+`make` builds the core and QEMU adapter libraries. Use `make build-tests` for
+the test binaries, or `make oracle` for the VirtualBox reference tool. The
+checked-in reference header does not require rebuilding the oracle.
+
+The mock Vulkan backend is compiled separately and remains available through
+the public `forceMock` configuration. The simulated guest driver lives in
+`tests/support` and is not installed.
+
 ## Use as a library
 
 Install the library and public headers:
