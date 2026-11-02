@@ -1,3 +1,4 @@
+#include "vlkn_mock_dispatch.h"
 #include "svga3_device.h"
 #include "svga3_context.h"
 #include "svga3_surface.h"

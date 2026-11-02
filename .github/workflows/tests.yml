@@ -34,7 +34,7 @@ jobs:
           export VK_ICD_FILENAMES="$HARNESS_ICD"
           export VK_LAYER_VALIDATE_SYNC=1
           export SPIRV_TOOLS_DIR=/usr/bin
-          make -j2 all
+          make -j2 build-tests
           bash scripts/harness_loop.sh --iterations 1 --skip-build --fail-fast
           for suite in test_atomic_commands test_resource_limits test_query_state test_fifo_framing; do
             "./bin/$suite"
