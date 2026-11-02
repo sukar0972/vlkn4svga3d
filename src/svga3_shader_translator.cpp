@@ -1246,6 +1246,17 @@ Svga3VlknStatus svga3_translate_shader_d3d9(SVGA3dShaderType shaderType,
                 return const0_v4;
             }
             if (src.relativeToken) {
+                /* Cap SPIR-V expansion when combining relative constant reads with DEF constants:
+                 * each relative read iterates over all DEF constants, which could otherwise
+                 * produce quadratic O(N_DEF * N_rel) SPIR-V output from a small guest shader. */
+                static const size_t MAX_SPIRV_FUNCTION_WORDS = 65536;
+                if (!defConstants.empty() &&
+                    b.functionDefinitions.size() + defConstants.size() * 20 > MAX_SPIRV_FUNCTION_WORDS) {
+                    outError = "Relative constant addressing with DEF constants exceeds instruction budget";
+                    transError = true;
+                    transErrorCode = SVGA3_VLKN_ERROR_INVALID_PARAM;
+                    return const0_v4;
+                }
                 ParsedSrc address; parseSrc(src.relativeToken, address);
                 uint32_t offset = 0;
                 if (address.regType == D3DSPR_LOOP) {

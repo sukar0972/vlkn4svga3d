@@ -25,7 +25,7 @@ constexpr size_t SVGA3_PAGE_SHIFT = 12;
 constexpr size_t SVGA3_PAGE_SIZE  = (1ULL << SVGA3_PAGE_SHIFT); /* 4096 bytes */
 constexpr size_t SVGA3_PAGE_MASK  = (SVGA3_PAGE_SIZE - 1);
 constexpr uint32_t SVGA3_MAX_GMR_IDS = 1024;
-constexpr uint32_t SVGA3_MAX_GMR_PAGES = 1048576; /* Up to 4GB per GMR */
+constexpr uint32_t SVGA3_MAX_GMR_PAGES = 1048576; /* Up to 4GB total GMR pages */
 constexpr uint32_t SVGA3_MAX_DESCRIPTOR_CHAIN = 2048;
 
 struct RamBlock {
@@ -116,6 +116,7 @@ private:
     mutable std::mutex m_mutex;
     std::vector<RamBlock> m_ramBlocks;
     std::unordered_map<uint32_t, GuestMemoryRegion> m_gmrs;
+    uint64_t m_totalGmrPages = 0;
     FramebufferInfo m_fb;
 
     Svga3HostAdapter m_adapter{};

@@ -157,6 +157,7 @@ static void VKAPI_CALL mock_vkGetPhysicalDeviceProperties(VkPhysicalDevice physi
     pProperties->limits.maxPushConstantsSize = 128;
     pProperties->limits.maxMemoryAllocationCount = 4096;
     pProperties->limits.maxSamplerAllocationCount = 4000;
+    pProperties->limits.maxSamplerLodBias = 16.0f;
     pProperties->limits.maxSamplerAnisotropy = 16.0f;
     pProperties->limits.lineWidthRange[0] = 1.0f;
     pProperties->limits.lineWidthRange[1] = 16.0f;

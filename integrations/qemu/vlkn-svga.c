@@ -159,6 +159,11 @@ uint32_t vlkn_svga_reg(VlknSvga *s, uint32_t reg)
 int vlkn_svga_dispatch(VlknSvga *s, uint8_t *fifo, uint32_t min,
                        uint32_t max, uint32_t next, uint32_t stop)
 {
+    if (min < 4 * (SVGA_FIFO_STOP + 1) || min >= max ||
+        stop < min || stop >= max || next < min || next >= max ||
+        ((min | max | stop | next) & 3) != 0) {
+        return -1;
+    }
     uint32_t cmd = ldl_le_p(fifo + stop);
     if (!(cmd >= SVGA_3D_CMD_BASE && cmd < SVGA_3D_CMD_FUTURE_MAX) &&
         cmd != SVGA_CMD_FENCE && cmd != SVGA_CMD_DEFINE_GMR2 &&
@@ -166,14 +171,19 @@ int vlkn_svga_dispatch(VlknSvga *s, uint8_t *fifo, uint32_t min,
         return 0;
     }
     uint32_t available = next >= stop ? next - stop : max - stop + next - min;
-    g_autofree uint8_t *packet = g_malloc(available);
-    uint32_t tail = MIN(available, max - stop);
-    memcpy(packet, fifo + stop, tail);
-    memcpy(packet + tail, fifo + min, available - tail);
+    uint8_t header[32];
+    uint32_t header_avail = MIN(available, (uint32_t)sizeof(header));
+    uint32_t header_tail = MIN(header_avail, max - stop);
+    memcpy(header, fifo + stop, header_tail);
+    memcpy(header + header_tail, fifo + min, header_avail - header_tail);
     size_t packet_size = 0;
-    if (svga3_vlkn_fifo_packet_size(packet, available, &packet_size) != SVGA3_VLKN_SUCCESS) {
+    if (svga3_vlkn_fifo_packet_size(header, available, &packet_size) != SVGA3_VLKN_SUCCESS) {
         return -1;
     }
+    g_autofree uint8_t *packet = g_malloc(packet_size);
+    uint32_t tail = MIN((uint32_t)packet_size, max - stop);
+    memcpy(packet, fifo + stop, tail);
+    memcpy(packet + tail, fifo + min, packet_size - tail);
     DisplaySurface *surface = qemu_console_surface(s->console);
     if (!surface) {
         return -1;
@@ -188,14 +198,19 @@ int vlkn_svga_dispatch(VlknSvga *s, uint8_t *fifo, uint32_t min,
     size_t consumed = 0;
     Svga3VlknStatus status = svga3_vlkn_fifo_execute(s->device, packet,
                                                    packet_size, &consumed);
-    if (status != SVGA3_VLKN_SUCCESS || consumed != packet_size) {
+    if (status != SVGA3_VLKN_SUCCESS) {
         error_report_once("SVGA3D command %u failed: %d", cmd, status);
-        return -1;
     }
     if (cmd == SVGA_CMD_FENCE) {
+        if (status != SVGA3_VLKN_SUCCESS || consumed != packet_size) {
+            return -1;
+        }
         stl_le_p(fifo + SVGA_FIFO_FENCE * 4, ldl_le_p(packet + 4));
     }
-    return packet_size;
+    if (consumed == 0 || consumed > packet_size) {
+        return -1;
+    }
+    return (int)consumed;
 }
 
 void vlkn_svga_submit(VlknSvga *s) {

@@ -539,15 +539,22 @@ static bool blit_gmrfb_to_legacy(void *s,
     const uint64_t lastDst = firstDst + (rows - 1) * dst_pitch;
     if (row_bytes > vram_size - lastSrc || row_bytes > vram_size - lastDst) return false;
 
-    for (int64_t row = 0; row < y1 - y0; ++row) {
-        uint64_t src_offset = src_base + (uint64_t)(sy + row) * src_pitch + (uint64_t)sx * 4;
-        uint64_t dst_offset = (g_screen_scanout_active ? g_screen_scanout_offset : 0) +
-                              (uint64_t)(y0 + row) * dst_pitch + (uint64_t)x0 * 4;
-        if (src_offset > vram_size || row_bytes > vram_size - src_offset ||
-            dst_offset > vram_size || row_bytes > vram_size - dst_offset) {
-            return false;
-        }
-        memmove(vram + dst_offset, vram + src_offset, (size_t)row_bytes);
+    /* Snapshot all rows before writing: source and destination may overlap in
+     * VRAM with different pitches or offsets, so row-by-row memmove could
+     * overwrite subsequent source rows. */
+    std::vector<uint8_t> snapshot;
+    try {
+        snapshot.resize((size_t)(rows * row_bytes));
+    } catch (const std::bad_alloc &) {
+        return false;
+    }
+    for (uint64_t row = 0; row < rows; ++row) {
+        uint64_t src_offset = firstSrc + row * src_pitch;
+        memcpy(snapshot.data() + row * row_bytes, vram + src_offset, (size_t)row_bytes);
+    }
+    for (uint64_t row = 0; row < rows; ++row) {
+        uint64_t dst_offset = firstDst + row * dst_pitch;
+        memcpy(vram + dst_offset, snapshot.data() + row * row_bytes, (size_t)row_bytes);
     }
     return true;
 }
@@ -672,13 +679,13 @@ static void ensure_vlkn_device(void *s) {
                 g_guest_ram_size / (1024*1024), g_guest_ram_base);
     }
 
-    uint32_t width = reg_value(s, SVGA_REG_WIDTH);
+    uint32_t width = g_screen_scanout_active ? g_screen_scanout_width : reg_value(s, SVGA_REG_WIDTH);
     if (!width || (portrait_profile_enabled() && width == 768)) width = SCREEN_W;
-    uint32_t height = reg_value(s, SVGA_REG_HEIGHT);
+    uint32_t height = g_screen_scanout_active ? g_screen_scanout_height : reg_value(s, SVGA_REG_HEIGHT);
     if (!height || (portrait_profile_enabled() && height == 1280)) height = SCREEN_H;
-    uint32_t pitch = reg_value(s, SVGA_REG_BYTES_PER_LINE);
+    uint32_t pitch = g_screen_scanout_active ? g_screen_scanout_pitch : reg_value(s, SVGA_REG_BYTES_PER_LINE);
     if (!pitch) pitch = width * 4;
-    uint32_t bpp = reg_value(s, SVGA_REG_BITS_PER_PIXEL);
+    uint32_t bpp = g_screen_scanout_active ? 32 : reg_value(s, SVGA_REG_BITS_PER_PIXEL);
     if (!bpp) bpp = 32;
     uint32_t vram_size = reg_value(s, SVGA_REG_VRAM_SIZE);
     if (!vram_size) vram_size = 128 * 1024 * 1024;
@@ -687,6 +694,9 @@ static void ensure_vlkn_device(void *s) {
             vram, width, height, pitch, bpp, vram_size);
 
     svga3_vlkn_device_set_framebuffer(g_vlknDev, vram, reg_value(s, SVGA_REG_FB_START), vram_size, width, height, pitch, bpp / 8);
+    if (g_screen_scanout_active) {
+        svga3_vlkn_device_set_scanout_offset(g_vlknDev, g_screen_scanout_offset);
+    }
     Svga3HostAdapter preloadAdapter{};
     preloadAdapter.opaque = s;
     preloadAdapter.displayUpdate = vlkn_display_update_cb;

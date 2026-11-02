@@ -258,19 +258,27 @@ void QemuVmsvgaDevice::ioWrite(uint16_t portOffset, uint32_t val, int size)
                     m_regs[SVGA_REG_ENABLE] = val ? 1 : 0;
                     break;
 
-                case SVGA_REG_WIDTH:
-                    m_regs[SVGA_REG_WIDTH] = val;
-                    m_regs[SVGA_REG_BYTES_PER_LINE] = val * (m_regs[SVGA_REG_BITS_PER_PIXEL] / 8);
+                case SVGA_REG_WIDTH: {
+                    uint32_t clamped = std::min(val, m_regs[SVGA_REG_MAX_WIDTH] ? m_regs[SVGA_REG_MAX_WIDTH] : 16384u);
+                    m_regs[SVGA_REG_WIDTH] = clamped;
+                    uint64_t bppBytes = std::min<uint64_t>(m_regs[SVGA_REG_BITS_PER_PIXEL] / 8, 16);
+                    m_regs[SVGA_REG_BYTES_PER_LINE] = static_cast<uint32_t>(uint64_t(clamped) * bppBytes);
                     break;
+                }
 
-                case SVGA_REG_HEIGHT:
-                    m_regs[SVGA_REG_HEIGHT] = val;
+                case SVGA_REG_HEIGHT: {
+                    uint32_t clamped = std::min(val, m_regs[SVGA_REG_MAX_HEIGHT] ? m_regs[SVGA_REG_MAX_HEIGHT] : 16384u);
+                    m_regs[SVGA_REG_HEIGHT] = clamped;
                     break;
+                }
 
-                case SVGA_REG_BITS_PER_PIXEL:
-                    m_regs[SVGA_REG_BITS_PER_PIXEL] = val;
-                    m_regs[SVGA_REG_BYTES_PER_LINE] = m_regs[SVGA_REG_WIDTH] * (val / 8);
+                case SVGA_REG_BITS_PER_PIXEL: {
+                    uint32_t clamped = (val == 8 || val == 15 || val == 16 || val == 24 || val == 32) ? val : 32u;
+                    m_regs[SVGA_REG_BITS_PER_PIXEL] = clamped;
+                    uint64_t width = m_regs[SVGA_REG_WIDTH];
+                    m_regs[SVGA_REG_BYTES_PER_LINE] = static_cast<uint32_t>(width * (clamped / 8));
                     break;
+                }
 
                 case SVGA_REG_CONFIG_DONE:
                     m_regs[SVGA_REG_CONFIG_DONE] = val;

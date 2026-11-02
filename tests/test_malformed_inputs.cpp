@@ -368,6 +368,121 @@ int main() {
             "Shader module budget fully released after context destroy");
     }
 
+    /* Audit hardening regressions:
+     * - LUMINANCE4_ALPHA4 rejected as unsupported format
+     * - Mip chain exceeding floor(log2(maxDim))+1 rejected
+     * - Non-square cubemap rejected
+     * - Unaligned index offset and oversized missing-index-surface draw rejected
+     * - Aggregate GMR page budget enforced across GMR IDs
+     * - Device reset clears framebuffer registration
+     * - Viewport dimension/bounds validation and vertex stride validation
+     */
+    {
+        SVGA3dSize size4x4 = { 4, 4, 1 };
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 9600, SVGA3D_SURFACE_HINT_TEXTURE,
+                       SVGA3D_LUMINANCE4_ALPHA4, &size4x4, 1) == SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT,
+                   "LUMINANCE4_ALPHA4 rejected as unsupported format");
+
+        SVGA3dSize badMips[2] = { { 1, 1, 1 }, { 1, 1, 1 } };
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 9601, SVGA3D_SURFACE_HINT_TEXTURE,
+                       SVGA3D_A8R8G8B8, badMips, 2) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "1x1 surface with 2 mip levels rejected");
+
+        SVGA3dSize nonSquareCube[6] = {
+            { 8, 4, 1 }, { 8, 4, 1 }, { 8, 4, 1 },
+            { 8, 4, 1 }, { 8, 4, 1 }, { 8, 4, 1 }
+        };
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 9602, SVGA3D_SURFACE_CUBEMAP,
+                       SVGA3D_A8R8G8B8, nonSquareCube, 6) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Non-square cubemap rejected");
+
+        /* Aggregate GMR page budget across GMR IDs (GMR 3 already holds 2 pages) */
+        auto &mem = *dev->guestMem;
+        TEST_CHECK(mem.defineGMR2(500, svga3_vlkn::SVGA3_MAX_GMR_PAGES - 2) == SVGA3_VLKN_SUCCESS,
+                   "Define GMR up to aggregate page limit");
+        TEST_CHECK(mem.defineGMR2(501, 1) == SVGA3_VLKN_ERROR_OUT_OF_MEMORY,
+                   "Second GMR exceeding aggregate page budget rejected");
+        TEST_CHECK(mem.destroyGMR(500) == SVGA3_VLKN_SUCCESS,
+                   "Destroy full-budget GMR releases aggregate pages");
+        TEST_CHECK(mem.defineGMR2(501, 16) == SVGA3_VLKN_SUCCESS,
+                   "GMR definition succeeds after releasing aggregate pages");
+        mem.destroyGMR(501);
+
+        /* Context draw & state hardening */
+        uint32_t cid = 9610;
+        TEST_CHECK(svga3_vlkn_context_create(dev, cid) == SVGA3_VLKN_SUCCESS,
+                   "Create context for draw/state hardening checks");
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 9610, SVGA3D_SURFACE_HINT_RENDERTARGET,
+                       SVGA3D_A8R8G8B8, &size4x4, 1) == SVGA3_VLKN_SUCCESS,
+                   "Define RT for draw/state hardening checks");
+        TEST_CHECK(svga3_vlkn_context_set_render_target(dev, cid, SVGA3D_RT_COLOR0, 9610, 0, 0) == SVGA3_VLKN_SUCCESS,
+                   "Bind RT for draw/state hardening checks");
+
+        /* Binding color surface as depth target or out-of-range mip rejected */
+        TEST_CHECK(svga3_vlkn_context_set_render_target(dev, cid, SVGA3D_RT_DEPTH, 9610, 0, 0) == SVGA3_VLKN_ERROR_UNSUPPORTED_FORMAT,
+                   "Color surface rejected on depth render target slot");
+        TEST_CHECK(svga3_vlkn_context_set_render_target(dev, cid, SVGA3D_RT_COLOR0, 9610, 0, 5) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Out-of-range mipmap rejected in setRenderTarget");
+
+        /* Oversized viewport rejected */
+        SVGA3dRect hugeVp = { 0, 0, 65536, 65536 };
+        TEST_CHECK(svga3_vlkn_context_set_viewport(dev, cid, &hugeVp) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Viewport exceeding maxViewportDimensions rejected");
+
+        /* Vertex stride exceeding maxVertexInputBindingStride rejected */
+        SVGA3dVertexDecl badStrideDecl{};
+        badStrideDecl.identity.usage = SVGA3D_DECLUSAGE_POSITION;
+        badStrideDecl.identity.type = SVGA3D_DECLTYPE_FLOAT3;
+        badStrideDecl.array.stride = 65536;
+        SVGA3dPrimitiveRange triRange{};
+        triRange.primType = SVGA3D_PRIMITIVE_TRIANGLELIST;
+        triRange.primitiveCount = 1;
+        triRange.indexArray.surfaceId = SVGA3D_INVALID_ID;
+        TEST_CHECK(svga3_vlkn_context_draw(dev, cid, SVGA3D_PRIMITIVE_TRIANGLELIST, &badStrideDecl, 1, &triRange, 1) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Vertex declaration stride exceeding device limit rejected");
+
+        /* Unaligned index buffer offset rejected */
+        SVGA3dVertexDecl goodDecl{};
+        goodDecl.identity.usage = SVGA3D_DECLUSAGE_POSITION;
+        goodDecl.identity.type = SVGA3D_DECLTYPE_FLOAT3;
+        goodDecl.array.stride = 12;
+        SVGA3dSize ibSize = { 64, 1, 1 };
+        TEST_CHECK(svga3_vlkn_surface_define(dev, 9611, SVGA3D_SURFACE_HINT_INDEXBUFFER,
+                       SVGA3D_BUFFER, &ibSize, 1) == SVGA3_VLKN_SUCCESS,
+                   "Define index buffer for alignment test");
+        SVGA3dPrimitiveRange unalignedIdxRange{};
+        unalignedIdxRange.primType = SVGA3D_PRIMITIVE_TRIANGLELIST;
+        unalignedIdxRange.primitiveCount = 1;
+        unalignedIdxRange.indexArray.surfaceId = 9611;
+        unalignedIdxRange.indexArray.stride = 4;
+        unalignedIdxRange.indexArray.offset = 2; /* not 4-byte aligned */
+        unalignedIdxRange.indexWidth = 4;
+        TEST_CHECK(svga3_vlkn_context_draw(dev, cid, SVGA3D_PRIMITIVE_TRIANGLELIST, &goodDecl, 1, &unalignedIdxRange, 1) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Unaligned 32-bit index buffer offset rejected");
+
+        /* Missing index surface exceeding 1 MiB fallback capacity rejected */
+        SVGA3dPrimitiveRange hugeMissingIdx{};
+        hugeMissingIdx.primType = SVGA3D_PRIMITIVE_POINTLIST;
+        hugeMissingIdx.primitiveCount = 300000; /* 300k * 4B > 1 MiB */
+        hugeMissingIdx.indexArray.surfaceId = 999999;
+        hugeMissingIdx.indexArray.stride = 4;
+        hugeMissingIdx.indexWidth = 4;
+        TEST_CHECK(svga3_vlkn_context_draw(dev, cid, SVGA3D_PRIMITIVE_POINTLIST, &goodDecl, 1, &hugeMissingIdx, 1) == SVGA3_VLKN_ERROR_INVALID_PARAM,
+                   "Missing index surface exceeding fallback buffer capacity rejected");
+
+        svga3_vlkn_surface_destroy(dev, 9611);
+        svga3_vlkn_surface_destroy(dev, 9610);
+        svga3_vlkn_context_destroy(dev, cid);
+
+        /* Device reset clears registered framebuffer */
+        uint8_t dummyFb[64 * 64 * 4]{};
+        TEST_CHECK(svga3_vlkn_device_set_framebuffer(dev, dummyFb, 0xE0000000ULL, sizeof(dummyFb), 64, 64, 256, 4) == SVGA3_VLKN_SUCCESS,
+                   "Register framebuffer before reset");
+        TEST_CHECK(dev->guestMem->getFramebuffer().hva != nullptr, "Framebuffer registered");
+        TEST_CHECK(svga3_vlkn_device_reset(dev) == SVGA3_VLKN_SUCCESS, "Device reset succeeds");
+        TEST_CHECK(dev->guestMem->getFramebuffer().hva == nullptr, "Device reset clears registered framebuffer");
+    }
+
     svga3_vlkn_device_destroy(dev);
 
     std::cout << "All malformed-input tests PASSED!" << std::endl;
