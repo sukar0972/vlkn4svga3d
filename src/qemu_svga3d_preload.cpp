@@ -715,13 +715,13 @@ static uint32_t advertised_devcap(const DevCapInfo &cap) {
          * rather than the packed shader versions used by the core/Linux
          * adapter. Keep vertex and pixel versions consistent: the OpenGL
          * ICD requires VS 3.0 and PS 3.0 to initialize its SVGA screen. */
-        if (windows_wddm_profile_enabled() && value == 0x300) {
+        if (value == 0x300) {
             const char *opengl = getenv("SVGA3_VLKN_WINDOWS_OPENGL");
             value = opengl && strcmp(opengl, "1") == 0 ? SVGA3DVSVERSION_30 : SVGA3DVSVERSION_20;
         }
         break;
     case SVGA3D_DEVCAP_FRAGMENT_SHADER_VERSION:
-        if (windows_wddm_profile_enabled() && value == 0x300) {
+        if (value == 0x300) {
             const char *opengl = getenv("SVGA3_VLKN_WINDOWS_OPENGL");
             value = opengl && strcmp(opengl, "1") == 0 ? SVGA3DPSVERSION_30 : SVGA3DPSVERSION_20;
         }
@@ -772,6 +772,7 @@ static uint32_t peek_word(uint32_t *fifo, uint32_t stop, uint32_t min, uint32_t 
 }
 
 extern "C" void my_vmsvga_fifo_run(void *s) {
+    std::lock_guard<std::recursive_mutex> lock(g_vlkn_mutex);
     if (!s || !*(int *)((char *)s+OFFSET_CONFIG) || !*(int *)((char *)s+OFFSET_ENABLE)) return;
     uint32_t *fifo = *(uint32_t **)((char *)s+OFFSET_FIFO);
     uint32_t allocated = *(uint32_t *)((char *)s+OFFSET_FIFO_SIZE);

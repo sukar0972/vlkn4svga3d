@@ -2491,6 +2491,9 @@ VkPipeline VlknContext::getOrCreatePipeline(SVGA3dPrimitiveType primitiveType,
 /* Overflow-safe vertex count: primCount is guest-controlled, and
  * primCount*3 wrapped in 32-bit. Clamp to a sane maximum. */
 static uint32_t calcVertexCount(SVGA3dPrimitiveType type, uint32_t primCount) {
+    if (primCount == 0) {
+        return 0;
+    }
     if (primCount > SVGA3_MAX_PRIMITIVES_PER_DRAW) {
         primCount = SVGA3_MAX_PRIMITIVES_PER_DRAW;
     }

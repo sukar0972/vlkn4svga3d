@@ -493,6 +493,7 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 }
             }
 
+            uint64_t prevVertices = ctx->vertexCount();
             Svga3VlknStatus st = ctx->draw(
                 primType, decls, pCmd->numVertexDecls, ranges, pCmd->numRanges
             );
@@ -500,8 +501,8 @@ Svga3VlknStatus processFifoPacket(Svga3VlknDevice *dev,
                 dev->stats.drawCallsSubmitted += pCmd->numRanges;
                 for (uint32_t i = 0; i < pCmd->numRanges; ++i) {
                     dev->stats.primitivesRendered += ranges[i].primitiveCount;
-                    dev->stats.verticesRendered += ranges[i].primitiveCount * 3;
                 }
+                dev->stats.verticesRendered += ctx->vertexCount() - prevVertices;
             }
             *bytesRead = offset;
             return st;

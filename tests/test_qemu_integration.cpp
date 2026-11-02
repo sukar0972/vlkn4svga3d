@@ -633,11 +633,12 @@ static bool testEndToEndRendering(QemuVmsvgaDevice &dev, GuestVmsvgaDriver &gues
     }
 
     /* QEMU Display Update notification */
-    if (dev.displayUpdates().empty()) {
+    const auto updates = dev.displayUpdates();
+    if (updates.empty()) {
         std::cerr << "FAILED: QEMU display update callback was not invoked." << std::endl;
         return false;
     }
-    const auto &up = dev.displayUpdates().front();
+    const auto &up = updates.front();
     std::cout << "    * QEMU Display update rect: [" << up.x << ", " << up.y << ", " << up.w << ", " << up.h << "]" << std::endl;
     if (up.x != 100 || up.y != 100 || up.w != 64 || up.h != 64) {
         std::cerr << "FAILED: Incorrect QEMU display update rect." << std::endl;

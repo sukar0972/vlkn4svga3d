@@ -1220,7 +1220,7 @@ Svga3VlknStatus VlknSurface::dmaUpload(uint32_t mipLevel,
                         size_t dstOffset = (static_cast<size_t>(bz + z) * mip.height + (by + y)) * mip.rowPitch + static_cast<size_t>(bx) * bpp;
                         if (dstOffset < m_bufferSize) {
                             size_t copyLen = std::min(copyRowBytes, m_bufferSize - dstOffset);
-                            memcpy(dstBuf + dstOffset, srcBuf + (z * bh + y) * copyRowBytes, copyLen);
+                            memcpy(dstBuf + dstOffset, srcBuf + (z * copyRows + y) * copyRowBytes, copyLen);
                         }
                     }
                 }

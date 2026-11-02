@@ -175,6 +175,9 @@ int vlkn_svga_dispatch(VlknSvga *s, uint8_t *fifo, uint32_t min,
         return -1;
     }
     DisplaySurface *surface = qemu_console_surface(s->console);
+    if (!surface) {
+        return -1;
+    }
     uint32_t width = surface_width(surface), height = surface_height(surface);
     if (svga3_vlkn_device_set_framebuffer(s->device,
             memory_region_get_ram_ptr(s->vram), pci_get_bar_addr(s->pci, 1),
