@@ -297,7 +297,7 @@ public:
     }
 
     void endRenderPassIfActive();
-    void invalidateSurface(uint32_t sid);
+    Svga3VlknStatus invalidateSurface(uint32_t sid);
 
 private:
     void initDefaultRenderStates();
@@ -468,7 +468,7 @@ public:
     void endAllRenderPasses();
     void endAllRenderPassesExcept(uint32_t cid);
     void clearPendingWindowPresents();
-    void invalidateSurface(uint32_t sid);
+    Svga3VlknStatus invalidateSurface(uint32_t sid);
 
 private:
     VlknBackend *m_backend;

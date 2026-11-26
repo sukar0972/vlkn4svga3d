@@ -92,6 +92,74 @@ static int checkDeferredImages() {
     svga3_vlkn_device_destroy(dev);
     return 0;
 }
+static PFN_vkDestroyFramebuffer savedDestroyFramebuffer;
+static unsigned framebufferDestroys;
+static void VKAPI_CALL countFramebufferDestroys(VkDevice device, VkFramebuffer framebuffer,
+                                                 const VkAllocationCallbacks *allocator) {
+    ++framebufferDestroys;
+    savedDestroyFramebuffer(device, framebuffer, allocator);
+}
+
+static int checkSurfaceInvalidationWaitFailure() {
+    Svga3VlknConfig cfg{};
+    cfg.forceMockBackend = true;
+    auto *dev = svga3_vlkn_device_create(&cfg);
+    CHECK(dev);
+    const SVGA3dSize size{4, 4, 1};
+    const SVGA3dSize replacementSize{8, 8, 1};
+    const uint32_t sid = 1;
+    CHECK(svga3_vlkn_surface_define(dev, sid, 0, SVGA3D_A8R8G8B8, &size, 1) == SVGA3_VLKN_SUCCESS);
+    CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
+    auto *ctx = dev->contextMgr->getContext(1);
+    CHECK(ctx->setRenderTarget(SVGA3D_RT_COLOR0, sid, 0, 0) == SVGA3_VLKN_SUCCESS);
+    auto *surface = dev->surfaceMgr->getSurface(sid);
+    auto &backend = *dev->backend;
+    auto &dispatch = backend.dispatch();
+    const auto savedWait = dispatch.vkWaitForFences;
+    savedDestroyFramebuffer = dispatch.vkDestroyFramebuffer;
+    dispatch.vkDestroyFramebuffer = countFramebufferDestroys;
+    framebufferDestroys = 0;
+    const auto surfaceBytes = backend.resourceBudgets().surfaceBytes();
+
+    enum class Operation { Destroy, Redefine, RedefineV2, ConvertToVolume };
+    for (const auto operation : {Operation::Destroy, Operation::Redefine,
+                                 Operation::RedefineV2, Operation::ConvertToVolume}) {
+        CHECK(ctx->clear(SVGA3D_CLEAR_COLOR, 0, 1, 0, nullptr, 0) == SVGA3_VLKN_SUCCESS);
+        CHECK(backend.isRenderPassActive());
+        waitCalls = 0;
+        failWaitAt = 1;
+        dispatch.vkWaitForFences = failQueueWait;
+        auto status = SVGA3_VLKN_SUCCESS;
+        switch (operation) {
+        case Operation::Destroy:
+            status = svga3_vlkn_surface_destroy(dev, sid);
+            break;
+        case Operation::Redefine:
+            status = svga3_vlkn_surface_define(dev, sid, 0, SVGA3D_A8R8G8B8, &replacementSize, 1);
+            break;
+        case Operation::RedefineV2:
+            status = svga3_vlkn_surface_define_v2(dev, sid, 0, SVGA3D_A8R8G8B8, 0,
+                                                 SVGA3D_TEX_FILTER_NONE, &replacementSize, 1);
+            break;
+        case Operation::ConvertToVolume:
+            status = dev->surfaceMgr->ensureVolumeSurface(sid);
+            break;
+        }
+        dispatch.vkWaitForFences = savedWait;
+        CHECK(status == SVGA3_VLKN_ERROR_DEVICE_LOST && !backend.isDeviceLost());
+        CHECK(waitCalls >= 1 && framebufferDestroys == 0);
+        CHECK(dev->surfaceMgr->getSurface(sid) == surface && !surface->isVolumeImage());
+        CHECK(backend.resourceBudgets().surfaceBytes() == surfaceBytes);
+    }
+
+    CHECK(svga3_vlkn_surface_destroy(dev, sid) == SVGA3_VLKN_SUCCESS);
+    CHECK(framebufferDestroys == 1 && !dev->surfaceMgr->exists(sid));
+    CHECK(backend.resourceBudgets().surfaceBytes() == 0);
+    svga3_vlkn_device_destroy(dev);
+    std::puts("Surface and framebuffer survive failed fence wait, then destroy succeeds on retry: PASS");
+    return 0;
+}
+
 static unsigned lossSubmitCalls, lossResetCalls;
 static PFN_vkQueueSubmit realLossSubmit;
 static PFN_vkResetCommandBuffer realLossReset;
@@ -143,6 +211,7 @@ static int checkStickyLossModes() {
 int main() {
     CHECK(checkStickyLossModes()==0);
     CHECK(checkDeferredImages()==0);
+    CHECK(checkSurfaceInvalidationWaitFailure()==0);
     Svga3VlknConfig cfg{}; cfg.forceMockBackend = true;
     auto *dev = svga3_vlkn_device_create(&cfg); CHECK(dev);
     CHECK(dev->contextMgr->createContext(1) == SVGA3_VLKN_SUCCESS);
