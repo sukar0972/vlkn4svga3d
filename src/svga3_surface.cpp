@@ -1777,7 +1777,13 @@ Svga3VlknStatus VlknSurfaceManager::defineSurface(uint32_t sid,
         return st;
     }
 
-    if (it != m_surfaces.end() && m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (it != m_surfaces.end() && m_contextMgr) {
+        st = m_contextMgr->invalidateSurface(sid);
+        if (st != SVGA3_VLKN_SUCCESS) {
+            m_backend->resourceBudgets().releaseSurfaceBytes(extraBytes);
+            return st;
+        }
+    }
     if (oldBytes > needBytes) m_backend->resourceBudgets().releaseSurfaceBytes(oldBytes - needBytes);
     m_surfaces[sid] = std::move(surf);
     return SVGA3_VLKN_SUCCESS;
@@ -1790,7 +1796,10 @@ Svga3VlknStatus VlknSurfaceManager::destroySurface(uint32_t sid) {
         return SVGA3_VLKN_ERROR_NOT_FOUND;
     }
 
-    if (m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (m_contextMgr) {
+        const auto status = m_contextMgr->invalidateSurface(sid);
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+    }
     m_backend->resourceBudgets().releaseSurfaceBytes(it->second->budgetedBytes());
     m_surfaces.erase(it);
     return SVGA3_VLKN_SUCCESS;
@@ -1800,7 +1809,10 @@ Svga3VlknStatus VlknSurfaceManager::ensureVolumeSurface(uint32_t sid) {
     auto *surface = getSurface(sid);
     if (!surface) return SVGA3_VLKN_ERROR_NOT_FOUND;
     if (surface->isVolumeImage()) return SVGA3_VLKN_SUCCESS;
-    if (m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (m_contextMgr) {
+        const auto status = m_contextMgr->invalidateSurface(sid);
+        if (status != SVGA3_VLKN_SUCCESS) return status;
+    }
     return surface->ensureVolumeImage();
 }
 
@@ -1823,7 +1835,7 @@ void VlknSurfaceManager::clear() {
     if (m_backend) m_backend->waitIdle();
     if (m_contextMgr) {
         for (const auto &pair : m_surfaces) {
-            m_contextMgr->invalidateSurface(pair.first);
+            if (m_contextMgr->invalidateSurface(pair.first) != SVGA3_VLKN_SUCCESS) return;
         }
     }
     if (m_backend) {
@@ -2099,7 +2111,13 @@ Svga3VlknStatus VlknSurfaceManager::defineSurfaceV2(uint32_t sid,
         return st;
     }
 
-    if (it != m_surfaces.end() && m_contextMgr) m_contextMgr->invalidateSurface(sid);
+    if (it != m_surfaces.end() && m_contextMgr) {
+        st = m_contextMgr->invalidateSurface(sid);
+        if (st != SVGA3_VLKN_SUCCESS) {
+            m_backend->resourceBudgets().releaseSurfaceBytes(extraBytes);
+            return st;
+        }
+    }
     if (oldBytes > needBytes) m_backend->resourceBudgets().releaseSurfaceBytes(oldBytes - needBytes);
     m_surfaces[sid] = std::move(surf);
     return SVGA3_VLKN_SUCCESS;

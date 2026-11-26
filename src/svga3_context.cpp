@@ -1874,11 +1874,11 @@ void VlknContext::clearDescriptorSetCache() {
     m_descriptorSetInitialized = false;
 }
 
-void VlknContext::invalidateSurface(uint32_t sid) {
+Svga3VlknStatus VlknContext::invalidateSurface(uint32_t sid) {
     endRenderPassIfActive();
     /* The surface may still be referenced by recorded draws or descriptors. */
-    m_backend->flushCommandBuffer();
-    if (m_backend->isDeviceLost()) return;
+    const auto status = m_backend->flushCommandBuffer();
+    if (status != SVGA3_VLKN_SUCCESS) return status;
     /* Descriptor sets are immutable while commands using them are pending.
      * Retire the cache after the flush so destroyed image views are released. */
     clearDescriptorSetCache();
@@ -1917,6 +1917,7 @@ void VlknContext::invalidateSurface(uint32_t sid) {
         m_lastDrawnWindowSid = 0;
         m_hasDrawnToWindow = false;
     }
+    return SVGA3_VLKN_SUCCESS;
 }
 
 static VkRect2D clipToFramebuffer(VkRect2D rect, uint32_t width, uint32_t height) {
@@ -3493,13 +3494,15 @@ void VlknContextManager::clearPendingWindowPresents() {
     for (auto &pair:m_contexts) if (pair.second) pair.second->resetDrawnToWindow();
 }
 
-void VlknContextManager::invalidateSurface(uint32_t sid) {
+Svga3VlknStatus VlknContextManager::invalidateSurface(uint32_t sid) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     for (auto &pair : m_contexts) {
         if (pair.second) {
-            pair.second->invalidateSurface(sid);
+            const auto status = pair.second->invalidateSurface(sid);
+            if (status != SVGA3_VLKN_SUCCESS) return status;
         }
     }
+    return SVGA3_VLKN_SUCCESS;
 }
 
 } // namespace svga3_vlkn
